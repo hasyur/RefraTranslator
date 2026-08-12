@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from types import TracebackType
 from typing import Any
 
@@ -12,6 +13,27 @@ from game_screen_translator.config import TranslationConfig
 
 class TranslationTransportError(RuntimeError):
     """Raised when the OpenAI-compatible service cannot satisfy a request."""
+
+
+def parse_model_ids(payload: Any) -> tuple[str, ...]:
+    if not isinstance(payload, Mapping):
+        raise TranslationTransportError("/v1/models 返回的 JSON 根节点不是对象")
+    records = payload.get("data")
+    if not isinstance(records, list):
+        raise TranslationTransportError("/v1/models 响应缺少 data 数组")
+    model_ids: list[str] = []
+    seen: set[str] = set()
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        model_id = record.get("id")
+        if not isinstance(model_id, str):
+            continue
+        model_id = model_id.strip()
+        if model_id and model_id not in seen:
+            seen.add(model_id)
+            model_ids.append(model_id)
+    return tuple(model_ids)
 
 
 class OpenAICompatibleTransport:
@@ -52,15 +74,7 @@ class OpenAICompatibleTransport:
 
     async def list_models(self) -> tuple[str, ...]:
         payload = await self._request_json("GET", "models")
-        records = payload.get("data")
-        if not isinstance(records, list):
-            raise TranslationTransportError("/v1/models 响应缺少 data 数组")
-        model_ids = tuple(
-            record["id"]
-            for record in records
-            if isinstance(record, dict) and isinstance(record.get("id"), str)
-        )
-        return model_ids
+        return parse_model_ids(payload)
 
     async def complete(self, prompt: str) -> str:
         request_body = {

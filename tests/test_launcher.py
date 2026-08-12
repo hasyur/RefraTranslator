@@ -69,6 +69,8 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     window = LauncherWindow(config_path)
 
     assert window.profile_combo.currentData() == "game"
+    assert window.server_url_combo.currentText() == "http://127.0.0.1:1234/v1"
+    assert window.model_combo.currentText() == "hy-mt1.5-7b"
     assert window._current_region() == (100, 200, 800, 300)
     assert window._glossary_editor.pairs() == (("仕事", "委托"),)
     assert window._correction_editor.pairs() == (("待て。", "等等。"),)
@@ -121,6 +123,8 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
         return True, 4321
 
     monkeypatch.setattr(QProcess, "startDetached", fake_start_detached)
+    window.server_url_combo.setCurrentText("http://10.20.30.40:9000/v1")
+    window.model_combo.setCurrentText("alternate-model")
 
     window._start_live()
 
@@ -134,6 +138,9 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     ]
     assert calls[0][1][-2:] == ["--profile", "game"]
     assert calls[0][2] == str(tmp_path)
+    saved = load_config(config_path)
+    assert saved.translation.base_url == "http://10.20.30.40:9000/v1"
+    assert saved.translation.model == "alternate-model"
     window.close()
     app.processEvents()
 
@@ -170,4 +177,30 @@ def test_launcher_theme_switch_has_contrast_and_persists_project_locally(
     assert restored.palette().color(QPalette.ColorRole.WindowText).name() == "#20242a"
     assert load_gui_preferences(config_path).theme == THEME_LIGHT
     restored.close()
+    app.processEvents()
+
+
+def test_launcher_model_choices_keep_manual_model_until_user_changes_it(
+    tmp_path: Path,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path)
+    window.model_combo.setCurrentText("manual-model")
+
+    retained = window._set_model_choices(("server-a", "server-b", "server-a"))
+
+    assert retained
+    assert window.model_combo.currentText() == "manual-model"
+    assert [window.model_combo.itemText(index) for index in range(3)] == [
+        "manual-model",
+        "server-a",
+        "server-b",
+    ]
+
+    window.model_combo.setCurrentText("")
+    assert not window._set_model_choices(("server-a", "server-b"))
+    assert window.model_combo.currentText() == "server-a"
+    window.close()
     app.processEvents()

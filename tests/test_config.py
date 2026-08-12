@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from game_screen_translator.config import ConfigError, load_config
+from game_screen_translator.config import (
+    ConfigError,
+    load_config,
+    save_translation_selection,
+)
 
 
 def _write(path: Path, extra: str = "") -> None:
@@ -71,3 +75,49 @@ def test_load_config_rejects_excessive_ocr_threads(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="cpu_threads"):
         load_config(path)
+
+
+def test_save_translation_selection_updates_only_two_values(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        """# local config
+[translation]
+provider = "openai_compatible"
+base_url = "http://old.test/v1" # replaced
+model = "old-model"
+temperature = 0.25
+
+[live]
+capture_fps = 12
+""",
+        encoding="utf-8",
+    )
+
+    saved = save_translation_selection(
+        path,
+        base_url="http://new.test:9000/v1",
+        model="new-model",
+    )
+
+    assert saved.translation.base_url == "http://new.test:9000/v1"
+    assert saved.translation.model == "new-model"
+    assert saved.translation.temperature == 0.25
+    assert saved.live.capture_fps == 12
+    text = path.read_text(encoding="utf-8")
+    assert "# local config" in text
+    assert "temperature = 0.25" in text
+    assert "[live]" in text
+    assert "capture_fps = 12" in text
+
+
+def test_save_translation_selection_rejects_invalid_url_without_writing(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path)
+    before = path.read_bytes()
+
+    with pytest.raises(ConfigError, match="http"):
+        save_translation_selection(path, base_url="not-a-url", model="model")
+
+    assert path.read_bytes() == before

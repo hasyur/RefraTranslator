@@ -7,6 +7,7 @@ from game_screen_translator.config import TranslationConfig
 from game_screen_translator.translation.transport import (
     OpenAICompatibleTransport,
     TranslationTransportError,
+    parse_model_ids,
 )
 
 
@@ -61,3 +62,22 @@ async def test_transport_reports_http_error_body() -> None:
     ) as transport:
         with pytest.raises(TranslationTransportError, match="503.*model is loading"):
             await transport.complete("prompt")
+
+
+def test_parse_model_ids_filters_invalid_and_duplicate_records() -> None:
+    assert parse_model_ids(
+        {
+            "data": [
+                {"id": "model-b"},
+                {"id": "model-a"},
+                {"id": "model-b"},
+                {"id": "  "},
+                {"name": "missing-id"},
+            ]
+        }
+    ) == ("model-b", "model-a")
+
+
+def test_parse_model_ids_requires_data_array() -> None:
+    with pytest.raises(TranslationTransportError, match="data"):
+        parse_model_ids({"models": []})

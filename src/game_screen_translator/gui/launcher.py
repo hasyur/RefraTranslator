@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
-from game_screen_translator.config import AppConfig, load_config
+from game_screen_translator.config import (
+    AppConfig,
+    ConfigError,
+    load_config,
+    save_translation_selection,
+)
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.overlay.window import exclude_window_from_capture
 from game_screen_translator.profiles import (
@@ -16,6 +23,10 @@ from game_screen_translator.profiles import (
     load_game_profile,
     save_profile_capture_settings,
     save_profile_glossary,
+)
+from game_screen_translator.translation.transport import (
+    TranslationTransportError,
+    parse_model_ids,
 )
 
 from .region_selector import RegionSelector
@@ -31,8 +42,9 @@ from .theme import (
 )
 
 try:
-    from PySide6.QtCore import QProcess, QTimer, Qt
+    from PySide6.QtCore import QProcess, QTimer, Qt, QUrl
     from PySide6.QtGui import QFont, QFontDatabase
+    from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
     from PySide6.QtWidgets import (
         QAbstractItemView,
         QApplication,
@@ -203,6 +215,8 @@ class LauncherWindow(QMainWindow):
         self._effective_theme = ""
         self._profile: GameProfile | None = None
         self._capture_excluded = False
+        self._network_manager = QNetworkAccessManager(self)
+        self._model_reply: QNetworkReply | None = None
         self.setWindowTitle("游戏屏幕翻译器")
         self.resize(960, 700)
         self.setMinimumSize(780, 580)
@@ -305,12 +319,49 @@ class LauncherWindow(QMainWindow):
     def _build_launch_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        service = QLabel(
-            f"翻译服务：{self._config.translation.model} · "
-            f"{self._config.translation.normalized_base_url}"
+
+        service_form = QFormLayout()
+        self.server_url_combo = QComboBox()
+        self.server_url_combo.setEditable(True)
+        self.server_url_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.server_url_combo.addItem(self._config.translation.base_url)
+        if self.server_url_combo.lineEdit() is not None:
+            self.server_url_combo.lineEdit().setPlaceholderText(
+                "例如 http://192.168.5.2:1234/v1"
+            )
+        service_form.addRow("API 服务器", self.server_url_combo)
+
+        model_widget = QWidget()
+        model_layout = QHBoxLayout(model_widget)
+        model_layout.setContentsMargins(0, 0, 0, 0)
+        self.model_combo = QComboBox()
+        self.model_combo.setEditable(True)
+        self.model_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.model_combo.addItem(self._config.translation.model)
+        if self.model_combo.lineEdit() is not None:
+            self.model_combo.lineEdit().setPlaceholderText("输入模型 ID 或读取服务器列表")
+        self.refresh_models_button = QPushButton("读取模型列表")
+        self.refresh_models_button.clicked.connect(self._refresh_models)
+        model_layout.addWidget(self.model_combo, 1)
+        model_layout.addWidget(self.refresh_models_button)
+        service_form.addRow("API 模型", model_widget)
+        layout.addLayout(service_form)
+
+        service_actions = QHBoxLayout()
+        self.service_status_label = QLabel(
+            f"当前：{self._config.translation.model} · "
+            f"{self._config.translation.normalized_base_url}；"
+            "可手动填写，读取列表不会自动保存。"
         )
-        service.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(service)
+        self.service_status_label.setObjectName("secondaryText")
+        self.service_status_label.setWordWrap(True)
+        save_service_button = QPushButton("保存服务设置")
+        save_service_button.clicked.connect(
+            lambda: self._save_translation_settings()
+        )
+        service_actions.addWidget(self.service_status_label, 1)
+        service_actions.addWidget(save_service_button)
+        layout.addLayout(service_actions)
 
         form = QFormLayout()
         self.monitor_combo = QComboBox()
@@ -369,6 +420,131 @@ class LauncherWindow(QMainWindow):
         self.start_button.clicked.connect(self._start_live)
         layout.addWidget(self.start_button)
         return widget
+
+    def _translation_candidate(self, *, require_model: bool = True):
+        base_url = self.server_url_combo.currentText().strip()
+        model = self.model_combo.currentText().strip()
+        if not model and not require_model:
+            model = self._config.translation.model
+        return replace(
+            self._config.translation,
+            base_url=base_url,
+            model=model,
+        )
+
+    def _refresh_models(self) -> None:
+        if self._model_reply is not None:
+            return
+        try:
+            translation = self._translation_candidate(require_model=False)
+            url = QUrl(translation.normalized_base_url + "models")
+            if not url.isValid() or not url.host():
+                raise ValueError("API 服务器地址无效")
+        except (ConfigError, ValueError) as exc:
+            self._show_error("无法读取模型列表", exc)
+            return
+
+        request = QNetworkRequest(url)
+        request.setRawHeader(b"Accept", b"application/json")
+        request.setTransferTimeout(max(1000, round(translation.timeout_seconds * 1000)))
+        if translation.api_key:
+            request.setRawHeader(
+                b"Authorization",
+                f"Bearer {translation.api_key}".encode("utf-8"),
+            )
+        reply = self._network_manager.get(request)
+        self._model_reply = reply
+        self.refresh_models_button.setEnabled(False)
+        self.refresh_models_button.setText("正在读取……")
+        self.service_status_label.setText(f"正在连接 {url.toString()}……")
+        reply.finished.connect(
+            lambda current_reply=reply, requested=url.toString(): self._models_loaded(
+                current_reply,
+                requested,
+            )
+        )
+
+    def _models_loaded(self, reply: QNetworkReply, requested_url: str) -> None:
+        if reply is not self._model_reply:
+            reply.deleteLater()
+            return
+        self._model_reply = None
+        self.refresh_models_button.setEnabled(True)
+        self.refresh_models_button.setText("读取模型列表")
+        try:
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                status = reply.attribute(
+                    QNetworkRequest.Attribute.HttpStatusCodeAttribute
+                )
+                prefix = f"HTTP {status}：" if status is not None else ""
+                raise TranslationTransportError(prefix + reply.errorString())
+            raw = bytes(reply.readAll())
+            try:
+                payload = json.loads(raw.decode("utf-8-sig"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise TranslationTransportError(
+                    "/v1/models 返回的不是有效 UTF-8 JSON"
+                ) from exc
+            models = parse_model_ids(payload)
+        except TranslationTransportError as exc:
+            self.service_status_label.setText(f"读取失败：{exc}")
+            self.statusBar().showMessage(f"读取模型列表失败：{exc}", 10000)
+            QMessageBox.warning(self, "读取模型列表失败", str(exc))
+        else:
+            retained = self._set_model_choices(models)
+            suffix = "；当前手填模型已保留" if retained else ""
+            self.service_status_label.setText(
+                f"已从 {requested_url} 读取 {len(models)} 个模型{suffix}。"
+            )
+            self.statusBar().showMessage(f"已读取 {len(models)} 个 API 模型", 5000)
+        finally:
+            reply.deleteLater()
+
+    def _set_model_choices(self, models) -> bool:
+        current = self.model_combo.currentText().strip()
+        unique_models = tuple(
+            dict.fromkeys(
+                str(model).strip()
+                for model in models
+                if str(model).strip()
+            )
+        )
+        retained = bool(current and current not in unique_models)
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        self.model_combo.addItems(unique_models)
+        if retained:
+            self.model_combo.insertItem(0, current)
+        if current:
+            self.model_combo.setCurrentText(current)
+        elif unique_models:
+            self.model_combo.setCurrentIndex(0)
+        self.model_combo.blockSignals(False)
+        return retained
+
+    def _save_translation_settings(self, *, announce: bool = True) -> bool:
+        try:
+            translation = self._translation_candidate()
+            self._config = save_translation_selection(
+                self._config_path,
+                base_url=translation.base_url,
+                model=translation.model,
+            )
+        except (ConfigError, OSError, RuntimeError, ValueError) as exc:
+            self._show_error("保存翻译服务失败", exc)
+            return False
+        self.server_url_combo.setCurrentText(self._config.translation.base_url)
+        self.model_combo.setCurrentText(self._config.translation.model)
+        self.service_status_label.setText(
+            f"当前：{self._config.translation.model} · "
+            f"{self._config.translation.normalized_base_url}"
+        )
+        if announce:
+            self.statusBar().showMessage(
+                "翻译服务设置已保存；新启动的实时翻译将使用该设置",
+                6000,
+            )
+        return True
 
     def _build_info_tab(self) -> QWidget:
         widget = QWidget()
@@ -602,7 +778,11 @@ class LauncherWindow(QMainWindow):
 
     def _start_live(self) -> None:
         profile = self._require_profile()
-        if profile is None or not self._save_capture_settings():
+        if profile is None:
+            return
+        if not self._save_translation_settings(announce=False):
+            return
+        if not self._save_capture_settings():
             return
         arguments = [
             "-m",

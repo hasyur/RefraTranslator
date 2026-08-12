@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -201,3 +203,77 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         live=_build(LiveConfig, _section(data, "live"), "live"),
         profiles=_build(ProfileConfig, _section(data, "profiles"), "profiles"),
     )
+
+
+_TOML_SECTION_RE = re.compile(
+    r"^[ \t]*\[([^\[\]\r\n]+)\][ \t]*(?:#.*)?$"
+)
+_TRANSLATION_VALUE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<key>base_url|model)[ \t]*="
+)
+
+
+def save_translation_selection(
+    path: str | Path,
+    *,
+    base_url: str,
+    model: str,
+) -> AppConfig:
+    """Atomically update only the local translation endpoint and model."""
+    config_path = Path(path).resolve()
+    current = load_config(config_path)
+    candidate_translation = replace(
+        current.translation,
+        base_url=base_url.strip(),
+        model=model.strip(),
+    )
+    if candidate_translation == current.translation:
+        return current
+
+    with config_path.open("r", encoding="utf-8", newline="") as handle:
+        lines = handle.readlines()
+    current_section: str | None = None
+    replaced_keys: set[str] = set()
+    values = {
+        "base_url": candidate_translation.base_url,
+        "model": candidate_translation.model,
+    }
+    for index, line in enumerate(lines):
+        if line.endswith("\r\n"):
+            body, ending = line[:-2], "\r\n"
+        elif line.endswith("\n"):
+            body, ending = line[:-1], "\n"
+        else:
+            body, ending = line, ""
+        section_match = _TOML_SECTION_RE.fullmatch(body)
+        if section_match is not None:
+            current_section = section_match.group(1).strip()
+            continue
+        if current_section != "translation":
+            continue
+        value_match = _TRANSLATION_VALUE_RE.match(body)
+        if value_match is None:
+            continue
+        key = value_match.group("key")
+        lines[index] = (
+            f'{value_match.group("indent")}{key} = '
+            f'{json.dumps(values[key], ensure_ascii=False)}{ending}'
+        )
+        replaced_keys.add(key)
+
+    missing = {"base_url", "model"} - replaced_keys
+    if missing:
+        raise ConfigError(
+            "[translation] 缺少无法更新的字段："
+            + ", ".join(sorted(missing))
+        )
+
+    temporary = config_path.with_name(f"{config_path.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="") as handle:
+            handle.writelines(lines)
+        validated = load_config(temporary)
+        os.replace(temporary, config_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return validated
