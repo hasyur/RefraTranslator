@@ -1,0 +1,51 @@
+[translation]
+provider = "openai_compatible"
+base_url = "http://127.0.0.1:1234/v1"
+model = "hy-mt1.5-7b"
+target_language = "简体中文"
+timeout_seconds = 5.0
+max_concurrency = 2
+temperature = 0.7
+top_p = 0.6
+max_output_tokens = 2048
+api_key_env = "GAME_SCREEN_TRANSLATOR_API_KEY"
+
+[ocr]
+language = "japan"
+min_score = 0.60
+cache_dir = ".cache/paddlex"
+detection_model = "PP-OCRv6_small_det"
+recognition_model = "PP-OCRv6_small_rec"
+model_source = "bos"
+# 限制 PaddleOCR 并行线程，避免与游戏争抢全部 CPU 核心。
+cpu_threads = 2
+# 整屏输入会在检测阶段等比缩小，OCR 坐标仍会还原到原始画面。
+detection_max_side = 1280
+
+[preview]
+blur_radius = 8.0
+overlay_opacity = 0.55
+font_path = ""
+
+[profiles]
+# 每个游戏各占一个子目录，其中包含术语表和 SQLite 翻译缓存。
+root_dir = "profiles"
+
+[live]
+# 相对于所选显示器左上角的捕获区域；width/height 为 0 表示延伸至显示器边缘。
+left = 0
+top = 0
+width = 0
+height = 0
+monitor_index = 0
+capture_fps = 15
+change_poll_fps = 6
+change_threshold = 3.0
+stable_observations = 2
+stable_ms = 150
+clear_after_ms = 900
+context_pairs = 8
+max_batch_size = 8
+capture_backend = "dxgi"
+# 每次 OCR 完成后的休息时间；增大可进一步降占用，但字幕响应会变慢。
+ocr_cooldown_ms = 350

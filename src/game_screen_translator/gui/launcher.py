@@ -1,0 +1,680 @@
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+from game_screen_translator.config import AppConfig, load_config
+from game_screen_translator.domain import GlossaryEntry
+from game_screen_translator.overlay.window import exclude_window_from_capture
+from game_screen_translator.profiles import (
+    GameProfile,
+    ProfileCaptureSettings,
+    ProfileError,
+    create_game_profile,
+    list_game_profiles,
+    load_game_profile,
+    save_profile_capture_settings,
+    save_profile_glossary,
+)
+
+from .region_selector import RegionSelector
+from .theme import (
+    GuiPreferences,
+    GuiSettingsError,
+    THEME_OPTIONS,
+    effective_theme,
+    load_gui_preferences,
+    save_gui_preferences,
+    theme_palette,
+    theme_stylesheet,
+)
+
+try:
+    from PySide6.QtCore import QProcess, QTimer, Qt
+    from PySide6.QtGui import QFont, QFontDatabase
+    from PySide6.QtWidgets import (
+        QAbstractItemView,
+        QApplication,
+        QCheckBox,
+        QComboBox,
+        QDialog,
+        QDialogButtonBox,
+        QFormLayout,
+        QHBoxLayout,
+        QHeaderView,
+        QLabel,
+        QLineEdit,
+        QMainWindow,
+        QMessageBox,
+        QPushButton,
+        QSpinBox,
+        QTabWidget,
+        QTableWidget,
+        QTableWidgetItem,
+        QVBoxLayout,
+        QWidget,
+    )
+except ImportError as exc:  # pragma: no cover - exercised only without GUI extra
+    raise RuntimeError("尚未安装 GUI 依赖。请运行：.\\bootstrap.ps1 -WithGui") from exc
+
+
+def _install_ui_font(app: QApplication, config: AppConfig, config_path: Path) -> None:
+    candidates: list[Path] = []
+    if config.preview.font_path:
+        configured = Path(config.preview.font_path)
+        candidates.append(
+            configured if configured.is_absolute() else config_path.parent / configured
+        )
+    windows_dir = Path(os.environ.get("WINDIR", r"C:\Windows"))
+    candidates.extend(
+        windows_dir / "Fonts" / name
+        for name in ("msyh.ttc", "msyhbd.ttc", "simhei.ttf")
+    )
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        font_id = QFontDatabase.addApplicationFont(str(candidate))
+        if font_id < 0:
+            continue
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        if families:
+            app.setFont(QFont(families[0], 10))
+            return
+
+
+class NewProfileDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("新建游戏 Profile")
+        self.setMinimumWidth(430)
+        self.profile_id_edit = QLineEdit()
+        self.profile_id_edit.setPlaceholderText("例如 cyberpunk2077")
+        self.display_name_edit = QLineEdit()
+        self.display_name_edit.setPlaceholderText("例如 赛博朋克 2077")
+        form = QFormLayout()
+        form.addRow("Profile ID", self.profile_id_edit)
+        form.addRow("显示名称", self.display_name_edit)
+        note = QLabel("ID 创建后用于目录名，只能包含文字、数字、连字符和下划线。")
+        note.setWordWrap(True)
+        note.setObjectName("secondaryText")
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(note)
+        layout.addWidget(buttons)
+
+    @property
+    def profile_id(self) -> str:
+        return self.profile_id_edit.text().strip()
+
+    @property
+    def display_name(self) -> str | None:
+        value = self.display_name_edit.text().strip()
+        return value or None
+
+
+class PairTableEditor(QWidget):
+    def __init__(
+        self,
+        *,
+        left_header: str,
+        right_header: str,
+        save_text: str,
+        save_callback,
+    ) -> None:
+        super().__init__()
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels((left_header, right_header))
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.verticalHeader().setVisible(False)
+        add_button = QPushButton("添加一行")
+        remove_button = QPushButton("删除选中行")
+        save_button = QPushButton(save_text)
+        add_button.clicked.connect(lambda: self.add_row())
+        remove_button.clicked.connect(self.remove_selected_rows)
+        save_button.clicked.connect(save_callback)
+        buttons = QHBoxLayout()
+        buttons.addWidget(add_button)
+        buttons.addWidget(remove_button)
+        buttons.addStretch(1)
+        buttons.addWidget(save_button)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.table)
+        layout.addLayout(buttons)
+
+    def add_row(self, left: str = "", right: str = "") -> None:
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self.table.setItem(row, 0, QTableWidgetItem(left))
+        self.table.setItem(row, 1, QTableWidgetItem(right))
+        if not left and not right:
+            self.table.setCurrentCell(row, 0)
+            self.table.editItem(self.table.item(row, 0))
+
+    def remove_selected_rows(self) -> None:
+        rows = {index.row() for index in self.table.selectionModel().selectedRows()}
+        if not rows and self.table.currentRow() >= 0:
+            rows.add(self.table.currentRow())
+        for row in sorted(rows, reverse=True):
+            self.table.removeRow(row)
+
+    def set_pairs(self, pairs) -> None:
+        self.table.setRowCount(0)
+        for left, right in pairs:
+            self.add_row(left, right)
+
+    def pairs(self) -> tuple[tuple[str, str], ...]:
+        values: list[tuple[str, str]] = []
+        for row in range(self.table.rowCount()):
+            left_item = self.table.item(row, 0)
+            right_item = self.table.item(row, 1)
+            left = left_item.text().strip() if left_item is not None else ""
+            right = right_item.text().strip() if right_item is not None else ""
+            if not left and not right:
+                continue
+            if not left or not right:
+                raise ValueError(f"第 {row + 1} 行的原文和译文必须同时填写")
+            values.append((left, right))
+        return tuple(values)
+
+
+class LauncherWindow(QMainWindow):
+    def __init__(self, config_path: Path) -> None:
+        super().__init__()
+        self._config_path = config_path.resolve()
+        self._config: AppConfig = load_config(self._config_path)
+        app = QApplication.instance()
+        if app is not None:
+            _install_ui_font(app, self._config, self._config_path)
+        try:
+            preferences = load_gui_preferences(self._config_path)
+            self._preferences_warning: str | None = None
+        except (GuiSettingsError, OSError) as exc:
+            preferences = GuiPreferences()
+            self._preferences_warning = str(exc)
+        self._theme_preference = preferences.theme
+        self._effective_theme = ""
+        self._profile: GameProfile | None = None
+        self._capture_excluded = False
+        self.setWindowTitle("游戏屏幕翻译器")
+        self.resize(960, 700)
+        self.setMinimumSize(780, 580)
+        self._apply_theme()
+        if app is not None:
+            app.styleHints().colorSchemeChanged.connect(self._system_theme_changed)
+
+        central = QWidget()
+        central.setObjectName("launcherCentral")
+        root = QVBoxLayout(central)
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(QLabel("当前游戏"))
+        self.profile_combo = QComboBox()
+        self.profile_combo.setMinimumWidth(320)
+        self.profile_combo.currentIndexChanged.connect(self._load_selected_profile)
+        new_profile_button = QPushButton("新建 Profile")
+        refresh_button = QPushButton("刷新")
+        new_profile_button.clicked.connect(self._create_profile)
+        refresh_button.clicked.connect(lambda: self.refresh_profiles())
+        profile_row.addWidget(self.profile_combo, 1)
+        profile_row.addWidget(new_profile_button)
+        profile_row.addWidget(refresh_button)
+        profile_row.addSpacing(10)
+        profile_row.addWidget(QLabel("界面"))
+        self.theme_combo = QComboBox()
+        self.theme_combo.setMinimumWidth(105)
+        for value, label in THEME_OPTIONS:
+            self.theme_combo.addItem(label, value)
+        theme_index = self.theme_combo.findData(self._theme_preference)
+        self.theme_combo.setCurrentIndex(max(theme_index, 0))
+        self.theme_combo.currentIndexChanged.connect(self._theme_changed)
+        profile_row.addWidget(self.theme_combo)
+        root.addLayout(profile_row)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_launch_tab(), "启动与区域")
+        self._glossary_editor = PairTableEditor(
+            left_header="游戏原文",
+            right_header="固定译名",
+            save_text="保存术语表",
+            save_callback=self._save_glossary,
+        )
+        self.tabs.addTab(self._glossary_editor, "术语表")
+        self._correction_editor = PairTableEditor(
+            left_header="OCR 原文",
+            right_header="人工译文（最高优先级）",
+            save_text="保存人工修订",
+            save_callback=self._save_corrections,
+        )
+        self.tabs.addTab(self._correction_editor, "人工修订")
+        self.tabs.addTab(self._build_info_tab(), "资料库状态")
+        root.addWidget(self.tabs, 1)
+        self.setCentralWidget(central)
+        self.statusBar().showMessage("正在读取游戏 Profile……")
+        self.refresh_profiles()
+        if self._preferences_warning:
+            self.statusBar().showMessage(
+                f"GUI 设置无效，已恢复为跟随系统：{self._preferences_warning}",
+                10000,
+            )
+
+    def _apply_theme(self) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        selected = effective_theme(self._theme_preference, app)
+        self._effective_theme = selected
+        self.setPalette(theme_palette(selected))
+        self.setStyleSheet(theme_stylesheet(selected))
+        self.setProperty("effectiveTheme", selected)
+
+    def _theme_changed(self, index: int) -> None:
+        value = self.theme_combo.itemData(index)
+        if not isinstance(value, str):
+            return
+        previous = self._theme_preference
+        self._theme_preference = value
+        self._apply_theme()
+        try:
+            save_gui_preferences(
+                self._config_path,
+                GuiPreferences(theme=self._theme_preference),
+            )
+        except (GuiSettingsError, OSError) as exc:
+            self._theme_preference = previous
+            self._apply_theme()
+            old_index = self.theme_combo.findData(previous)
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.setCurrentIndex(max(old_index, 0))
+            self.theme_combo.blockSignals(False)
+            self._show_error("保存界面主题失败", exc)
+            return
+        label = self.theme_combo.currentText()
+        self.statusBar().showMessage(f"界面已切换为“{label}”并保存", 4000)
+
+    def _system_theme_changed(self, *args) -> None:
+        if self._theme_preference == "system":
+            self._apply_theme()
+
+    def _build_launch_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        service = QLabel(
+            f"翻译服务：{self._config.translation.model} · "
+            f"{self._config.translation.normalized_base_url}"
+        )
+        service.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(service)
+
+        form = QFormLayout()
+        self.monitor_combo = QComboBox()
+        app = QApplication.instance()
+        for index, screen in enumerate(app.screens() if app is not None else ()):  # type: ignore[union-attr]
+            geometry = screen.geometry()
+            self.monitor_combo.addItem(
+                f"{index}: {screen.name()} · {geometry.width()}×{geometry.height()} "
+                f"· {screen.devicePixelRatio():g}x",
+                index,
+            )
+        form.addRow("显示器", self.monitor_combo)
+
+        region_widget = QWidget()
+        region_layout = QHBoxLayout(region_widget)
+        region_layout.setContentsMargins(0, 0, 0, 0)
+        self.region_spins: list[QSpinBox] = []
+        for label in ("左", "上", "宽", "高"):
+            region_layout.addWidget(QLabel(label))
+            spin = QSpinBox()
+            spin.setRange(0, 100_000)
+            spin.setAccelerated(True)
+            self.region_spins.append(spin)
+            region_layout.addWidget(spin, 1)
+        form.addRow("字幕区域", region_widget)
+        layout.addLayout(form)
+
+        note = QLabel(
+            "性能提示：宽和高都为 0 会对整个屏幕执行 OCR，CPU 开销明显更高。"
+            "区域坐标相对于所选显示器，强烈建议点击“框选字幕区域”，只保留字幕会出现的位置。"
+        )
+        note.setWordWrap(True)
+        note.setObjectName("secondaryText")
+        layout.addWidget(note)
+
+        region_buttons = QHBoxLayout()
+        select_button = QPushButton("框选字幕区域")
+        full_button = QPushButton("使用整个显示器")
+        save_button = QPushButton("保存区域")
+        select_button.clicked.connect(self._select_region)
+        full_button.clicked.connect(self._use_full_screen)
+        save_button.clicked.connect(self._save_capture_settings)
+        region_buttons.addWidget(select_button)
+        region_buttons.addWidget(full_button)
+        region_buttons.addStretch(1)
+        region_buttons.addWidget(save_button)
+        layout.addLayout(region_buttons)
+
+        self.debug_checkbox = QCheckBox("显示 OCR/翻译区域调试边框")
+        layout.addWidget(self.debug_checkbox)
+        layout.addStretch(1)
+        self.start_button = QPushButton("启动实时翻译")
+        self.start_button.setObjectName("startButton")
+        self.start_button.setMinimumHeight(48)
+        self.start_button.setStyleSheet("font-size: 16px; font-weight: 600;")
+        self.start_button.clicked.connect(self._start_live)
+        layout.addWidget(self.start_button)
+        return widget
+
+    def _build_info_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        self.info_label = QLabel()
+        self.info_label.setWordWrap(True)
+        self.info_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        refresh_button = QPushButton("刷新统计")
+        refresh_button.clicked.connect(self._reload_current_profile)
+        layout.addWidget(self.info_label)
+        layout.addStretch(1)
+        layout.addWidget(refresh_button)
+        return widget
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if QApplication.platformName() == "offscreen":
+            self._capture_excluded = True
+            return
+        if not self._capture_excluded:
+            self._capture_excluded = exclude_window_from_capture(int(self.winId()))
+            if not self._capture_excluded:
+                self.statusBar().showMessage("警告：启动器未能从屏幕采集中排除", 8000)
+
+    def refresh_profiles(self, select_profile_id: str | None = None) -> None:
+        current_id = select_profile_id
+        if current_id is None and self.profile_combo.currentIndex() >= 0:
+            current_id = self.profile_combo.currentData()
+        try:
+            profiles = list_game_profiles(self._config_path, self._config)
+        except (ProfileError, RuntimeError, ValueError) as exc:
+            self._show_error("无法读取 Profile", exc)
+            return
+
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        selected_index = 0
+        for index, profile in enumerate(profiles):
+            self.profile_combo.addItem(
+                f"{profile.display_name} ({profile.profile_id})",
+                profile.profile_id,
+            )
+            if profile.profile_id == current_id:
+                selected_index = index
+        if profiles:
+            self.profile_combo.setCurrentIndex(selected_index)
+            self.profile_combo.blockSignals(False)
+            self._load_selected_profile()
+        else:
+            self.profile_combo.blockSignals(False)
+            self._profile = None
+            self._set_profile_enabled(False)
+            self._glossary_editor.set_pairs(())
+            self._correction_editor.set_pairs(())
+            self.info_label.setText(
+                "尚未创建游戏 Profile。点击窗口上方的“新建 Profile”开始。"
+            )
+            self.statusBar().showMessage("请先新建一个游戏 Profile")
+
+    def _set_profile_enabled(self, enabled: bool) -> None:
+        for index in range(self.tabs.count()):
+            self.tabs.setTabEnabled(index, enabled)
+
+    def _create_profile(self) -> None:
+        dialog = NewProfileDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            profile = create_game_profile(
+                self._config_path,
+                self._config,
+                dialog.profile_id,
+                display_name=dialog.display_name,
+            )
+        except (ProfileError, OSError, RuntimeError, ValueError) as exc:
+            self._show_error("新建 Profile 失败", exc)
+            return
+        self.refresh_profiles(profile.profile_id)
+        self.statusBar().showMessage(f"已创建 {profile.display_name}", 5000)
+
+    def _load_selected_profile(self, *args) -> None:
+        profile_id = self.profile_combo.currentData()
+        if not isinstance(profile_id, str):
+            return
+        try:
+            profile = load_game_profile(self._config_path, self._config, profile_id)
+            corrections = profile.cache.list_manual_corrections(
+                source_language=self._config.ocr.language,
+                target_language=self._config.translation.target_language,
+            )
+        except (ProfileError, RuntimeError, ValueError) as exc:
+            self._show_error("加载 Profile 失败", exc)
+            return
+        self._profile = profile
+        self._set_profile_enabled(True)
+        capture = profile.capture_settings
+        monitor_index = (
+            capture.monitor_index
+            if capture.monitor_index is not None
+            else self._config.live.monitor_index
+        )
+        if 0 <= monitor_index < self.monitor_combo.count():
+            self.monitor_combo.setCurrentIndex(monitor_index)
+        else:
+            self.monitor_combo.setCurrentIndex(0)
+            self.statusBar().showMessage(
+                f"Profile 中的显示器 {monitor_index} 当前不存在，已临时选择显示器 0",
+                8000,
+            )
+        region = capture.region or (
+            self._config.live.left,
+            self._config.live.top,
+            self._config.live.width,
+            self._config.live.height,
+        )
+        for spin, value in zip(self.region_spins, region):
+            spin.setValue(value)
+        self._glossary_editor.set_pairs(
+            (entry.source, entry.target) for entry in profile.glossary
+        )
+        self._correction_editor.set_pairs(
+            (entry.source_text, entry.translated_text) for entry in corrections
+        )
+        self._update_info()
+        self.statusBar().showMessage(f"已加载 {profile.display_name}", 3000)
+
+    def _reload_current_profile(self) -> None:
+        if self._profile is not None:
+            self.refresh_profiles(self._profile.profile_id)
+
+    def _save_glossary(self) -> None:
+        profile = self._require_profile()
+        if profile is None:
+            return
+        try:
+            entries = tuple(
+                GlossaryEntry(source, target)
+                for source, target in self._glossary_editor.pairs()
+            )
+            save_profile_glossary(profile, entries)
+        except (ProfileError, OSError, RuntimeError, ValueError) as exc:
+            self._show_error("保存术语表失败", exc)
+            return
+        self.refresh_profiles(profile.profile_id)
+        self.statusBar().showMessage(
+            f"术语表已保存，共 {len(entries)} 条；下次启动实时翻译时使用新版本",
+            6000,
+        )
+
+    def _save_corrections(self) -> None:
+        profile = self._require_profile()
+        if profile is None:
+            return
+        try:
+            corrections = self._correction_editor.pairs()
+            profile.cache.replace_manual_corrections(
+                corrections,
+                source_language=self._config.ocr.language,
+                target_language=self._config.translation.target_language,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._show_error("保存人工修订失败", exc)
+            return
+        self.refresh_profiles(profile.profile_id)
+        self.statusBar().showMessage(
+            f"人工修订已保存，共 {len(corrections)} 条",
+            6000,
+        )
+
+    def _current_region(self) -> tuple[int, int, int, int]:
+        return tuple(spin.value() for spin in self.region_spins)  # type: ignore[return-value]
+
+    def _save_capture_settings(self) -> bool:
+        profile = self._require_profile()
+        if profile is None:
+            return False
+        monitor_index = self.monitor_combo.currentData()
+        if not isinstance(monitor_index, int):
+            self._show_error("保存区域失败", ValueError("当前没有可用显示器"))
+            return False
+        try:
+            settings = ProfileCaptureSettings(
+                monitor_index=monitor_index,
+                region=self._current_region(),
+            )
+            save_profile_capture_settings(profile, settings)
+            self._profile = load_game_profile(
+                self._config_path,
+                self._config,
+                profile.profile_id,
+            )
+        except (ProfileError, OSError, RuntimeError, ValueError) as exc:
+            self._show_error("保存区域失败", exc)
+            return False
+        self._update_info()
+        self.statusBar().showMessage(
+            f"区域已保存到 {profile.display_name}：{','.join(map(str, settings.region or ())) }",
+            6000,
+        )
+        return True
+
+    def _select_region(self) -> None:
+        profile = self._require_profile()
+        if profile is None:
+            return
+        monitor_index = self.monitor_combo.currentData()
+        app = QApplication.instance()
+        screens = app.screens() if app is not None else []
+        if not isinstance(monitor_index, int) or monitor_index >= len(screens):
+            self._show_error("无法框选区域", ValueError("当前显示器不可用"))
+            return
+
+        self.hide()
+        QApplication.processEvents()
+        selector = RegionSelector(screens[monitor_index])
+        accepted = selector.exec() == QDialog.DialogCode.Accepted
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if not accepted or selector.selected_region is None:
+            self.statusBar().showMessage("已取消框选", 3000)
+            return
+        for spin, value in zip(self.region_spins, selector.selected_region):
+            spin.setValue(value)
+        self._save_capture_settings()
+
+    def _use_full_screen(self) -> None:
+        for spin in self.region_spins:
+            spin.setValue(0)
+        self._save_capture_settings()
+
+    def _start_live(self) -> None:
+        profile = self._require_profile()
+        if profile is None or not self._save_capture_settings():
+            return
+        arguments = [
+            "-m",
+            "game_screen_translator",
+            "--config",
+            str(self._config_path),
+            "live",
+            "--profile",
+            profile.profile_id,
+        ]
+        if self.debug_checkbox.isChecked():
+            arguments.append("--debug-border")
+        started, process_id = QProcess.startDetached(
+            sys.executable,
+            arguments,
+            str(self._config_path.parent),
+        )
+        if not started:
+            self._show_error("启动失败", RuntimeError("无法创建实时翻译进程"))
+            return
+        self.statusBar().showMessage(
+            f"实时翻译已启动（进程 {process_id}）；可在右上角控制窗停止",
+            10000,
+        )
+        self.showMinimized()
+
+    def _update_info(self) -> None:
+        profile = self._profile
+        if profile is None:
+            return
+        stats = profile.cache.stats()
+        capture = profile.capture_settings
+        region = (
+            ",".join(str(value) for value in capture.region)
+            if capture.region is not None
+            else "未单独设置（使用 config.toml）"
+        )
+        monitor = (
+            str(capture.monitor_index)
+            if capture.monitor_index is not None
+            else "未单独设置（使用 config.toml）"
+        )
+        self.info_label.setText(
+            f"Profile：{profile.display_name} ({profile.profile_id})\n\n"
+            f"目录：{profile.directory}\n"
+            f"显示器：{monitor}\n"
+            f"字幕区域：{region}\n\n"
+            f"术语：{len(profile.glossary)} 条\n"
+            f"模型缓存：{stats.automatic_entries} 条，命中 {stats.automatic_hits} 次\n"
+            f"人工修订：{stats.manual_corrections} 条，命中 {stats.manual_hits} 次"
+        )
+
+    def _require_profile(self) -> GameProfile | None:
+        if self._profile is None:
+            self._show_error("尚未选择游戏", ValueError("请先新建或选择一个 Profile"))
+        return self._profile
+
+    def _show_error(self, title: str, error: Exception) -> None:
+        self.statusBar().showMessage(f"{title}：{error}", 10000)
+        QMessageBox.critical(self, title, str(error))
+
+
+def run_launcher(
+    config_path: Path,
+    *,
+    duration_seconds: float | None = None,
+) -> int:
+    if duration_seconds is not None and duration_seconds <= 0:
+        raise ValueError("--duration 必须大于 0")
+    app = QApplication.instance() or QApplication(["game-screen-translator-gui"])
+    window = LauncherWindow(config_path)
+    window.show()
+    if duration_seconds is not None:
+        QTimer.singleShot(round(duration_seconds * 1000), app.quit)
+    return app.exec()

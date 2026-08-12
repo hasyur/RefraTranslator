@@ -1,0 +1,203 @@
+# 游戏屏幕翻译器（原型）
+
+这是 Windows 游戏屏幕翻译软件的实时原型：
+
+1. DXcam 持续采集一个显示器区域，低分辨率变化检测负责限制 OCR 频率；
+2. PP-OCRv6 small 识别日文/英文，并在文字连续稳定后建立 track/revision；
+3. 通过 OpenAI-compatible API 调用 `hy-mt1.5-7b`；
+4. 严格校验批量翻译的 `<sn id="...">` 对应关系；
+5. 在鼠标穿透的透明窗口中模糊原文字区域，叠加暗层并绘制中文译文；
+6. 使用 `WDA_EXCLUDEFROMCAPTURE` 排除覆盖层，避免翻译结果被再次 OCR。
+7. 可为每个游戏选择独立 Profile，隔离术语表、模型缓存和人工修订。
+
+程序不注入游戏进程、不区分说话人，也不管理 LLM、显卡或推理服务器。当前支持普通窗口和无边框窗口；独占全屏不在原型保证范围内。
+
+## 图形化启动器（推荐）
+
+完成环境安装后，可以直接双击项目根目录的 `start_gui.bat`，或运行：
+
+```powershell
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml gui
+```
+
+启动器可以直接完成：
+
+- 新建和切换每游戏 Profile；
+- 在“跟随系统 / 浅色 / 深色”之间切换界面色调；
+- 选择显示器，并在屏幕截图上拖拽框选字幕区域；
+- 编辑并保存游戏术语表；
+- 编辑最高优先级的人工修订；
+- 查看模型缓存、人工修订及命中统计；
+- 使用当前项目虚拟环境启动实时翻译。
+
+界面色调会立即生效，并保存到项目配置文件旁的 `.gui-settings.toml`；这个文件只属于当前项目，不写 Windows 注册表。浅色和深色主题都会显式设置文字、输入框、表格及背景颜色，避免系统深色模式造成白底白字。
+
+框选坐标会按照 Windows DPI 缩放换算为屏幕采集像素，并保存到当前 Profile 的 `settings.toml`。启动实时翻译后，启动器会自动最小化；即使 Windows 无法将它排除出采集，也不会长期出现在 OCR 画面中。
+
+## 环境隔离
+
+所有 Python 包都安装在项目目录的 `.venv`，不会写入系统或 Anaconda 的全局 site-packages。脚本和文档中的命令也始终显式调用 `.venv\Scripts\python.exe`，无需激活环境。安装缓存位于 `.cache\pip`，PaddleOCR 模型位于 `.cache\paddlex`，不会使用用户级 `~/.paddlex`。
+
+安装核心与开发依赖：
+
+```powershell
+.\bootstrap.ps1
+```
+
+需要运行截图 OCR 时，再单独安装较大的 OCR 依赖：
+
+```powershell
+.\bootstrap.ps1 -WithOcr
+```
+
+安装完整的实时 OCR、GUI 和采集依赖：
+
+```powershell
+.\bootstrap.ps1 -WithOcr -WithGui
+```
+
+`.venv/`、`.cache/`、本机的 `config.toml` 和 `.gui-settings.toml` 都已加入 `.gitignore`。可公开的配置模板是 `config.example.toml`。
+
+## 配置
+
+本机 `config.toml` 已指向当前测试服务：
+
+```toml
+[translation]
+base_url = "http://192.168.5.2:1234/v1"
+model = "hy-mt1.5-7b"
+```
+
+API key 不是必填。若以后服务器要求鉴权，只通过 `GAME_SCREEN_TRANSLATOR_API_KEY` 环境变量提供，不写进配置文件。
+
+## 每个游戏独立的 Profile
+
+持久化数据不会使用全局共享缓存。先为游戏创建一个稳定 ID：
+
+```powershell
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml profile init cyberpunk2077 --name "赛博朋克 2077"
+```
+
+生成目录为 `profiles\cyberpunk2077\`：
+
+- `profile.toml`：Profile 身份信息；
+- `settings.toml`：该游戏使用的显示器和字幕捕获区域；
+- `glossary.toml`：可直接编辑的游戏术语表；
+- `translations.sqlite3`：该游戏专属的模型缓存与人工修订。
+
+这些内容可以在图形化启动器中维护。术语表也可直接编辑，格式如下；修改后重新启动翻译进程即可加载新版本：
+
+```toml
+[[terms]]
+source = "フィクサー"
+target = "中间人"
+
+[[terms]]
+source = "ナイトシティ"
+target = "夜之城"
+```
+
+人工修订优先级高于术语表和模型缓存，适合固定纠正某一句 OCR 原文：
+
+```powershell
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml profile correct cyberpunk2077 "待て。" "等等。"
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml profile info cyberpunk2077
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml profile uncorrect cyberpunk2077 "待て。"
+```
+
+模型缓存键包含规范化原文、源/目标语言、模型、提示词版本、术语表版本和最近上下文指纹；翻译条件变化时不会错误复用旧结果。人工修订只绑定本游戏、规范化原文和语言，因此不会因模型或上下文变化而失效。
+
+`--profile` 必须指向已显式创建的 Profile，拼错名称时程序会停止并提示，不会偷偷新建或回退到其他游戏。省略 `--profile` 时只保留当前进程内的最近上下文，不读取或写入任何持久化翻译缓存。
+
+## 验证和运行
+
+启动实时翻译。若 Profile 已通过启动器保存区域，会优先使用该区域；否则使用 `config.toml`：
+
+```powershell
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml live --profile cyberpunk2077
+```
+
+建议先限制到游戏字幕区域。参数含义是相对于显示器左上角的 `LEFT,TOP,WIDTH,HEIGHT`：
+
+```powershell
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml live --profile cyberpunk2077 --region 100,700,1800,350
+```
+
+运行时右上角会出现一个不会被采集的控制窗口；点击“停止翻译”即可退出。DXGI 初始化失败时会自动尝试 WinRT。`--monitor 1` 可选择第二个显示器。
+
+## CPU 占用与低负载设置
+
+实时模式默认采用面向游戏的低负载策略：DXcam 以 15 FPS 保留最新帧，变化检测每秒检查 6 次；PaddleOCR 最多使用 2 个 CPU 线程，将检测输入最长边限制到 1280，并在每次识别完成后休息 350 ms。翻译器进程在 Windows 上会切换为“低于正常”优先级，让游戏优先获得 CPU 时间。坐标会由 PaddleOCR 还原到原始画面，因此缩放不会改变覆盖层位置。
+
+最有效的优化仍然是只捕获字幕区域。宽和高都为 `0` 代表整屏 OCR，适合文字位置完全不固定的游戏，但负载和识别延迟都会明显增加。可在启动器中点击“框选字幕区域”。需要进一步降低占用时，可在 `config.toml` 中增大 `ocr_cooldown_ms` 或将 `cpu_threads` 改为 `1`；代价是新字幕出现后等待时间更长。
+
+可用内置日文样图验证整个实时闭环：
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\create_demo_image.py
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml live --region 0,0,1280,360 --duration 10 --debug-border --test-source .\output\demo_source.png
+```
+
+其余诊断命令如下。
+
+检查服务与模型：
+
+```powershell
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml doctor
+```
+
+直接验证翻译链路：
+
+```powershell
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml translate "お前、本当に来たんだな。"
+```
+
+直接翻译和静态预览也支持 `--profile cyberpunk2077`，并遵守相同的术语与缓存契约。
+
+生成静态截图翻译预览：
+
+```powershell
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml preview .\sample.png --output .\output\preview.png
+```
+
+没有现成截图时，可生成一张日文演示图后跑同一条链路：
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\create_demo_image.py
+.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml preview .\output\demo_source.png --output .\output\demo_translated.png
+```
+
+运行不访问网络的单元测试：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+```
+
+实时服务器联调测试默认跳过。显式设置开关后才会访问本地服务：
+
+```powershell
+$env:GAME_TRANSLATOR_LIVE = "1"
+.\.venv\Scripts\python.exe -m pytest -m integration
+```
+
+## 已实现的实时安全契约
+
+- 每条文字使用 `zone_id + track_id + revision` 标识；
+- 模型必须完整返回请求中的 ID，重复、遗漏或额外 ID 都会整批拒绝；
+- 新 revision 出现后，旧请求即使晚到也不会覆盖屏幕上的新文字；
+- 并发由客户端信号量限制，当前默认最多两个请求；
+- 相同文字默认需要连续两次 OCR 一致并稳定至少 150 ms 才会发送；
+- 覆盖层鼠标穿透、拒绝焦点，并从 Windows 屏幕捕获中排除；
+- 服务离线或响应异常时明确报错，不会自动转发到云端。
+- Profile ID 不能包含路径分隔符，Profile 根目录也只能位于项目配置目录内；
+- 不同游戏的 SQLite 文件互不查询，人工修订总是先于模型缓存命中。
+- 所有 SQLite 操作都会显式关闭连接，停止程序后可以立即移动或备份 Profile。
+
+## 当前限制
+
+- 每次运行只有一个活动捕获区域；可以通过图形化启动器、配置或 `--region` 选择；
+- 游戏窗口移动后不会自动跟随，需要重新启动并更新区域；
+- 最近 8 条翻译对照仅保留在当前进程内；
+- 暂不自动识别说话人或区分人物语气；
+- 暂无自动识别游戏窗口、随窗口移动以及 Profile 删除界面；
+- PP-OCRv6 当前使用限制为 2 线程的 CPU 路径，以规避 Paddle 3.3.1 在 Windows oneDNN/PIR 上的兼容错误；整屏 OCR 仍会比字幕区域 OCR 更慢。
