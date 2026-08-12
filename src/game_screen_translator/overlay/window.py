@@ -23,14 +23,13 @@ WS_EX_NOACTIVATE = 0x08000000
 @dataclass(frozen=True, slots=True)
 class OverlayStyle:
     blur_radius: float = 8.0
-    overlay_opacity: float = 0.55
     font_path: str = ""
 
 
 def _load_qt():
     try:
         from PySide6.QtCore import QPoint, QRect, Qt
-        from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetrics, QImage, QPainter, QPainterPath, QPen, QPixmap
+        from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetrics, QImage, QPainter, QPen, QPixmap
         from PySide6.QtWidgets import QApplication, QWidget
     except ImportError as exc:
         raise RuntimeError("尚未安装 GUI 依赖。请运行：.\\bootstrap.ps1 -WithGui") from exc
@@ -44,7 +43,6 @@ def _load_qt():
         "QFontMetrics": QFontMetrics,
         "QImage": QImage,
         "QPainter": QPainter,
-        "QPainterPath": QPainterPath,
         "QPen": QPen,
         "QPixmap": QPixmap,
         "QApplication": QApplication,
@@ -136,6 +134,8 @@ class TranslationOverlay(QWidget):
             return
         painter = QT["QPainter"](self)
         painter.setRenderHint(QT["QPainter"].RenderHint.Antialiasing, True)
+        painter.setRenderHint(QT["QPainter"].RenderHint.TextAntialiasing, True)
+        painter.setRenderHint(QT["QPainter"].RenderHint.SmoothPixmapTransform, True)
         for track in self._tracks:
             self._paint_track(painter, track)
         painter.end()
@@ -171,10 +171,6 @@ class TranslationOverlay(QWidget):
                 painter.drawPixmap(rect, pixmap)
                 painter.restore()
 
-        painter.fillRect(
-            rect,
-            QT["QColor"](0, 0, 0, round(255 * self._style.overlay_opacity)),
-        )
         if self._debug_border:
             painter.setPen(QT["QPen"](QT["QColor"](0, 220, 255, 220), 1))
             painter.drawRect(rect.adjusted(0, 0, -1, -1))
@@ -190,12 +186,27 @@ class TranslationOverlay(QWidget):
             line_width = metrics.horizontalAdvance(line)
             x = text_rect.left() + max(0, (text_rect.width() - line_width) // 2)
             baseline = y + metrics.ascent()
-            path = QT["QPainterPath"]()
-            path.addText(QT["QPoint"](x, baseline), font, line)
-            painter.setPen(QT["QPen"](QT["QColor"](0, 0, 0, 230), 3))
-            painter.setBrush(QT["QColor"](255, 255, 255, 255))
-            painter.drawPath(path)
+            self._draw_text_line(painter, x, baseline, line)
             y += line_height
+
+    @staticmethod
+    def _draw_text_line(painter, x: int, baseline: int, text: str) -> None:
+        # Native text drawing keeps Windows font hinting. A one-pixel outline
+        # remains legible on light and dark frames without closing small glyphs.
+        painter.setPen(QT["QColor"](0, 0, 0, 230))
+        for dx, dy in (
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+            (-1, 0),
+            (1, 0),
+            (-1, 1),
+            (0, 1),
+            (1, 1),
+        ):
+            painter.drawText(QT["QPoint"](x + dx, baseline + dy), text)
+        painter.setPen(QT["QColor"](255, 255, 255, 255))
+        painter.drawText(QT["QPoint"](x, baseline), text)
 
     def _frame_pixmap(self, source_bounds):
         frame = self._frame
@@ -223,14 +234,21 @@ class TranslationOverlay(QWidget):
         return QT["QPixmap"].fromImage(image)
 
     def _fit_font(self, text: str, rect):
-        for size in range(max(10, min(42, int(rect.height() * 0.72))), 8, -1):
-            font = QT["QFont"](self._font_family, size)
-            font.setBold(True)
+        upper = max(12, min(48, int(rect.height() * 0.64)))
+        for size in range(upper, 9, -1):
+            font = self._make_font(size)
             metrics = QT["QFontMetrics"](font)
             lines = self._wrap(text, metrics, rect.width())
             if metrics.lineSpacing() * len(lines) <= rect.height():
                 return font
-        return QT["QFont"](self._font_family, 9)
+        return self._make_font(10)
+
+    def _make_font(self, pixel_size: int):
+        font = QT["QFont"](self._font_family)
+        font.setPixelSize(pixel_size)
+        font.setWeight(QT["QFont"].Weight.DemiBold)
+        font.setHintingPreference(QT["QFont"].HintingPreference.PreferFullHinting)
+        return font
 
     @staticmethod
     def _wrap(text: str, metrics, width: int) -> list[str]:

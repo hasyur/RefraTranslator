@@ -10,7 +10,9 @@ from game_screen_translator.preview.renderer import render_preview
 def test_render_preview_blurs_and_draws_region(tmp_path: Path) -> None:
     source = tmp_path / "source.png"
     output = tmp_path / "preview.png"
-    Image.new("RGB", (240, 100), (220, 30, 30)).save(source)
+    source_image = Image.new("RGB", (240, 100), (220, 30, 30))
+    source_image.paste((30, 30, 220), (120, 0, 240, 100))
+    source_image.save(source)
     observation = OcrText(
         "こんにちは",
         0.99,
@@ -22,11 +24,18 @@ def test_render_preview_blurs_and_draws_region(tmp_path: Path) -> None:
         output,
         (observation,),
         ("你好，欢迎回来。",),
-        PreviewConfig(blur_radius=3, overlay_opacity=0.55),
+        # A legacy non-zero opacity must not tint the blurred game frame.
+        PreviewConfig(blur_radius=3, overlay_opacity=1.0),
     )
 
     assert resolved == output.resolve()
     assert output.is_file()
     with Image.open(output) as rendered:
         assert rendered.size == (240, 100)
-        assert rendered.getpixel((35, 30)) != (220, 30, 30)
+        assert rendered.getpixel((30, 24)) == (220, 30, 30)
+        assert rendered.getpixel((119, 24)) not in {
+            (220, 30, 30),
+            (30, 30, 220),
+        }
+        extrema = rendered.crop((30, 25, 210, 75)).getextrema()
+        assert all(channel_max >= 245 for _, channel_max in extrema[:3])

@@ -15,8 +15,7 @@ def test_overlay_renders_only_translated_track_region() -> None:
     app = QApplication.instance() or QApplication([])
     overlay = TranslationOverlay(
         geometry=(0, 0, 320, 120),
-        style=OverlayStyle(blur_radius=4, overlay_opacity=0.55),
-        debug_border=True,
+        style=OverlayStyle(blur_radius=4),
     )
     frame = np.full((120, 320, 3), (30, 40, 50), dtype=np.uint8)
     track = TrackedText(
@@ -40,4 +39,12 @@ def test_overlay_renders_only_translated_track_region() -> None:
 
     assert target.pixelColor(5, 5).alpha() == 0
     assert target.pixelColor(50, 40).alpha() > 0
+    assert target.pixelColor(50, 40).getRgb() == (30, 40, 50, 255)
+    assert any(
+        target.pixelColor(x, y).red() >= 245
+        and target.pixelColor(x, y).green() >= 245
+        and target.pixelColor(x, y).blue() >= 245
+        for y in range(30, 90)
+        for x in range(40, 280)
+    )
     app.processEvents()

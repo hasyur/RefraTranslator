@@ -88,7 +88,9 @@ class OcrConfig:
 @dataclass(frozen=True, slots=True)
 class PreviewConfig:
     blur_radius: float = 8.0
-    overlay_opacity: float = 0.55
+    # Kept only so older local config.toml files continue to load. Rendering
+    # intentionally applies no color layer over the blurred game frame.
+    overlay_opacity: float = 0.0
     font_path: str = ""
 
     def __post_init__(self) -> None:

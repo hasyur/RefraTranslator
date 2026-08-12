@@ -625,7 +625,6 @@ def run_live(
         geometry=geometry,
         style=OverlayStyle(
             blur_radius=config.preview.blur_radius,
-            overlay_opacity=config.preview.overlay_opacity,
             font_path=config.preview.font_path,
         ),
         debug_border=debug_border,
