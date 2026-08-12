@@ -10,7 +10,7 @@
 6. 使用 `WDA_EXCLUDEFROMCAPTURE` 排除覆盖层，避免翻译结果被再次 OCR。
 7. 可为每个游戏选择独立 Profile，隔离术语表、模型缓存和人工修订。
 
-程序不注入游戏进程、不区分说话人，也不管理 LLM、显卡或推理服务器。当前支持普通窗口和无边框窗口；独占全屏不在原型保证范围内。
+程序不注入游戏进程、不区分说话人，也不管理 LLM 推理服务器。当前支持普通窗口和无边框窗口；独占全屏不在原型保证范围内。
 
 ## 图形化启动器（推荐）
 
@@ -25,6 +25,7 @@
 - 新建和切换每游戏 Profile；
 - 在“跟随系统 / 浅色 / 深色”之间切换界面色调；
 - 编辑 OpenAI-compatible API 服务器地址，并从 `/v1/models` 读取或手填模型 ID；
+- 在 CPU 与检测到的 NVIDIA GPU 之间切换 OCR 设备；
 - 选择显示器，并在屏幕截图上拖拽框选字幕区域；
 - 编辑并保存游戏术语表；
 - 编辑最高优先级的人工修订；
@@ -33,7 +34,7 @@
 
 界面色调会立即生效，并保存到项目配置文件旁的 `.gui-settings.toml`；这个文件只属于当前项目，不写 Windows 注册表。浅色和深色主题都会显式设置文字、输入框、表格及背景颜色，避免系统深色模式造成白底白字。
 
-启动页中的“API 服务器”和“API 模型”均可编辑。点击“读取模型列表”会异步请求当前地址的 `/models`（例如地址填写到 `/v1` 时，实际请求 `/v1/models`），不会阻塞 GUI；返回的模型可以下拉选择，也可以保留手填 ID。点击“保存服务设置”或直接启动实时翻译，会原子更新本机 `config.toml` 中 `[translation]` 的 `base_url` 与 `model`，其他配置和注释保持不变。已有实时翻译进程不会中途换模型，设置从下一次启动开始生效。
+启动页中的“API 服务器”和“API 模型”均可编辑。点击“读取模型列表”会异步请求当前地址的 `/models`（例如地址填写到 `/v1` 时，实际请求 `/v1/models`），不会阻塞 GUI；返回的模型可以下拉选择，也可以保留手填 ID。“OCR 设备”会列出 CPU 与 `nvidia-smi` 检测到的显卡。点击“保存服务与 OCR 设置”或直接启动实时翻译，会原子更新本机 `config.toml` 中 API 地址、模型和 `ocr.device`。已有实时翻译进程不会中途切换，设置从下一次启动开始生效。
 
 框选坐标会按照 Windows DPI 缩放换算为屏幕采集像素，并保存到当前 Profile 的 `settings.toml`。启动实时翻译后，启动器会自动最小化；即使 Windows 无法将它排除出采集，也不会长期出现在 OCR 画面中。
 
@@ -47,17 +48,25 @@
 .\bootstrap.ps1
 ```
 
-需要运行截图 OCR 时，再单独安装较大的 OCR 依赖：
+需要使用 CPU OCR 时：
 
 ```powershell
 .\bootstrap.ps1 -WithOcr
 ```
 
-安装完整的实时 OCR、GUI 和采集依赖：
+安装 CPU OCR、GUI 和采集依赖：
 
 ```powershell
 .\bootstrap.ps1 -WithOcr -WithGui
 ```
+
+NVIDIA GPU OCR 使用独立开关；它会先移除 `.venv` 中的 CPU Paddle，再从 Paddle 官方 CUDA 仓库安装 GPU 版本及运行库：
+
+```powershell
+.\bootstrap.ps1 -WithGpuOcr -WithGui
+```
+
+GPU 默认使用 CUDA 12.9 wheel；可通过 `-GpuCuda cu118|cu126|cu129|cu130` 选择其他官方构建。`-WithOcr` 与 `-WithGpuOcr` 互斥，但 GPU Paddle 本身仍可在 GUI 中切回 CPU 推理。首次 GPU 安装需要下载约数 GB 的隔离运行库，不要求向系统 Python 安装包。
 
 `.venv/`、`.cache/`、本机的 `config.toml` 和 `.gui-settings.toml` 都已加入 `.gitignore`。可公开的配置模板是 `config.example.toml`。
 
@@ -69,6 +78,9 @@
 [translation]
 base_url = "http://192.168.5.2:1234/v1"
 model = "hy-mt1.5-7b"
+
+[ocr]
+device = "gpu:1" # 第二张 NVIDIA GPU；CPU 使用 "cpu"
 ```
 
 API key 不是必填。若以后服务器要求鉴权，只通过 `GAME_SCREEN_TRANSLATOR_API_KEY` 环境变量提供，不写进配置文件。
@@ -128,11 +140,21 @@ target = "夜之城"
 
 运行时右上角会出现一个不会被采集的控制窗口；点击“停止翻译”即可退出。DXGI 初始化失败时会自动尝试 WinRT。`--monitor 1` 可选择第二个显示器。
 
-## CPU 占用与低负载设置
+控制窗口会持续显示分阶段延迟的最近值和本次运行峰值：
 
-实时模式默认采用面向游戏的低负载策略：DXcam 以 15 FPS 保留最新帧，变化检测每秒检查 6 次；PaddleOCR 最多使用 2 个 CPU 线程，将检测输入最长边限制到 1280，并在每次识别完成后休息 350 ms。翻译器进程在 Windows 上会切换为“低于正常”优先级，让游戏优先获得 CPU 时间。坐标会由 PaddleOCR 还原到原始画面，因此缩放不会改变覆盖层位置。
+- `OCR`：单轮 PaddleOCR 推理时间；
+- `稳定`：文字首次被 OCR 识别后，等待连续一致结果的时间；
+- `排队`：翻译批次等待可用翻译线程的时间；
+- `LLM`：`/v1/chat/completions` 从发出请求到收到完整 JSON 响应的时间；命中本游戏缓存时显示“缓存命中”；
+- `总计`：从画面变化触发首轮 OCR 到翻译结果可应用于覆盖层的时间。
 
-最有效的优化仍然是只捕获字幕区域。宽和高都为 `0` 代表整屏 OCR，适合文字位置完全不固定的游戏，但负载和识别延迟都会明显增加。可在启动器中点击“框选字幕区域”。需要进一步降低占用时，可在 `config.toml` 中增大 `ocr_cooldown_ms` 或将 `cpu_threads` 改为 `1`；代价是新字幕出现后等待时间更长。
+勾选“显示 OCR/翻译区域调试边框”或使用 `--debug-border` 时，同样的分段耗时也会逐批输出到终端。`OCR` 与 `稳定` 可能覆盖不同轮次，因此它们用于定位阶段瓶颈，不应简单相加来推算总延迟。
+
+## OCR 性能与低负载设置
+
+实时模式默认采用面向游戏的低负载策略：DXcam 以 15 FPS 保留最新帧，变化检测每秒检查 6 次；PaddleOCR 将检测输入最长边限制到 1280，并在每次识别完成后休息 350 ms。CPU 模式最多使用 2 个线程；GPU 模式可在启动器中选择具体卡号。翻译器进程在 Windows 上会切换为“低于正常”优先级，让游戏优先获得 CPU 时间。坐标会由 PaddleOCR 还原到原始画面，因此缩放不会改变覆盖层位置。
+
+宽和高都为 `0` 代表整屏 OCR，适合文字位置不固定的游戏，但仍会识别更多无关 UI。限制字幕区域可以减少误识别和后续 LLM 请求。需要进一步降低扫描频率时，可在 `config.toml` 中增大 `ocr_cooldown_ms`；代价是新字幕出现后等待时间更长。`cpu_threads` 只影响 CPU 模式。
 
 可用内置日文样图验证整个实时闭环：
 
@@ -203,4 +225,4 @@ $env:GAME_TRANSLATOR_LIVE = "1"
 - 最近 8 条翻译对照仅保留在当前进程内；
 - 暂不自动识别说话人或区分人物语气；
 - 暂无自动识别游戏窗口、随窗口移动以及 Profile 删除界面；
-- PP-OCRv6 当前使用限制为 2 线程的 CPU 路径，以规避 Paddle 3.3.1 在 Windows oneDNN/PIR 上的兼容错误；整屏 OCR 仍会比字幕区域 OCR 更慢。
+- GPU OCR 当前依赖 NVIDIA CUDA 版 Paddle；非 NVIDIA 显卡仍使用 CPU 路径。

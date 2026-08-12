@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -10,9 +11,10 @@ from game_screen_translator.config import (
     AppConfig,
     ConfigError,
     load_config,
-    save_translation_selection,
+    save_runtime_selection,
 )
 from game_screen_translator.domain import GlossaryEntry
+from game_screen_translator.ocr.paddle import discover_nvidia_gpus
 from game_screen_translator.overlay.window import exclude_window_from_capture
 from game_screen_translator.profiles import (
     GameProfile,
@@ -93,6 +95,37 @@ def _install_ui_font(app: QApplication, config: AppConfig, config_path: Path) ->
         if families:
             app.setFont(QFont(families[0], 10))
             return
+
+
+def _validate_ocr_device_isolated(device: str) -> str:
+    """Probe Paddle in a short-lived process so the launcher keeps no GPU runtime."""
+    if device == "cpu":
+        return "CPU"
+    probe = (
+        "import sys; "
+        "from game_screen_translator.ocr.paddle import validate_ocr_device; "
+        "print(validate_ocr_device(sys.argv[1]))"
+    )
+    try:
+        completed = subprocess.run(
+            (sys.executable, "-c", probe, device),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"无法检查 OCR 设备 {device}：{exc}") from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        if len(detail) > 1200:
+            detail = detail[-1200:]
+        raise RuntimeError(detail or f"OCR 设备检查退出码 {completed.returncode}")
+    lines = tuple(line.strip() for line in completed.stdout.splitlines() if line.strip())
+    if not lines:
+        raise RuntimeError("OCR 设备检查没有返回结果")
+    return lines[-1]
 
 
 class NewProfileDialog(QDialog):
@@ -345,17 +378,36 @@ class LauncherWindow(QMainWindow):
         model_layout.addWidget(self.model_combo, 1)
         model_layout.addWidget(self.refresh_models_button)
         service_form.addRow("API 模型", model_widget)
+
+        self.ocr_device_combo = QComboBox()
+        self.ocr_device_combo.addItem("CPU", "cpu")
+        for index, name in discover_nvidia_gpus():
+            self.ocr_device_combo.addItem(f"GPU {index} · {name}", f"gpu:{index}")
+        configured_device = self._config.ocr.device
+        device_index = self.ocr_device_combo.findData(configured_device)
+        if device_index < 0:
+            self.ocr_device_combo.addItem(
+                f"{configured_device}（当前未检测到）",
+                configured_device,
+            )
+            device_index = self.ocr_device_combo.count() - 1
+        self.ocr_device_combo.setCurrentIndex(device_index)
+        self.ocr_device_combo.setToolTip(
+            "GPU OCR 需要通过 bootstrap.ps1 -WithGpuOcr 安装项目内运行库"
+        )
+        service_form.addRow("OCR 设备", self.ocr_device_combo)
         layout.addLayout(service_form)
 
         service_actions = QHBoxLayout()
         self.service_status_label = QLabel(
             f"当前：{self._config.translation.model} · "
-            f"{self._config.translation.normalized_base_url}；"
+            f"{self._config.translation.normalized_base_url} · "
+            f"OCR {self._config.ocr.device}；"
             "可手动填写，读取列表不会自动保存。"
         )
         self.service_status_label.setObjectName("secondaryText")
         self.service_status_label.setWordWrap(True)
-        save_service_button = QPushButton("保存服务设置")
+        save_service_button = QPushButton("保存服务与 OCR 设置")
         save_service_button.clicked.connect(
             lambda: self._save_translation_settings()
         )
@@ -390,8 +442,8 @@ class LauncherWindow(QMainWindow):
         layout.addLayout(form)
 
         note = QLabel(
-            "性能提示：宽和高都为 0 会对整个屏幕执行 OCR，CPU 开销明显更高。"
-            "区域坐标相对于所选显示器，强烈建议点击“框选字幕区域”，只保留字幕会出现的位置。"
+            "性能提示：宽和高都为 0 会对整个屏幕执行 OCR；GPU 通常明显快于 CPU。"
+            "区域坐标相对于所选显示器，限制字幕区域仍能减少无关文字和翻译请求。"
         )
         note.setWordWrap(True)
         note.setObjectName("secondaryText")
@@ -431,6 +483,12 @@ class LauncherWindow(QMainWindow):
             base_url=base_url,
             model=model,
         )
+
+    def _ocr_candidate(self):
+        device = self.ocr_device_combo.currentData()
+        if not isinstance(device, str):
+            raise ConfigError("当前没有可用的 OCR 设备")
+        return replace(self._config.ocr, device=device)
 
     def _refresh_models(self) -> None:
         if self._model_reply is not None:
@@ -525,23 +583,29 @@ class LauncherWindow(QMainWindow):
     def _save_translation_settings(self, *, announce: bool = True) -> bool:
         try:
             translation = self._translation_candidate()
-            self._config = save_translation_selection(
+            ocr = self._ocr_candidate()
+            self._config = save_runtime_selection(
                 self._config_path,
                 base_url=translation.base_url,
                 model=translation.model,
+                ocr_device=ocr.device,
             )
         except (ConfigError, OSError, RuntimeError, ValueError) as exc:
-            self._show_error("保存翻译服务失败", exc)
+            self._show_error("保存服务与 OCR 设置失败", exc)
             return False
         self.server_url_combo.setCurrentText(self._config.translation.base_url)
         self.model_combo.setCurrentText(self._config.translation.model)
+        device_index = self.ocr_device_combo.findData(self._config.ocr.device)
+        if device_index >= 0:
+            self.ocr_device_combo.setCurrentIndex(device_index)
         self.service_status_label.setText(
             f"当前：{self._config.translation.model} · "
-            f"{self._config.translation.normalized_base_url}"
+            f"{self._config.translation.normalized_base_url} · "
+            f"OCR {self._config.ocr.device}"
         )
         if announce:
             self.statusBar().showMessage(
-                "翻译服务设置已保存；新启动的实时翻译将使用该设置",
+                "服务与 OCR 设置已保存；新启动的实时翻译将使用该设置",
                 6000,
             )
         return True
@@ -780,6 +844,14 @@ class LauncherWindow(QMainWindow):
         profile = self._require_profile()
         if profile is None:
             return
+        try:
+            selected_device = self._ocr_candidate().device
+            self.statusBar().showMessage(f"正在检查 OCR 设备 {selected_device}……")
+            QApplication.processEvents()
+            runtime_description = _validate_ocr_device_isolated(selected_device)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._show_error("OCR 设备不可用", exc)
+            return
         if not self._save_translation_settings(announce=False):
             return
         if not self._save_capture_settings():
@@ -804,7 +876,8 @@ class LauncherWindow(QMainWindow):
             self._show_error("启动失败", RuntimeError("无法创建实时翻译进程"))
             return
         self.statusBar().showMessage(
-            f"实时翻译已启动（进程 {process_id}）；可在右上角控制窗停止",
+            f"实时翻译已启动（进程 {process_id}，{runtime_description}）；"
+            "可在右上角控制窗停止",
             10000,
         )
         self.showMinimized()

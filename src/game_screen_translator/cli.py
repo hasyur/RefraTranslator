@@ -197,6 +197,7 @@ async def _preview(
         detection_model=config.ocr.detection_model,
         recognition_model=config.ocr.recognition_model,
         model_source=config.ocr.model_source,
+        device=config.ocr.device,
     )
     observations = engine.recognize(image_path)
     if not observations:

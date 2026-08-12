@@ -17,6 +17,8 @@ cache_dir = ".cache/paddlex"
 detection_model = "PP-OCRv6_small_det"
 recognition_model = "PP-OCRv6_small_rec"
 model_source = "bos"
+# cpu 或 gpu:N；例如第二张显卡使用 gpu:1。
+device = "cpu"
 # 限制 PaddleOCR 并行线程，避免与游戏争抢全部 CPU 核心。
 cpu_threads = 2
 # 整屏输入会在检测阶段等比缩小，OCR 坐标仍会还原到原始画面。

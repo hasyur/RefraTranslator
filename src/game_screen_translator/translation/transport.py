@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Mapping
 from types import TracebackType
 from typing import Any
@@ -55,6 +56,12 @@ class OpenAICompatibleTransport:
         )
         self._semaphore = asyncio.Semaphore(config.max_concurrency)
         self._closed = False
+        self._completion_durations: list[float] = []
+
+    @property
+    def completion_durations(self) -> tuple[float, ...]:
+        """Wall-clock durations of chat completion requests made by this client."""
+        return tuple(self._completion_durations)
 
     async def __aenter__(self) -> OpenAICompatibleTransport:
         return self
@@ -85,7 +92,13 @@ class OpenAICompatibleTransport:
             "max_tokens": self.config.max_output_tokens,
             "stream": False,
         }
-        payload = await self._request_json("POST", "chat/completions", json=request_body)
+        started_at = time.perf_counter()
+        try:
+            payload = await self._request_json(
+                "POST", "chat/completions", json=request_body
+            )
+        finally:
+            self._completion_durations.append(time.perf_counter() - started_at)
         try:
             content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:

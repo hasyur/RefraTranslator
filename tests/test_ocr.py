@@ -5,10 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from game_screen_translator.ocr import paddle as paddle_module
+
 from game_screen_translator.ocr.paddle import (
     OcrResultError,
     PaddleOcrEngine,
     parse_paddle_results,
+    validate_ocr_device,
 )
 
 
@@ -93,3 +96,29 @@ def test_engine_forces_project_local_model_cache(monkeypatch, tmp_path: Path) ->
             },
         )
     ]
+
+
+def test_validate_gpu_device_reports_runtime(monkeypatch) -> None:
+    fake_paddle = SimpleNamespace(
+        __version__="3.3.1",
+        device=SimpleNamespace(
+            is_compiled_with_cuda=lambda: True,
+            cuda=SimpleNamespace(device_count=lambda: 2),
+        ),
+        version=SimpleNamespace(cuda=lambda: "12.9"),
+    )
+    monkeypatch.setitem(sys.modules, "paddle", fake_paddle)
+    monkeypatch.setattr(paddle_module, "_configure_bundled_nvidia_dlls", lambda: ())
+
+    assert validate_ocr_device("gpu:1") == "gpu:1 · Paddle 3.3.1 · CUDA 12.9"
+
+
+def test_validate_gpu_device_rejects_cpu_paddle(monkeypatch) -> None:
+    fake_paddle = SimpleNamespace(
+        device=SimpleNamespace(is_compiled_with_cuda=lambda: False),
+    )
+    monkeypatch.setitem(sys.modules, "paddle", fake_paddle)
+    monkeypatch.setattr(paddle_module, "_configure_bundled_nvidia_dlls", lambda: ())
+
+    with pytest.raises(paddle_module.OcrDependencyError, match="CPU 版 Paddle"):
+        validate_ocr_device("gpu:0")

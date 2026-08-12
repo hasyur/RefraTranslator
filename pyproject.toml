@@ -22,6 +22,10 @@ ocr = [
   "paddleocr>=3.3,<4",
   "paddlepaddle>=3.2,<4",
 ]
+ocr-gpu = [
+  "paddleocr>=3.3,<4",
+  "paddlepaddle-gpu>=3.3.1,<3.4",
+]
 gui = [
   "PySide6>=6.9,<6.10",
   "dxcam>=0.3,<0.4",

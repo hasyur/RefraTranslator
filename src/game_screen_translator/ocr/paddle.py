@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
+import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -14,6 +18,100 @@ class OcrDependencyError(RuntimeError):
 
 class OcrResultError(RuntimeError):
     """Raised when PaddleOCR returns an unsupported result shape."""
+
+
+_NVIDIA_DLL_HANDLES: dict[str, Any] = {}
+
+
+@lru_cache(maxsize=1)
+def discover_nvidia_gpus() -> tuple[tuple[int, str], ...]:
+    """Return NVIDIA devices without importing the heavyweight Paddle runtime."""
+    try:
+        completed = subprocess.run(
+            (
+                "nvidia-smi",
+                "--query-gpu=index,name",
+                "--format=csv,noheader,nounits",
+            ),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return ()
+
+    devices: list[tuple[int, str]] = []
+    for line in completed.stdout.splitlines():
+        index_text, separator, name = line.partition(",")
+        if not separator:
+            continue
+        try:
+            index = int(index_text.strip())
+        except ValueError:
+            continue
+        normalized_name = name.strip()
+        if normalized_name:
+            devices.append((index, normalized_name))
+    return tuple(devices)
+
+
+def _configure_bundled_nvidia_dlls() -> tuple[Path, ...]:
+    """Expose CUDA wheels installed inside this virtual environment on Windows."""
+    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return ()
+    nvidia_root = Path(sys.prefix) / "Lib" / "site-packages" / "nvidia"
+    directories = tuple(
+        sorted(path for path in nvidia_root.glob("*/bin") if path.is_dir())
+    )
+    for directory in directories:
+        key = os.path.normcase(str(directory.resolve()))
+        if key not in _NVIDIA_DLL_HANDLES:
+            _NVIDIA_DLL_HANDLES[key] = os.add_dll_directory(str(directory))
+
+    current_path = os.environ.get("PATH", "")
+    known = {
+        os.path.normcase(os.path.abspath(value))
+        for value in current_path.split(os.pathsep)
+        if value
+    }
+    missing = [str(path) for path in directories if os.path.normcase(str(path)) not in known]
+    if missing:
+        os.environ["PATH"] = os.pathsep.join((*missing, current_path))
+    return directories
+
+
+def validate_ocr_device(device: str) -> str:
+    """Validate a configured OCR device and return a short runtime description."""
+    normalized = device.strip().lower()
+    if normalized == "cpu":
+        return "CPU"
+    match = re.fullmatch(r"gpu:(\d+)", normalized)
+    if match is None:
+        raise OcrDependencyError("OCR 设备必须是 cpu 或 gpu:N（例如 gpu:1）")
+
+    _configure_bundled_nvidia_dlls()
+    try:
+        import paddle
+    except ImportError as exc:
+        raise OcrDependencyError(
+            "尚未安装 Paddle GPU 运行时。请运行："
+            ".\\bootstrap.ps1 -WithGpuOcr -WithGui"
+        ) from exc
+    if not paddle.device.is_compiled_with_cuda():
+        raise OcrDependencyError(
+            "当前是 CPU 版 Paddle，不能使用 GPU OCR。请运行："
+            ".\\bootstrap.ps1 -WithGpuOcr -WithGui"
+        )
+    index = int(match.group(1))
+    count = int(paddle.device.cuda.device_count())
+    if index >= count:
+        raise OcrDependencyError(
+            f"配置了 {normalized}，但 Paddle 只发现 {count} 张 GPU"
+        )
+    cuda_version = str(paddle.version.cuda() or "未知")
+    return f"{normalized} · Paddle {paddle.__version__} · CUDA {cuda_version}"
 
 
 def _plain_payload(result: Any) -> Mapping[str, Any]:
@@ -81,9 +179,11 @@ class PaddleOcrEngine:
         detection_model: str = "PP-OCRv6_small_det",
         recognition_model: str = "PP-OCRv6_small_rec",
         model_source: str = "bos",
+        device: str = "cpu",
         cpu_threads: int = 2,
         detection_max_side: int = 1280,
     ) -> None:
+        device = device.strip().lower()
         isolated_cache = Path(cache_dir).resolve()
         isolated_cache.mkdir(parents=True, exist_ok=True)
         # PaddleX reads this at import time. Set it before importing PaddleOCR so
@@ -94,16 +194,20 @@ class PaddleOcrEngine:
         # Paddle 3.3.1 on Windows currently fails while converting oneDNN PIR
         # array attributes for PP-OCRv6. The plain CPU executor is stable.
         os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "False"
+        runtime_description = validate_ocr_device(device)
         try:
             from paddleocr import PaddleOCR
         except ImportError as exc:
+            install_switch = "-WithGpuOcr" if device.startswith("gpu:") else "-WithOcr"
             raise OcrDependencyError(
                 "尚未安装 OCR 可选依赖。请运行："
-                ".\\bootstrap.ps1 -WithOcr"
+                f".\\bootstrap.ps1 {install_switch}"
             ) from exc
 
         self._min_score = min_score
         self._detection_max_side = detection_max_side
+        self.device = device
+        self.runtime_description = runtime_description
         try:
             self._engine = PaddleOCR(
                 text_detection_model_name=detection_model,
@@ -111,14 +215,19 @@ class PaddleOcrEngine:
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
                 use_textline_orientation=False,
-                device="cpu",
+                device=device,
                 enable_mkldnn=False,
                 cpu_threads=cpu_threads,
             )
         except Exception as exc:
+            gpu_hint = (
+                "；可重新运行 .\\bootstrap.ps1 -WithGpuOcr -WithGui 补齐运行库"
+                if device.startswith("gpu:")
+                else ""
+            )
             raise OcrDependencyError(
-                f"无法初始化 PaddleOCR（语言={language}，检测={detection_model}，"
-                f"识别={recognition_model}）：{exc}"
+                f"无法初始化 PaddleOCR（设备={device}，语言={language}，"
+                f"检测={detection_model}，识别={recognition_model}）：{exc}{gpu_hint}"
             ) from exc
 
     def recognize(self, image_path: str | Path) -> tuple[OcrText, ...]:

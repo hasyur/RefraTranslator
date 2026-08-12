@@ -44,6 +44,8 @@ async def test_transport_lists_models_and_sends_chat_contract() -> None:
     ) as transport:
         assert await transport.list_models() == ("hy-mt1.5-7b",)
         assert await transport.complete("prompt") == "<target />"
+        assert len(transport.completion_durations) == 1
+        assert transport.completion_durations[0] >= 0
 
     assert [request.url.path for request in requests] == [
         "/v1/models",

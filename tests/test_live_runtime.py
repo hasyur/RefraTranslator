@@ -46,9 +46,15 @@ class FakeOverlay:
 class FakeControl:
     def __init__(self) -> None:
         self.status = ""
+        self.detail = ""
+        self.latency = ""
 
     def set_status(self, status, detail="") -> None:
         self.status = status
+        self.detail = detail
+
+    def set_latency(self, summary) -> None:
+        self.latency = summary
 
 
 def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
@@ -164,4 +170,50 @@ def test_ocr_backlog_waits_for_cooldown_after_completion(monkeypatch) -> None:
     controller._tick()
     assert controller._ocr_future is not None
     controller._ocr_future.result(timeout=2)
+    controller.close()
+
+
+def test_live_latency_display_covers_ocr_queue_and_cached_translation(
+    tmp_path: Path,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://127.0.0.1:1/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0),
+    )
+    profile = create_game_profile(tmp_path / "config.toml", config, "timing-game")
+    profile.cache.set_manual_correction(
+        "固定字幕",
+        "固定译文",
+        source_language=config.ocr.language,
+        target_language=config.translation.target_language,
+    )
+    control = FakeControl()
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=control,
+        app=app,
+        profile=profile,
+    )
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    controller._tick()
+    translation_future = next(iter(controller._translation_futures))
+    translation_future.result(timeout=2)
+    controller._collect_translations()
+
+    assert "OCR" in control.latency
+    assert "稳定" in control.latency
+    assert "排队" in control.latency
+    assert "LLM 缓存命中" in control.latency
+    assert "总计" in control.latency
+    assert control.detail.startswith("已覆盖 1 条")
     controller.close()

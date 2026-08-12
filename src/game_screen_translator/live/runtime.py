@@ -7,6 +7,7 @@ import sys
 import time
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -21,6 +22,7 @@ from game_screen_translator.domain import (
     TranslationBatch,
 )
 from game_screen_translator.live.change_detector import FrameChangeDetector
+from game_screen_translator.live.latency import LiveLatencyStats
 from game_screen_translator.live.tracker import StableTextTracker
 from game_screen_translator.ocr.paddle import PaddleOcrEngine
 from game_screen_translator.ocr.types import OcrText
@@ -54,6 +56,36 @@ except ImportError as exc:  # pragma: no cover - exercised only without GUI extr
 BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 
 
+@dataclass(frozen=True, slots=True)
+class _OcrTaskResult:
+    observations: tuple[OcrText, ...]
+    triggered_at: float
+    started_at: float
+    completed_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceLatencyOrigin:
+    pipeline_started_at: float
+    first_recognized_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class _TranslationSubmission:
+    batch: TranslationBatch
+    queued_at: float
+    pipeline_started_at: float
+    first_recognized_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class _TranslationWorkerResult:
+    cached_outcome: CachedTranslationOutcome
+    started_at: float
+    completed_at: float
+    llm_seconds: float | None
+
+
 def prefer_game_process_priority() -> bool:
     """Lower only this translator process so the game wins CPU contention."""
     if os.name != "nt":
@@ -79,17 +111,24 @@ class LiveControlWindow(QWidget):
     def __init__(self, stop_callback) -> None:
         super().__init__(None, Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setWindowTitle("游戏屏幕翻译器")
-        self.setFixedWidth(390)
+        self.setFixedWidth(520)
         self._status = QLabel("正在初始化……")
         self._status.setWordWrap(True)
         self._detail = QLabel("")
         self._detail.setWordWrap(True)
         self._detail.setStyleSheet("color: #777;")
+        self._latency = QLabel("延迟统计：等待首个 OCR 样本……")
+        self._latency.setWordWrap(True)
+        self._latency.setToolTip(
+            "OCR 是单轮识别；稳定是首轮识别后等待一致结果；"
+            "排队是等待翻译线程；总计从画面变化触发 OCR 到译文可显示。"
+        )
         stop_button = QPushButton("停止翻译")
         stop_button.clicked.connect(stop_callback)
         layout = QVBoxLayout(self)
         layout.addWidget(self._status)
         layout.addWidget(self._detail)
+        layout.addWidget(self._latency)
         layout.addWidget(stop_button)
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt callback name
@@ -100,6 +139,9 @@ class LiveControlWindow(QWidget):
     def set_status(self, status: str, detail: str = "") -> None:
         self._status.setText(status)
         self._detail.setText(detail)
+
+    def set_latency(self, summary: str) -> None:
+        self._latency.setText(summary)
 
 
 class LiveController:
@@ -137,12 +179,17 @@ class LiveController:
             max_workers=config.translation.max_concurrency,
             thread_name_prefix="translation",
         )
-        self._ocr_future: Future[tuple[OcrText, ...]] | None = None
+        self._ocr_future: Future[_OcrTaskResult] | None = None
         self._translation_futures: dict[
-            Future[CachedTranslationOutcome], TranslationBatch
+            Future[_TranslationWorkerResult], _TranslationSubmission
         ] = {}
         self._pending_ocr_frame: np.ndarray | None = None
+        self._pending_ocr_triggered_at: float | None = None
         self._latest_frame: np.ndarray | None = None
+        self._source_latency_origins: dict[
+            tuple[str, int], _SourceLatencyOrigin
+        ] = {}
+        self._latency_stats = LiveLatencyStats()
         self._last_ocr_completed = 0.0
         self._next_ocr_allowed = 0.0
         self._shutting_down = False
@@ -155,6 +202,7 @@ class LiveController:
         self._timer = QTimer()
         self._timer.setInterval(max(10, round(1000 / config.live.change_poll_fps)))
         self._timer.timeout.connect(self._tick)
+        self._control.set_latency(self._latency_stats.render())
 
     def start(self) -> None:
         region = self._capture.region
@@ -169,11 +217,16 @@ class LiveController:
             and region == (0, 0, output_size[0], output_size[1])
         )
         region_hint = " · 当前为整屏 OCR，框选字幕区域可继续降载" if full_screen else ""
+        ocr_runtime = (
+            f"{self._config.ocr.device} / {self._config.ocr.cpu_threads} 线程"
+            if self._config.ocr.device == "cpu"
+            else self._config.ocr.device
+        )
         self._control.set_status(
             "实时翻译运行中",
             f"捕获：{self._capture.active_backend} {region} · "
             f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
-            f"OCR {self._config.ocr.cpu_threads} 线程 / 最长边 "
+            f"OCR {ocr_runtime} / 最长边 "
             f"{self._config.ocr.detection_max_side} · {profile_label}{region_hint}",
         )
         self._timer.start()
@@ -191,6 +244,8 @@ class LiveController:
             f"人工修订 {self._manual_hit_count} 条，缓存 {self._cache_hit_count} 条，"
             f"模型 {self._model_result_count} 条，丢弃过期译文 {self._stale_result_count} 条"
         )
+        if self._ocr_scan_count:
+            print("延迟统计：" + self._latency_stats.render().replace("\n", "；"))
 
     def _tick(self) -> None:
         if self._shutting_down:
@@ -215,19 +270,40 @@ class LiveController:
 
         if changed or needs_stability_scan:
             self._pending_ocr_frame = frame
+            if changed or self._pending_ocr_triggered_at is None:
+                self._pending_ocr_triggered_at = now
         if (
             self._ocr_future is None
             and self._pending_ocr_frame is not None
             and now >= self._next_ocr_allowed
         ):
             pending = self._pending_ocr_frame
+            triggered_at = self._pending_ocr_triggered_at
             self._pending_ocr_frame = None
-            self._submit_ocr(pending)
+            self._pending_ocr_triggered_at = None
+            self._submit_ocr(pending, triggered_at=triggered_at)
 
         self._overlay.set_scene(frame, self._tracker.visible_tracks)
 
-    def _submit_ocr(self, frame: np.ndarray) -> None:
-        self._ocr_future = self._ocr_executor.submit(self._ocr.recognize_frame, frame)
+    def _submit_ocr(
+        self,
+        frame: np.ndarray,
+        *,
+        triggered_at: float | None = None,
+    ) -> None:
+        trigger = time.monotonic() if triggered_at is None else triggered_at
+        self._ocr_future = self._ocr_executor.submit(self._run_ocr, frame, trigger)
+
+    def _run_ocr(self, frame: np.ndarray, triggered_at: float) -> _OcrTaskResult:
+        started_at = time.monotonic()
+        observations = tuple(self._ocr.recognize_frame(frame))
+        completed_at = time.monotonic()
+        return _OcrTaskResult(
+            observations,
+            triggered_at,
+            started_at,
+            completed_at,
+        )
 
     def _collect_ocr(self) -> None:
         future = self._ocr_future
@@ -239,17 +315,40 @@ class LiveController:
             now + self._config.live.ocr_cooldown_ms / 1000
         )
         try:
-            observations = future.result()
+            task_result = future.result()
         except Exception as exc:
             self._control.set_status("OCR 暂时失败，等待画面变化后重试", str(exc))
             print(f"OCR 错误：{exc}", file=sys.stderr)
             return
 
+        observations = task_result.observations
+        ocr_seconds = max(0.0, task_result.completed_at - task_result.started_at)
+        self._latency_stats.record_ocr(ocr_seconds)
+        self._refresh_latency_display()
         self._ocr_scan_count += 1
-        if self._debug and observations:
-            print("OCR：" + " | ".join(item.text for item in observations))
+        if self._debug:
+            print(f"耗时：OCR {ocr_seconds:.3f}s")
+            if observations:
+                print("OCR：" + " | ".join(item.text for item in observations))
         self._last_ocr_completed = now
+        previous_keys = {
+            (track.track_id, track.revision) for track in self._tracker.visible_tracks
+        }
         update = self._tracker.observe(observations, now)
+        current_keys: set[tuple[str, int]] = set()
+        for track in update.visible_tracks:
+            key = (track.track_id, track.revision)
+            current_keys.add(key)
+            if key not in previous_keys or key not in self._source_latency_origins:
+                self._source_latency_origins[key] = _SourceLatencyOrigin(
+                    pipeline_started_at=task_result.triggered_at,
+                    first_recognized_at=task_result.completed_at,
+                )
+        self._source_latency_origins = {
+            key: origin
+            for key, origin in self._source_latency_origins.items()
+            if key in current_keys
+        }
         if update.stable_sources:
             if self._debug:
                 print("稳定字幕：" + " | ".join(item.text for item in update.stable_sources))
@@ -260,15 +359,48 @@ class LiveController:
         for offset in range(0, len(sources), batch_size):
             batch = TranslationBatch(tuple(sources[offset : offset + batch_size]))
             context = tuple(self._context)
-            future = self._translation_executor.submit(self._translate_blocking, batch, context)
-            self._translation_futures[future] = batch
+            queued_at = time.monotonic()
+            origins = tuple(
+                self._source_latency_origins.get((source.track_id, source.revision))
+                for source in batch.items
+            )
+            known_origins = tuple(origin for origin in origins if origin is not None)
+            pipeline_started_at = (
+                min(origin.pipeline_started_at for origin in known_origins)
+                if known_origins
+                else queued_at
+            )
+            first_recognized_at = (
+                min(origin.first_recognized_at for origin in known_origins)
+                if known_origins
+                else queued_at
+            )
+            submission = _TranslationSubmission(
+                batch,
+                queued_at,
+                pipeline_started_at,
+                first_recognized_at,
+            )
+            future = self._translation_executor.submit(
+                self._translate_blocking_timed, batch, context
+            )
+            self._translation_futures[future] = submission
 
     def _translate_blocking(
         self,
         batch: TranslationBatch,
         context: tuple[ContextPair, ...],
     ) -> CachedTranslationOutcome:
-        async def translate() -> CachedTranslationOutcome:
+        return self._translate_blocking_timed(batch, context).cached_outcome
+
+    def _translate_blocking_timed(
+        self,
+        batch: TranslationBatch,
+        context: tuple[ContextPair, ...],
+    ) -> _TranslationWorkerResult:
+        started_at = time.monotonic()
+
+        async def translate() -> tuple[CachedTranslationOutcome, float | None]:
             async with OpenAICompatibleTransport(self._config.translation) as transport:
                 prompt_builder = HyMtPromptBuilder(
                     self._config.translation.target_language
@@ -286,21 +418,59 @@ class LiveController:
                     model=self._config.translation.model,
                     prompt_version=prompt_builder.prompt_version,
                 )
-                return await cached_service.translate(batch, context=context)
+                cached_outcome = await cached_service.translate(batch, context=context)
+                durations = transport.completion_durations
+                return cached_outcome, (sum(durations) if durations else None)
 
-        return asyncio.run(translate())
+        cached_outcome, llm_seconds = asyncio.run(translate())
+        return _TranslationWorkerResult(
+            cached_outcome,
+            started_at,
+            time.monotonic(),
+            llm_seconds,
+        )
 
     def _collect_translations(self) -> None:
         for future in tuple(self._translation_futures):
             if not future.done():
                 continue
-            batch = self._translation_futures.pop(future)
+            submission = self._translation_futures.pop(future)
             try:
-                cached_outcome = future.result()
+                worker_result = future.result()
             except Exception as exc:
                 self._control.set_status("翻译服务异常，屏幕保留原文", str(exc))
                 print(f"翻译错误：{exc}", file=sys.stderr)
                 continue
+
+            cached_outcome = worker_result.cached_outcome
+            stability_seconds = max(
+                0.0, submission.queued_at - submission.first_recognized_at
+            )
+            queue_seconds = max(
+                0.0, worker_result.started_at - submission.queued_at
+            )
+            total_seconds = max(
+                0.0, time.monotonic() - submission.pipeline_started_at
+            )
+            self._latency_stats.record_translation(
+                stability_seconds=stability_seconds,
+                queue_seconds=queue_seconds,
+                llm_seconds=worker_result.llm_seconds,
+                total_seconds=total_seconds,
+                batch_size=len(submission.batch.items),
+            )
+            self._refresh_latency_display()
+            if self._debug:
+                llm_label = (
+                    f"{worker_result.llm_seconds:.3f}s"
+                    if worker_result.llm_seconds is not None
+                    else "缓存命中"
+                )
+                print(
+                    f"耗时：稳定 {stability_seconds:.3f}s · "
+                    f"翻译排队 {queue_seconds:.3f}s · LLM {llm_label} · "
+                    f"总计 {total_seconds:.3f}s · 批次 {len(submission.batch.items)} 条"
+                )
 
             outcome = cached_outcome.outcome
             current = {
@@ -357,6 +527,9 @@ class LiveController:
             if self._latest_frame is not None:
                 self._overlay.set_scene(self._latest_frame, self._tracker.visible_tracks)
 
+    def _refresh_latency_display(self) -> None:
+        self._control.set_latency(self._latency_stats.render())
+
     def _fatal(self, message: str) -> None:
         print(message, file=sys.stderr)
         self._control.set_status("实时翻译已停止", message)
@@ -407,6 +580,7 @@ def run_live(
         detection_model=config.ocr.detection_model,
         recognition_model=config.ocr.recognition_model,
         model_source=config.ocr.model_source,
+        device=config.ocr.device,
         cpu_threads=config.ocr.cpu_threads,
         detection_max_side=config.ocr.detection_max_side,
     )

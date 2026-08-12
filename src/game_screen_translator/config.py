@@ -62,6 +62,7 @@ class OcrConfig:
     detection_model: str = "PP-OCRv6_small_det"
     recognition_model: str = "PP-OCRv6_small_rec"
     model_source: str = "bos"
+    device: str = "cpu"
     cpu_threads: int = 2
     detection_max_side: int = 1280
 
@@ -76,6 +77,8 @@ class OcrConfig:
             raise ConfigError("OCR 检测和识别模型名称均不能为空")
         if self.model_source not in {"bos", "huggingface", "modelscope", "aistudio"}:
             raise ConfigError("ocr.model_source 必须是 bos/huggingface/modelscope/aistudio")
+        if re.fullmatch(r"(?:cpu|gpu:\d+)", self.device) is None:
+            raise ConfigError("ocr.device 必须是 cpu 或 gpu:N（例如 gpu:1）")
         if not 1 <= self.cpu_threads <= 32:
             raise ConfigError("ocr.cpu_threads 必须在 1 到 32 之间")
         if not 320 <= self.detection_max_side <= 4096:
@@ -211,6 +214,7 @@ _TOML_SECTION_RE = re.compile(
 _TRANSLATION_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>base_url|model)[ \t]*="
 )
+_OCR_DEVICE_VALUE_RE = re.compile(r"^(?P<indent>[ \t]*)device[ \t]*=")
 
 
 def save_translation_selection(
@@ -220,6 +224,37 @@ def save_translation_selection(
     model: str,
 ) -> AppConfig:
     """Atomically update only the local translation endpoint and model."""
+    return _save_selected_values(
+        path,
+        base_url=base_url,
+        model=model,
+        ocr_device=None,
+    )
+
+
+def save_runtime_selection(
+    path: str | Path,
+    *,
+    base_url: str,
+    model: str,
+    ocr_device: str,
+) -> AppConfig:
+    """Atomically update the launcher-owned API and OCR device selections."""
+    return _save_selected_values(
+        path,
+        base_url=base_url,
+        model=model,
+        ocr_device=ocr_device,
+    )
+
+
+def _save_selected_values(
+    path: str | Path,
+    *,
+    base_url: str,
+    model: str,
+    ocr_device: str | None,
+) -> AppConfig:
     config_path = Path(path).resolve()
     current = load_config(config_path)
     candidate_translation = replace(
@@ -227,7 +262,15 @@ def save_translation_selection(
         base_url=base_url.strip(),
         model=model.strip(),
     )
-    if candidate_translation == current.translation:
+    candidate_ocr = (
+        current.ocr
+        if ocr_device is None
+        else replace(current.ocr, device=ocr_device.strip())
+    )
+    if (
+        candidate_translation == current.translation
+        and candidate_ocr == current.ocr
+    ):
         return current
 
     with config_path.open("r", encoding="utf-8", newline="") as handle:
@@ -268,6 +311,9 @@ def save_translation_selection(
             + ", ".join(sorted(missing))
         )
 
+    if ocr_device is not None:
+        _upsert_ocr_device(lines, candidate_ocr.device)
+
     temporary = config_path.with_name(f"{config_path.name}.{os.getpid()}.tmp")
     try:
         with temporary.open("w", encoding="utf-8", newline="") as handle:
@@ -277,3 +323,44 @@ def save_translation_selection(
     finally:
         temporary.unlink(missing_ok=True)
     return validated
+
+
+def _upsert_ocr_device(lines: list[str], device: str) -> None:
+    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+    current_section: str | None = None
+    ocr_header_index: int | None = None
+    ocr_end_index = len(lines)
+    for index, line in enumerate(lines):
+        body = line.rstrip("\r\n")
+        section_match = _TOML_SECTION_RE.fullmatch(body)
+        if section_match is not None:
+            if current_section == "ocr" and ocr_end_index == len(lines):
+                ocr_end_index = index
+            current_section = section_match.group(1).strip()
+            if current_section == "ocr":
+                ocr_header_index = index
+            continue
+        if current_section != "ocr":
+            continue
+        value_match = _OCR_DEVICE_VALUE_RE.match(body)
+        if value_match is None:
+            continue
+        ending = line[len(body) :]
+        lines[index] = (
+            f'{value_match.group("indent")}device = '
+            f'{json.dumps(device, ensure_ascii=False)}{ending}'
+        )
+        return
+
+    device_line = f'device = {json.dumps(device, ensure_ascii=False)}{newline}'
+    if ocr_header_index is None:
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            lines[-1] += newline
+        if lines and lines[-1].strip():
+            lines.append(newline)
+        lines.extend((f"[ocr]{newline}", device_line))
+        return
+
+    if ocr_end_index > 0 and not lines[ocr_end_index - 1].endswith(("\n", "\r")):
+        lines[ocr_end_index - 1] += newline
+    lines.insert(ocr_end_index, device_line)

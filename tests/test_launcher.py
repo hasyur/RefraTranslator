@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from game_screen_translator.config import load_config
 from game_screen_translator.domain import GlossaryEntry
+from game_screen_translator.gui import launcher as launcher_module
 from game_screen_translator.gui.launcher import LauncherWindow, PairTableEditor, QProcess
 from game_screen_translator.gui.theme import (
     THEME_DARK,
@@ -71,6 +73,7 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.profile_combo.currentData() == "game"
     assert window.server_url_combo.currentText() == "http://127.0.0.1:1234/v1"
     assert window.model_combo.currentText() == "hy-mt1.5-7b"
+    assert window.ocr_device_combo.currentData() == "cpu"
     assert window._current_region() == (100, 200, 800, 300)
     assert window._glossary_editor.pairs() == (("仕事", "委托"),)
     assert window._correction_editor.pairs() == (("待て。", "等等。"),)
@@ -141,6 +144,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     saved = load_config(config_path)
     assert saved.translation.base_url == "http://10.20.30.40:9000/v1"
     assert saved.translation.model == "alternate-model"
+    assert saved.ocr.device == "cpu"
     window.close()
     app.processEvents()
 
@@ -204,3 +208,42 @@ def test_launcher_model_choices_keep_manual_model_until_user_changes_it(
     assert window.model_combo.currentText() == "server-a"
     window.close()
     app.processEvents()
+
+
+def test_launcher_saves_selected_gpu_device(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path)
+    gpu_index = window.ocr_device_combo.findData("gpu:1")
+    if gpu_index < 0:
+        window.ocr_device_combo.addItem("GPU 1 · test", "gpu:1")
+        gpu_index = window.ocr_device_combo.count() - 1
+    window.ocr_device_combo.setCurrentIndex(gpu_index)
+
+    assert window._save_translation_settings(announce=False)
+
+    assert load_config(config_path).ocr.device == "gpu:1"
+    window.close()
+    app.processEvents()
+
+
+def test_gpu_device_probe_runs_in_isolated_interpreter(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(arguments, **kwargs):
+        calls.append((arguments, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            stdout="gpu:1 · Paddle 3.3.1 · CUDA 12.9\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(launcher_module.subprocess, "run", fake_run)
+
+    description = launcher_module._validate_ocr_device_isolated("gpu:1")
+
+    assert description == "gpu:1 · Paddle 3.3.1 · CUDA 12.9"
+    assert calls[0][0][0] == sys.executable
+    assert calls[0][0][-1] == "gpu:1"
+    assert calls[0][1]["timeout"] == 20
