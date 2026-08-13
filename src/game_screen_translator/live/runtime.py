@@ -102,6 +102,8 @@ class _SourceLatencyOrigin:
 class _TranslationSubmission:
     batch: TranslationBatch
     context: tuple[ContextPair, ...]
+    order_group: int
+    order_path: tuple[int, ...]
     queued_at: float
     pipeline_started_at: float
     first_recognized_at: float
@@ -113,6 +115,8 @@ class _TranslationSubmission:
 class _PendingTranslationRetry:
     batch: TranslationBatch
     context: tuple[ContextPair, ...]
+    order_group: int
+    order_path: tuple[int, ...]
     ready_at: float
     pipeline_started_at: float
     first_recognized_at: float
@@ -290,6 +294,7 @@ class LiveController:
             Future[_TranslationWorkerResult], _TranslationSubmission
         ] = {}
         self._translation_retries: list[_PendingTranslationRetry] = []
+        self._next_translation_order_group = 0
         self._pending_ocr_frame: np.ndarray | None = None
         self._pending_ocr_triggered_at: float | None = None
         self._latest_frame: np.ndarray | None = None
@@ -544,8 +549,25 @@ class LiveController:
             (track.track_id, track.revision): track
             for track in self._tracker.visible_tracks
         }
-        for offset in range(0, len(sources), batch_size):
-            batch = TranslationBatch(tuple(sources[offset : offset + batch_size]))
+        ordered_sources = tuple(
+            sorted(
+                sources,
+                key=lambda source: (
+                    (
+                        visible_by_key[(source.track_id, source.revision)].bounds[1],
+                        visible_by_key[(source.track_id, source.revision)].bounds[0],
+                    )
+                    if (source.track_id, source.revision) in visible_by_key
+                    else (sys.maxsize, sys.maxsize)
+                ),
+            )
+        )
+        order_group = self._next_translation_order_group
+        self._next_translation_order_group += 1
+        for batch_index, offset in enumerate(range(0, len(ordered_sources), batch_size)):
+            batch = TranslationBatch(
+                tuple(ordered_sources[offset : offset + batch_size])
+            )
             origins = tuple(
                 self._source_latency_origins.get((source.track_id, source.revision))
                 for source in batch.items
@@ -573,6 +595,8 @@ class LiveController:
             self._submit_translation_batch(
                 batch,
                 context=context,
+                order_group=order_group,
+                order_path=(batch_index,),
                 pipeline_started_at=pipeline_started_at,
                 first_recognized_at=first_recognized_at,
                 source_bounds=source_bounds,
@@ -584,6 +608,8 @@ class LiveController:
         batch: TranslationBatch,
         *,
         context: tuple[ContextPair, ...],
+        order_group: int,
+        order_path: tuple[int, ...],
         pipeline_started_at: float,
         first_recognized_at: float,
         source_bounds: tuple[Bounds | None, ...],
@@ -593,6 +619,8 @@ class LiveController:
         submission = _TranslationSubmission(
             batch,
             context,
+            order_group,
+            order_path,
             queued_at,
             pipeline_started_at,
             first_recognized_at,
@@ -650,9 +678,10 @@ class LiveController:
 
     def _collect_translations(self) -> None:
         self._cancel_obsolete_translation_futures()
-        for future in tuple(self._translation_futures):
-            if not future.done():
-                continue
+        while True:
+            future = self._next_publishable_translation_future()
+            if future is None:
+                break
             submission = self._translation_futures.pop(future)
             try:
                 worker_result = future.result()
@@ -744,6 +773,36 @@ class LiveController:
             if self._latest_frame is not None:
                 self._overlay.set_scene(self._latest_frame, self._tracker.visible_tracks)
 
+    def _next_publishable_translation_future(
+        self,
+    ) -> Future[_TranslationWorkerResult] | None:
+        """Return a completed batch whose earlier screen batches are resolved.
+
+        Requests still execute concurrently.  Publication is ordered only
+        inside one OCR update, so a slow stale update cannot block text found
+        by a later OCR pass.
+        """
+        first_path_by_group: dict[int, tuple[int, ...]] = {}
+        for submission in self._translation_futures.values():
+            current = first_path_by_group.get(submission.order_group)
+            if current is None or submission.order_path < current:
+                first_path_by_group[submission.order_group] = submission.order_path
+        for retry in self._translation_retries:
+            current = first_path_by_group.get(retry.order_group)
+            if current is None or retry.order_path < current:
+                first_path_by_group[retry.order_group] = retry.order_path
+
+        candidates = [
+            (submission.order_group, future)
+            for future, submission in self._translation_futures.items()
+            if future.done()
+            and submission.order_path
+            == first_path_by_group.get(submission.order_group)
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: item[0])[1]
+
     def _expire_missing_tracks(self, now: float) -> None:
         expired = self._tracker.expire_missing(now)
         if not expired.removed_track_ids:
@@ -795,10 +854,12 @@ class LiveController:
         if isinstance(error, TranslationProtocolError) and len(rebound_batch.items) > 1:
             midpoint = len(rebound_batch.items) // 2
             slices = (slice(0, midpoint), slice(midpoint, None))
-            for item_slice in slices:
+            for child_index, item_slice in enumerate(slices):
                 self._schedule_translation_retry(
                     TranslationBatch(rebound_batch.items[item_slice]),
                     context=submission.context,
+                    order_group=submission.order_group,
+                    order_path=submission.order_path + (child_index,),
                     pipeline_started_at=submission.pipeline_started_at,
                     first_recognized_at=submission.first_recognized_at,
                     source_bounds=rebound_bounds[item_slice],
@@ -815,10 +876,12 @@ class LiveController:
         ):
             midpoint = len(rebound_batch.items) // 2
             slices = (slice(0, midpoint), slice(midpoint, None))
-            for item_slice in slices:
+            for child_index, item_slice in enumerate(slices):
                 self._schedule_translation_retry(
                     TranslationBatch(rebound_batch.items[item_slice]),
                     context=submission.context,
+                    order_group=submission.order_group,
+                    order_path=submission.order_path + (child_index,),
                     pipeline_started_at=submission.pipeline_started_at,
                     first_recognized_at=submission.first_recognized_at,
                     source_bounds=rebound_bounds[item_slice],
@@ -835,6 +898,8 @@ class LiveController:
         self._schedule_translation_retry(
             rebound_batch,
             context=submission.context,
+            order_group=submission.order_group,
+            order_path=submission.order_path,
             pipeline_started_at=submission.pipeline_started_at,
             first_recognized_at=submission.first_recognized_at,
             source_bounds=rebound_bounds,
@@ -848,6 +913,8 @@ class LiveController:
         batch: TranslationBatch,
         *,
         context: tuple[ContextPair, ...],
+        order_group: int,
+        order_path: tuple[int, ...],
         pipeline_started_at: float,
         first_recognized_at: float,
         source_bounds: tuple[Bounds | None, ...],
@@ -858,6 +925,8 @@ class LiveController:
             _PendingTranslationRetry(
                 batch,
                 context,
+                order_group,
+                order_path,
                 time.monotonic() + delay_seconds,
                 pipeline_started_at,
                 first_recognized_at,
@@ -889,6 +958,8 @@ class LiveController:
             self._submit_translation_batch(
                 batch,
                 context=retry.context,
+                order_group=retry.order_group,
+                order_path=retry.order_path,
                 pipeline_started_at=retry.pipeline_started_at,
                 first_recognized_at=retry.first_recognized_at,
                 source_bounds=source_bounds,

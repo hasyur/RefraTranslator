@@ -1,4 +1,5 @@
 import os
+import threading
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -459,6 +460,77 @@ def _two_visible_sources(controller: LiveController):
         now=1.0,
     )
     return update.stable_sources
+
+
+def test_concurrent_batches_publish_in_top_to_bottom_order(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-1.8b",
+            max_concurrency=2,
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0, max_batch_size=1),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    update = controller._tracker.observe(
+        (
+            OcrText("下方。", 0.99, ((10, 60), (150, 60), (150, 90), (10, 90))),
+            OcrText("上方。", 0.99, ((10, 10), (150, 10), (150, 40), (10, 40))),
+        ),
+        now=1.0,
+    )
+    release_top = threading.Event()
+    bottom_completed = threading.Event()
+
+    def translate(batch, context):
+        del context
+        if batch.items[0].text == "上方。":
+            release_top.wait(timeout=5)
+        else:
+            bottom_completed.set()
+        return _successful_worker_result(batch)
+
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
+    # Deliberately pass the sources in reverse to verify the runtime does not
+    # depend on PaddleOCR's result order.
+    controller._submit_translations(tuple(reversed(update.stable_sources)))
+    futures_by_text = {
+        submission.batch.items[0].text: future
+        for future, submission in controller._translation_futures.items()
+    }
+
+    try:
+        assert bottom_completed.wait(timeout=2)
+        futures_by_text["下方。"].result(timeout=2)
+        assert not futures_by_text["上方。"].done()
+
+        controller._collect_translations()
+        assert all(
+            track.translated_text is None
+            for track in controller._tracker.visible_tracks
+        )
+        assert tuple(controller._context) == ()
+
+        release_top.set()
+        futures_by_text["上方。"].result(timeout=2)
+        controller._collect_translations()
+
+        assert [
+            track.translated_text for track in controller._tracker.visible_tracks
+        ] == ["译文：上方。", "译文：下方。"]
+        assert [pair.source for pair in controller._context] == ["上方。", "下方。"]
+    finally:
+        release_top.set()
+        controller.close()
 
 
 def test_protocol_failure_splits_batch_and_recovers_every_visible_text(
