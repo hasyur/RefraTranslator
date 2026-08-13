@@ -76,6 +76,9 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.max_concurrency_spin.value() == 2
     assert window.ocr_device_combo.currentData() == "cpu"
     assert window.ocr_filter_checkbox.isChecked()
+    assert window.settle_rescan_spin.value() == 500
+    assert window.idle_rescan_spin.value() == 2000
+    assert window.ocr_cooldown_spin.value() == 0
     assert window._current_region() == (100, 200, 800, 300)
     assert window._glossary_editor.pairs() == (("仕事", "委托"),)
     assert window._correction_editor.pairs() == (("待て。", "等等。"),)
@@ -131,6 +134,9 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     window.server_url_combo.setCurrentText("http://10.20.30.40:9000/v1")
     window.model_combo.setCurrentText("alternate-model")
     window.max_concurrency_spin.setValue(6)
+    window.settle_rescan_spin.setValue(800)
+    window.idle_rescan_spin.setValue(4000)
+    window.ocr_cooldown_spin.setValue(100)
 
     window._start_live()
 
@@ -149,6 +155,9 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.translation.model == "alternate-model"
     assert saved.translation.max_concurrency == 6
     assert saved.ocr.device == "cpu"
+    assert saved.live.settle_rescan_ms == 800
+    assert saved.live.idle_rescan_ms == 4000
+    assert saved.live.ocr_cooldown_ms == 100
     window.close()
     app.processEvents()
 
@@ -248,6 +257,34 @@ def test_launcher_saves_and_restores_ocr_filter_switch(tmp_path: Path) -> None:
 
     restored = LauncherWindow(config_path)
     assert not restored.ocr_filter_checkbox.isChecked()
+    restored.close()
+    app.processEvents()
+
+
+def test_launcher_saves_and_restores_live_ocr_timings(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path)
+    window.settle_rescan_spin.setValue(750)
+    window.idle_rescan_spin.setValue(3500)
+    window.ocr_cooldown_spin.setValue(125)
+
+    assert window._save_translation_settings(announce=False)
+    saved = load_config(config_path)
+    assert saved.live.settle_rescan_ms == 750
+    assert saved.live.idle_rescan_ms == 3500
+    assert saved.live.ocr_cooldown_ms == 125
+    assert "补扫 750 ms" in window.service_status_label.text()
+    assert "兜底 3500 ms" in window.service_status_label.text()
+    assert "冷却 125 ms" in window.service_status_label.text()
+    window.close()
+    app.processEvents()
+
+    restored = LauncherWindow(config_path)
+    assert restored.settle_rescan_spin.value() == 750
+    assert restored.idle_rescan_spin.value() == 3500
+    assert restored.ocr_cooldown_spin.value() == 125
     restored.close()
     app.processEvents()
 

@@ -235,6 +235,10 @@ _TRANSLATION_VALUE_RE = re.compile(
 _OCR_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>device|text_filter_enabled)[ \t]*="
 )
+_LIVE_VALUE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<key>ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms)"
+    r"[ \t]*="
+)
 
 
 def save_translation_selection(
@@ -251,6 +255,9 @@ def save_translation_selection(
         max_concurrency=None,
         ocr_device=None,
         ocr_text_filter_enabled=None,
+        ocr_cooldown_ms=None,
+        settle_rescan_ms=None,
+        idle_rescan_ms=None,
     )
 
 
@@ -262,8 +269,11 @@ def save_runtime_selection(
     ocr_device: str,
     max_concurrency: int | None = None,
     ocr_text_filter_enabled: bool | None = None,
+    ocr_cooldown_ms: int | None = None,
+    settle_rescan_ms: int | None = None,
+    idle_rescan_ms: int | None = None,
 ) -> AppConfig:
-    """Atomically update the launcher-owned API, concurrency and OCR selections."""
+    """Atomically update launcher-owned translation, OCR and rescan settings."""
     return _save_selected_values(
         path,
         base_url=base_url,
@@ -271,6 +281,9 @@ def save_runtime_selection(
         max_concurrency=max_concurrency,
         ocr_device=ocr_device,
         ocr_text_filter_enabled=ocr_text_filter_enabled,
+        ocr_cooldown_ms=ocr_cooldown_ms,
+        settle_rescan_ms=settle_rescan_ms,
+        idle_rescan_ms=idle_rescan_ms,
     )
 
 
@@ -282,6 +295,9 @@ def _save_selected_values(
     max_concurrency: int | None,
     ocr_device: str | None,
     ocr_text_filter_enabled: bool | None,
+    ocr_cooldown_ms: int | None,
+    settle_rescan_ms: int | None,
+    idle_rescan_ms: int | None,
 ) -> AppConfig:
     config_path = Path(path).resolve()
     current = load_config(config_path)
@@ -304,9 +320,28 @@ def _save_selected_values(
             else ocr_text_filter_enabled
         ),
     )
+    candidate_live = replace(
+        current.live,
+        ocr_cooldown_ms=(
+            current.live.ocr_cooldown_ms
+            if ocr_cooldown_ms is None
+            else ocr_cooldown_ms
+        ),
+        settle_rescan_ms=(
+            current.live.settle_rescan_ms
+            if settle_rescan_ms is None
+            else settle_rescan_ms
+        ),
+        idle_rescan_ms=(
+            current.live.idle_rescan_ms
+            if idle_rescan_ms is None
+            else idle_rescan_ms
+        ),
+    )
     if (
         candidate_translation == current.translation
         and candidate_ocr == current.ocr
+        and candidate_live == current.live
     ):
         return current
 
@@ -359,6 +394,29 @@ def _save_selected_values(
             text_filter_enabled=(
                 candidate_ocr.text_filter_enabled
                 if ocr_text_filter_enabled is not None
+                else None
+            ),
+        )
+
+    if any(
+        value is not None
+        for value in (ocr_cooldown_ms, settle_rescan_ms, idle_rescan_ms)
+    ):
+        _upsert_live_values(
+            lines,
+            ocr_cooldown_ms=(
+                candidate_live.ocr_cooldown_ms
+                if ocr_cooldown_ms is not None
+                else None
+            ),
+            settle_rescan_ms=(
+                candidate_live.settle_rescan_ms
+                if settle_rescan_ms is not None
+                else None
+            ),
+            idle_rescan_ms=(
+                candidate_live.idle_rescan_ms
+                if idle_rescan_ms is not None
                 else None
             ),
         )
@@ -459,3 +517,63 @@ def _upsert_ocr_values(
             f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}",
         )
         ocr_end_index += 1
+
+
+def _upsert_live_values(
+    lines: list[str],
+    *,
+    ocr_cooldown_ms: int | None,
+    settle_rescan_ms: int | None,
+    idle_rescan_ms: int | None,
+) -> None:
+    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+    values = {
+        key: value
+        for key, value in (
+            ("ocr_cooldown_ms", ocr_cooldown_ms),
+            ("settle_rescan_ms", settle_rescan_ms),
+            ("idle_rescan_ms", idle_rescan_ms),
+        )
+        if value is not None
+    }
+    current_section: str | None = None
+    live_header_index: int | None = None
+    live_end_index = len(lines)
+    replaced_keys: set[str] = set()
+    for index, line in enumerate(lines):
+        body = line.rstrip("\r\n")
+        section_match = _TOML_SECTION_RE.fullmatch(body)
+        if section_match is not None:
+            if current_section == "live" and live_end_index == len(lines):
+                live_end_index = index
+            current_section = section_match.group(1).strip()
+            if current_section == "live":
+                live_header_index = index
+            continue
+        if current_section != "live":
+            continue
+        value_match = _LIVE_VALUE_RE.match(body)
+        if value_match is None or value_match.group("key") not in values:
+            continue
+        key = value_match.group("key")
+        ending = line[len(body) :]
+        lines[index] = f'{value_match.group("indent")}{key} = {values[key]}{ending}'
+        replaced_keys.add(key)
+
+    missing_keys = tuple(key for key in values if key not in replaced_keys)
+    if not missing_keys:
+        return
+    if live_header_index is None:
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            lines[-1] += newline
+        if lines and lines[-1].strip():
+            lines.append(newline)
+        lines.append(f"[live]{newline}")
+        lines.extend(f"{key} = {values[key]}{newline}" for key in missing_keys)
+        return
+
+    if live_end_index > 0 and not lines[live_end_index - 1].endswith(("\n", "\r")):
+        lines[live_end_index - 1] += newline
+    for key in missing_keys:
+        lines.insert(live_end_index, f"{key} = {values[key]}{newline}")
+        live_end_index += 1

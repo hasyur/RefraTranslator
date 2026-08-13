@@ -519,6 +519,17 @@ def test_concurrent_batches_publish_in_top_to_bottom_order(monkeypatch) -> None:
             for track in controller._tracker.visible_tracks
         )
         assert tuple(controller._context) == ()
+        assert [pair.source for pair in controller._context_snapshot()] == ["下方。"]
+
+        controller._submit_translations(
+            (SourceText("live-zone-1", "follow-up", 1, "后续。"),)
+        )
+        follow_up = next(
+            submission
+            for submission in controller._translation_futures.values()
+            if submission.batch.items[0].text == "后续。"
+        )
+        assert [pair.source for pair in follow_up.context] == ["下方。"]
 
         release_top.set()
         futures_by_text["上方。"].result(timeout=2)
@@ -528,6 +539,7 @@ def test_concurrent_batches_publish_in_top_to_bottom_order(monkeypatch) -> None:
             track.translated_text for track in controller._tracker.visible_tracks
         ] == ["译文：上方。", "译文：下方。"]
         assert [pair.source for pair in controller._context] == ["上方。", "下方。"]
+        assert controller._early_context == {}
     finally:
         release_top.set()
         controller.close()

@@ -414,6 +414,45 @@ class LauncherWindow(QMainWindow):
             "OCR 置信度阈值仍然有效。"
         )
         service_form.addRow("OCR 过滤", self.ocr_filter_checkbox)
+
+        self.settle_rescan_spin = QSpinBox()
+        self.settle_rescan_spin.setRange(0, 60_000)
+        self.settle_rescan_spin.setValue(self._config.live.settle_rescan_ms)
+        self.settle_rescan_spin.setSingleStep(50)
+        self.settle_rescan_spin.setAccelerated(True)
+        self.settle_rescan_spin.setSuffix(" ms")
+        self.settle_rescan_spin.setSpecialValueText("关闭")
+        self.settle_rescan_spin.setToolTip(
+            "最后一次检测到画面变化后，等待这段时间自动补扫一次；"
+            "用于补全字幕绘制中途的首轮 OCR，0 表示关闭。"
+        )
+        service_form.addRow("画面稳定补扫", self.settle_rescan_spin)
+
+        self.idle_rescan_spin = QSpinBox()
+        self.idle_rescan_spin.setRange(0, 60_000)
+        self.idle_rescan_spin.setValue(self._config.live.idle_rescan_ms)
+        self.idle_rescan_spin.setSingleStep(100)
+        self.idle_rescan_spin.setAccelerated(True)
+        self.idle_rescan_spin.setSuffix(" ms")
+        self.idle_rescan_spin.setSpecialValueText("关闭")
+        self.idle_rescan_spin.setToolTip(
+            "画面没有再次触发变化检测时，按此间隔兜底执行 OCR；"
+            "增大可降低静止画面负载，0 表示关闭。"
+        )
+        service_form.addRow("静止画面兜底", self.idle_rescan_spin)
+
+        self.ocr_cooldown_spin = QSpinBox()
+        self.ocr_cooldown_spin.setRange(0, 10_000)
+        self.ocr_cooldown_spin.setValue(self._config.live.ocr_cooldown_ms)
+        self.ocr_cooldown_spin.setSingleStep(50)
+        self.ocr_cooldown_spin.setAccelerated(True)
+        self.ocr_cooldown_spin.setSuffix(" ms")
+        self.ocr_cooldown_spin.setSpecialValueText("无冷却")
+        self.ocr_cooldown_spin.setToolTip(
+            "每次 OCR 完成后至少等待这段时间才启动下一轮；"
+            "增大可降低连续变化时的负载，但可能增加延迟或漏掉短字幕。"
+        )
+        service_form.addRow("OCR 冷却", self.ocr_cooldown_spin)
         layout.addLayout(service_form)
 
         service_actions = QHBoxLayout()
@@ -422,12 +461,15 @@ class LauncherWindow(QMainWindow):
             f"{self._config.translation.normalized_base_url} · "
             f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device} · "
-            f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'}；"
+            f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
+            f"补扫 {self._config.live.settle_rescan_ms} ms · "
+            f"兜底 {self._config.live.idle_rescan_ms} ms · "
+            f"冷却 {self._config.live.ocr_cooldown_ms} ms；"
             "可手动填写，读取列表不会自动保存。"
         )
         self.service_status_label.setObjectName("secondaryText")
         self.service_status_label.setWordWrap(True)
-        save_service_button = QPushButton("保存服务与 OCR 设置")
+        save_service_button = QPushButton("保存运行设置")
         save_service_button.clicked.connect(
             lambda: self._save_translation_settings()
         )
@@ -513,6 +555,14 @@ class LauncherWindow(QMainWindow):
             self._config.ocr,
             device=device,
             text_filter_enabled=self.ocr_filter_checkbox.isChecked(),
+        )
+
+    def _live_candidate(self):
+        return replace(
+            self._config.live,
+            settle_rescan_ms=self.settle_rescan_spin.value(),
+            idle_rescan_ms=self.idle_rescan_spin.value(),
+            ocr_cooldown_ms=self.ocr_cooldown_spin.value(),
         )
 
     def _refresh_models(self) -> None:
@@ -609,6 +659,7 @@ class LauncherWindow(QMainWindow):
         try:
             translation = self._translation_candidate()
             ocr = self._ocr_candidate()
+            live = self._live_candidate()
             self._config = save_runtime_selection(
                 self._config_path,
                 base_url=translation.base_url,
@@ -616,9 +667,12 @@ class LauncherWindow(QMainWindow):
                 ocr_device=ocr.device,
                 max_concurrency=translation.max_concurrency,
                 ocr_text_filter_enabled=ocr.text_filter_enabled,
+                settle_rescan_ms=live.settle_rescan_ms,
+                idle_rescan_ms=live.idle_rescan_ms,
+                ocr_cooldown_ms=live.ocr_cooldown_ms,
             )
         except (ConfigError, OSError, RuntimeError, ValueError) as exc:
-            self._show_error("保存服务与 OCR 设置失败", exc)
+            self._show_error("保存运行设置失败", exc)
             return False
         self.server_url_combo.setCurrentText(self._config.translation.base_url)
         self.model_combo.setCurrentText(self._config.translation.model)
@@ -629,16 +683,22 @@ class LauncherWindow(QMainWindow):
         if device_index >= 0:
             self.ocr_device_combo.setCurrentIndex(device_index)
         self.ocr_filter_checkbox.setChecked(self._config.ocr.text_filter_enabled)
+        self.settle_rescan_spin.setValue(self._config.live.settle_rescan_ms)
+        self.idle_rescan_spin.setValue(self._config.live.idle_rescan_ms)
+        self.ocr_cooldown_spin.setValue(self._config.live.ocr_cooldown_ms)
         self.service_status_label.setText(
             f"当前：{self._config.translation.model} · "
             f"{self._config.translation.normalized_base_url} · "
             f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device} · "
-            f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'}"
+            f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
+            f"补扫 {self._config.live.settle_rescan_ms} ms · "
+            f"兜底 {self._config.live.idle_rescan_ms} ms · "
+            f"冷却 {self._config.live.ocr_cooldown_ms} ms"
         )
         if announce:
             self.statusBar().showMessage(
-                "服务与 OCR 设置已保存；新启动的实时翻译将使用该设置",
+                "运行设置已保存；新启动的实时翻译将使用该设置",
                 6000,
             )
         return True

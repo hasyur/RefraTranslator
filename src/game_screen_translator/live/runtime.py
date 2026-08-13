@@ -132,6 +132,12 @@ class _TranslationWorkerResult:
     llm_seconds: float | None
 
 
+@dataclass(frozen=True, slots=True)
+class _CompletedTranslation:
+    submission: _TranslationSubmission
+    cached_outcome: CachedTranslationOutcome
+
+
 def prefer_game_process_priority() -> bool:
     """Lower only this translator process so the game wins CPU contention."""
     if os.name != "nt":
@@ -294,7 +300,14 @@ class LiveController:
             Future[_TranslationWorkerResult], _TranslationSubmission
         ] = {}
         self._translation_retries: list[_PendingTranslationRetry] = []
+        self._completed_translations: dict[
+            tuple[int, tuple[int, ...]], _CompletedTranslation
+        ] = {}
+        self._early_context: dict[
+            tuple[int, tuple[int, ...]], tuple[ContextPair, ...]
+        ] = {}
         self._next_translation_order_group = 0
+        self._latest_context_order_group = -1
         self._pending_ocr_frame: np.ndarray | None = None
         self._pending_ocr_triggered_at: float | None = None
         self._latest_frame: np.ndarray | None = None
@@ -544,7 +557,7 @@ class LiveController:
 
     def _submit_translations(self, sources: Sequence[SourceText]) -> None:
         batch_size = self._config.live.max_batch_size
-        context = tuple(self._context)
+        context = self._context_snapshot()
         visible_by_key = {
             (track.track_id, track.revision): track
             for track in self._tracker.visible_tracks
@@ -602,6 +615,16 @@ class LiveController:
                 source_bounds=source_bounds,
                 attempt=1,
             )
+
+    def _context_snapshot(self) -> tuple[ContextPair, ...]:
+        limit = self._config.live.context_pairs
+        if limit <= 0:
+            return ()
+        combined = list(self._context)
+        for (order_group, _), pairs in self._early_context.items():
+            if order_group >= self._latest_context_order_group:
+                combined.extend(pairs)
+        return tuple(combined[-limit:])
 
     def _submit_translation_batch(
         self,
@@ -678,10 +701,9 @@ class LiveController:
 
     def _collect_translations(self) -> None:
         self._cancel_obsolete_translation_futures()
-        while True:
-            future = self._next_publishable_translation_future()
-            if future is None:
-                break
+        for future in tuple(self._translation_futures):
+            if not future.done():
+                continue
             submission = self._translation_futures.pop(future)
             try:
                 worker_result = future.result()
@@ -722,6 +744,32 @@ class LiveController:
                     f"总计 {total_seconds:.3f}s · 批次 {len(submission.batch.items)} 条"
                 )
 
+            order_key = (submission.order_group, submission.order_path)
+            accepted_with_origins, _ = self._accept_current_results(
+                submission,
+                cached_outcome,
+            )
+            self._early_context[order_key] = tuple(
+                ContextPair(result.source.text, result.translated_text)
+                for result, _ in accepted_with_origins
+            )
+            self._completed_translations[order_key] = _CompletedTranslation(
+                submission,
+                cached_outcome,
+            )
+
+        self._publish_ready_translations()
+
+    def _publish_ready_translations(self) -> None:
+        scene_changed = False
+        while True:
+            order_key = self._next_publishable_translation_key()
+            if order_key is None:
+                break
+            completed = self._completed_translations.pop(order_key)
+            self._early_context.pop(order_key, None)
+            submission = completed.submission
+            cached_outcome = completed.cached_outcome
             outcome = cached_outcome.outcome
             accepted_with_origins, reattached = self._accept_current_results(
                 submission,
@@ -735,8 +783,12 @@ class LiveController:
             )
             self._reattached_result_count += reattached
             self._tracker.apply_translations(accepted)
-            for result in accepted:
-                self._context.append(ContextPair(result.source.text, result.translated_text))
+            if accepted and submission.order_group >= self._latest_context_order_group:
+                for result in accepted:
+                    self._context.append(
+                        ContextPair(result.source.text, result.translated_text)
+                    )
+                self._latest_context_order_group = submission.order_group
             for _, origin in accepted_with_origins:
                 if origin == "manual":
                     self._manual_hit_count += 1
@@ -768,19 +820,20 @@ class LiveController:
                 self._control.set_status(
                     "实时翻译运行中",
                     f"已覆盖 {self._translated_count} 条 · "
-                    f"当前上下文 {len(self._context)} 条{profile_label}",
+                    f"当前上下文 {len(self._context_snapshot())} 条{profile_label}",
                 )
-            if self._latest_frame is not None:
-                self._overlay.set_scene(self._latest_frame, self._tracker.visible_tracks)
+                scene_changed = True
+        if scene_changed and self._latest_frame is not None:
+            self._overlay.set_scene(self._latest_frame, self._tracker.visible_tracks)
 
-    def _next_publishable_translation_future(
+    def _next_publishable_translation_key(
         self,
-    ) -> Future[_TranslationWorkerResult] | None:
-        """Return a completed batch whose earlier screen batches are resolved.
+    ) -> tuple[int, tuple[int, ...]] | None:
+        """Return a buffered result whose earlier screen batches are resolved.
 
-        Requests still execute concurrently.  Publication is ordered only
-        inside one OCR update, so a slow stale update cannot block text found
-        by a later OCR pass.
+        Completed results become temporary prompt context immediately, while
+        publication remains ordered only inside one OCR update.  A slow stale
+        update therefore cannot block text found by a later OCR pass.
         """
         first_path_by_group: dict[int, tuple[int, ...]] = {}
         for submission in self._translation_futures.values():
@@ -791,17 +844,19 @@ class LiveController:
             current = first_path_by_group.get(retry.order_group)
             if current is None or retry.order_path < current:
                 first_path_by_group[retry.order_group] = retry.order_path
+        for order_group, order_path in self._completed_translations:
+            current = first_path_by_group.get(order_group)
+            if current is None or order_path < current:
+                first_path_by_group[order_group] = order_path
 
         candidates = [
-            (submission.order_group, future)
-            for future, submission in self._translation_futures.items()
-            if future.done()
-            and submission.order_path
-            == first_path_by_group.get(submission.order_group)
+            order_key
+            for order_key in self._completed_translations
+            if order_key[1] == first_path_by_group.get(order_key[0])
         ]
         if not candidates:
             return None
-        return min(candidates, key=lambda item: item[0])[1]
+        return min(candidates)
 
     def _expire_missing_tracks(self, now: float) -> None:
         expired = self._tracker.expire_missing(now)

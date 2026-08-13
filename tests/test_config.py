@@ -189,6 +189,9 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         ocr_device="gpu:1",
         max_concurrency=7,
         ocr_text_filter_enabled=False,
+        ocr_cooldown_ms=125,
+        settle_rescan_ms=750,
+        idle_rescan_ms=3500,
     )
 
     assert saved.translation.base_url == "http://gpu.test/v1"
@@ -197,11 +200,17 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.ocr.device == "gpu:1"
     assert saved.ocr.text_filter_enabled is False
     assert saved.live.capture_fps == 12
+    assert saved.live.ocr_cooldown_ms == 125
+    assert saved.live.settle_rescan_ms == 750
+    assert saved.live.idle_rescan_ms == 3500
     text = path.read_text(encoding="utf-8")
     assert "[ocr]" in text
     assert 'device = "gpu:1"' in text
     assert "text_filter_enabled = false" in text
     assert "max_concurrency = 7" in text
+    assert "ocr_cooldown_ms = 125" in text
+    assert "settle_rescan_ms = 750" in text
+    assert "idle_rescan_ms = 3500" in text
 
     saved = save_runtime_selection(
         path,
@@ -211,6 +220,9 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     )
     assert saved.ocr.device == "cpu"
     assert saved.ocr.text_filter_enabled is False
+    assert saved.live.ocr_cooldown_ms == 125
+    assert saved.live.settle_rescan_ms == 750
+    assert saved.live.idle_rescan_ms == 3500
     assert path.read_text(encoding="utf-8").count("device =") == 1
     assert path.read_text(encoding="utf-8").count("text_filter_enabled =") == 1
 
@@ -225,6 +237,42 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     text = path.read_text(encoding="utf-8")
     assert "text_filter_enabled = true" in text
     assert text.count("text_filter_enabled =") == 1
+
+
+def test_save_runtime_selection_updates_existing_live_timing_values(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(
+        path,
+        """
+[live]
+ocr_cooldown_ms = 350
+settle_rescan_ms = 500
+idle_rescan_ms = 2000
+""",
+    )
+
+    saved = save_runtime_selection(
+        path,
+        base_url="http://127.0.0.1:1234/v1",
+        model="hy-mt1.5-7b",
+        ocr_device="cpu",
+        ocr_cooldown_ms=0,
+        settle_rescan_ms=900,
+        idle_rescan_ms=5000,
+    )
+
+    assert saved.live.ocr_cooldown_ms == 0
+    assert saved.live.settle_rescan_ms == 900
+    assert saved.live.idle_rescan_ms == 5000
+    text = path.read_text(encoding="utf-8")
+    assert "ocr_cooldown_ms = 0" in text
+    assert "settle_rescan_ms = 900" in text
+    assert "idle_rescan_ms = 5000" in text
+    assert text.count("ocr_cooldown_ms =") == 1
+    assert text.count("settle_rescan_ms =") == 1
+    assert text.count("idle_rescan_ms =") == 1
 
 
 def test_save_runtime_selection_adds_device_to_existing_ocr_section(
