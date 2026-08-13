@@ -140,7 +140,7 @@ target = "夜之城"
 .\.venv\Scripts\python.exe -m game_screen_translator --config config.toml live --profile cyberpunk2077 --region 100,700,1800,350
 ```
 
-运行时右上角会出现一个不会被采集的控制窗口；点击“停止翻译”即可退出。DXGI 初始化失败时会自动尝试 WinRT。`--monitor 1` 可选择第二个显示器。
+运行时右上角会出现一个不会被采集的控制窗口；点击“缩小”后会隐藏状态、过滤和延迟信息，仅保留紧凑的“恢复”和“关闭翻译”按钮，点击“恢复”可重新展开。DXGI 初始化失败时会自动尝试 WinRT。`--monitor 1` 可选择第二个显示器。
 
 控制窗口会持续显示分阶段延迟的最近值和本次运行峰值：
 

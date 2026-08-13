@@ -57,6 +57,7 @@ try:
     from PySide6.QtCore import QTimer, Qt
     from PySide6.QtWidgets import (
         QApplication,
+        QHBoxLayout,
         QLabel,
         QPushButton,
         QVBoxLayout,
@@ -167,14 +168,30 @@ class LiveControlWindow(QWidget):
         self._filter = QLabel("文字过滤：等待首个 OCR 样本……")
         self._filter.setWordWrap(True)
         self._filter.setStyleSheet("color: #777;")
-        stop_button = QPushButton("停止翻译")
-        stop_button.clicked.connect(stop_callback)
-        layout = QVBoxLayout(self)
-        layout.addWidget(self._status)
-        layout.addWidget(self._detail)
-        layout.addWidget(self._filter)
-        layout.addWidget(self._latency)
-        layout.addWidget(stop_button)
+        self._shrink_button = QPushButton("缩小")
+        self._shrink_button.setToolTip("隐藏运行信息，只保留恢复和关闭按钮")
+        self._shrink_button.clicked.connect(self.collapse)
+        self._restore_button = QPushButton("恢复")
+        self._restore_button.setToolTip("恢复显示运行状态、过滤和延迟信息")
+        self._restore_button.clicked.connect(self.restore)
+        self._restore_button.hide()
+        self._stop_button = QPushButton("关闭翻译")
+        self._stop_button.clicked.connect(stop_callback)
+        self._diagnostic_widgets = (
+            self._status,
+            self._detail,
+            self._filter,
+            self._latency,
+        )
+        self._layout = QVBoxLayout(self)
+        for widget in self._diagnostic_widgets:
+            self._layout.addWidget(widget)
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        actions.addWidget(self._shrink_button)
+        actions.addWidget(self._restore_button)
+        actions.addWidget(self._stop_button)
+        self._layout.addLayout(actions)
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt callback name
         super().showEvent(event)
@@ -190,6 +207,41 @@ class LiveControlWindow(QWidget):
 
     def set_filter_status(self, summary: str) -> None:
         self._filter.setText(summary)
+
+    def collapse(self) -> None:
+        """Compact the control window while keeping restore and stop actions."""
+        if self._shrink_button.isHidden():
+            return
+        right = self.geometry().right()
+        top = self.geometry().top()
+        for widget in self._diagnostic_widgets:
+            widget.hide()
+        self._shrink_button.hide()
+        self._restore_button.show()
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16_777_215, 16_777_215)
+        self._layout.invalidate()
+        self._layout.activate()
+        self.setFixedSize(self.sizeHint())
+        self.move(right - self.width() + 1, top)
+
+    def restore(self) -> None:
+        """Restore the complete runtime information without moving the right edge."""
+        if self._restore_button.isHidden():
+            return
+        right = self.geometry().right()
+        top = self.geometry().top()
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16_777_215, 16_777_215)
+        self.setFixedWidth(520)
+        for widget in self._diagnostic_widgets:
+            widget.show()
+        self._restore_button.hide()
+        self._shrink_button.show()
+        self._layout.invalidate()
+        self._layout.activate()
+        self.adjustSize()
+        self.move(right - self.width() + 1, top)
 
 
 class LiveController:
