@@ -120,13 +120,13 @@ class LiveConfig:
     capture_fps: int = 15
     change_poll_fps: int = 6
     change_threshold: float = 3.0
-    stable_observations: int = 2
-    stable_ms: int = 150
+    stable_observations: int = 1
+    stable_ms: int = 0
     clear_after_ms: int = 900
     context_pairs: int = 8
     max_batch_size: int = 8
     capture_backend: str = "dxgi"
-    ocr_cooldown_ms: int = 350
+    ocr_cooldown_ms: int = 0
 
     def __post_init__(self) -> None:
         if self.left < 0 or self.top < 0:

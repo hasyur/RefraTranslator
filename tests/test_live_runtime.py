@@ -11,7 +11,15 @@ from game_screen_translator.live import runtime as live_runtime
 from game_screen_translator.live.runtime import LiveController
 from game_screen_translator.ocr.types import OcrText
 from game_screen_translator.profiles import create_game_profile
-from game_screen_translator.domain import SourceText, TranslationBatch
+from game_screen_translator.domain import (
+    SourceText,
+    TranslationBatch,
+    TranslationResult,
+)
+from game_screen_translator.translation.cached import CachedTranslationOutcome
+from game_screen_translator.translation.hy_mt import TranslationProtocolError
+from game_screen_translator.translation.service import TranslationOutcome
+from game_screen_translator.translation.transport import TranslationTransportError
 
 
 class FakeCapture:
@@ -261,4 +269,186 @@ def test_live_latency_display_covers_ocr_queue_and_cached_translation(
     assert "LLM 缓存命中" in control.latency
     assert "总计" in control.latency
     assert control.detail.startswith("已覆盖 1 条")
+    controller.close()
+
+
+def _successful_worker_result(batch: TranslationBatch):
+    results = tuple(
+        TranslationResult(source, f"译文：{source.text}") for source in batch.items
+    )
+    return live_runtime._TranslationWorkerResult(
+        CachedTranslationOutcome(
+            TranslationOutcome(results, ()),
+            tuple("model" for _ in results),
+        ),
+        started_at=100.0,
+        completed_at=100.1,
+        llm_seconds=0.1,
+    )
+
+
+def _two_visible_sources(controller: LiveController):
+    update = controller._tracker.observe(
+        (
+            OcrText("待って。", 0.99, ((10, 10), (150, 10), (150, 40), (10, 40))),
+            OcrText("急げ。", 0.99, ((10, 60), (150, 60), (150, 90), (10, 90))),
+        ),
+        now=1.0,
+    )
+    return update.stable_sources
+
+
+def test_protocol_failure_splits_batch_and_recovers_every_visible_text(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-1.8b",
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0, max_batch_size=8),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [100.0]
+    calls: list[tuple[str, ...]] = []
+
+    def translate(batch, context):
+        calls.append(tuple(source.text for source in batch.items))
+        if len(batch.items) > 1:
+            raise TranslationProtocolError("缺少 id")
+        return _successful_worker_result(batch)
+
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
+    controller._submit_translations(_two_visible_sources(controller))
+    next(iter(controller._translation_futures)).exception(timeout=2)
+
+    controller._collect_translations()
+
+    assert len(controller._translation_retries) == 2
+    assert [len(item.batch.items) for item in controller._translation_retries] == [1, 1]
+    clock[0] = 100.36
+    controller._submit_ready_translation_retries()
+    for future in tuple(controller._translation_futures):
+        future.result(timeout=2)
+    controller._collect_translations()
+
+    assert calls[0] == ("待って。", "急げ。")
+    assert set(calls[1:]) == {("待って。",), ("急げ。",)}
+    assert {track.translated_text for track in controller._tracker.visible_tracks} == {
+        "译文：待って。",
+        "译文：急げ。",
+    }
+    assert controller._translation_failure_count == 0
+    controller.close()
+
+
+def test_http_500_retries_same_batch_once_then_splits(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-1.8b",
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0, max_batch_size=8),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [200.0]
+    calls: list[int] = []
+
+    def translate(batch, context):
+        calls.append(len(batch.items))
+        if len(calls) <= 2:
+            raise TranslationTransportError("HTTP 500")
+        return _successful_worker_result(batch)
+
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
+    controller._submit_translations(_two_visible_sources(controller))
+    next(iter(controller._translation_futures)).exception(timeout=2)
+    controller._collect_translations()
+
+    assert len(controller._translation_retries) == 1
+    assert len(controller._translation_retries[0].batch.items) == 2
+    clock[0] = 200.36
+    controller._submit_ready_translation_retries()
+    next(iter(controller._translation_futures)).exception(timeout=2)
+    controller._collect_translations()
+
+    assert len(controller._translation_retries) == 2
+    assert [len(item.batch.items) for item in controller._translation_retries] == [1, 1]
+    clock[0] = 200.72
+    controller._submit_ready_translation_retries()
+    for future in tuple(controller._translation_futures):
+        future.result(timeout=2)
+    controller._collect_translations()
+
+    assert calls == [2, 2, 1, 1]
+    assert all(
+        track.translated_text is not None
+        for track in controller._tracker.visible_tracks
+    )
+    controller.close()
+
+
+def test_late_result_reattaches_when_same_text_moves_to_a_new_track(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-1.8b",
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0, clear_after_ms=0),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    monkeypatch.setattr(
+        controller,
+        "_translate_blocking_timed",
+        lambda batch, context: _successful_worker_result(batch),
+    )
+    old_update = controller._tracker.observe(
+        (OcrText("待って。", 0.99, ((10, 10), (150, 10), (150, 40), (10, 40))),),
+        now=1.0,
+    )
+    old_source = old_update.stable_sources[0]
+    controller._submit_translations((old_source,))
+    next(iter(controller._translation_futures)).result(timeout=2)
+
+    controller._tracker.observe((), now=2.0)
+    new_update = controller._tracker.observe(
+        (OcrText("待って。", 0.99, ((500, 200), (650, 200), (650, 230), (500, 230))),),
+        now=2.1,
+    )
+    assert new_update.stable_sources[0].track_id != old_source.track_id
+
+    controller._collect_translations()
+
+    assert controller._tracker.visible_tracks[0].translated_text == "译文：待って。"
+    assert controller._reattached_result_count == 1
+    assert controller._stale_result_count == 0
     controller.close()

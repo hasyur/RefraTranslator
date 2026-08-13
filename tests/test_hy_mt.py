@@ -78,6 +78,28 @@ def test_parser_repairs_only_missing_closing_id_quote() -> None:
     }
 
 
+def test_parser_accepts_plain_translation_for_single_item_only() -> None:
+    batch = TranslationBatch((SourceText("dialogue", "a", 1, "待って。"),))
+    wire_id = batch.items[0].wire_id
+
+    assert HyMtResponseParser().parse("等等。", (wire_id,)) == {wire_id: "等等。"}
+    assert HyMtResponseParser().parse("<target>等等。</target>", (wire_id,)) == {
+        wire_id: "等等。"
+    }
+
+    with pytest.raises(TranslationProtocolError, match="没有"):
+        HyMtResponseParser().parse("甲\n乙", ("first", "second"))
+
+
+def test_parser_accepts_single_sn_without_id() -> None:
+    batch = TranslationBatch((SourceText("dialogue", "a", 1, "待って。"),))
+    wire_id = batch.items[0].wire_id
+
+    assert HyMtResponseParser().parse("<sn>等等。</sn>", (wire_id,)) == {
+        wire_id: "等等。"
+    }
+
+
 @pytest.mark.parametrize(
     ("response_factory", "message"),
     [

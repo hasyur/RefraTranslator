@@ -52,6 +52,7 @@ class TrackedText:
     observations: int
     stable_emitted: bool = False
     translated_text: str | None = None
+    missing_since: float | None = None
 
     def source(self, zone_id: str) -> SourceText:
         return SourceText(zone_id, self.track_id, self.revision, self.text)
@@ -69,8 +70,8 @@ class StableTextTracker:
         self,
         zone_id: str,
         *,
-        stable_observations: int = 2,
-        stable_seconds: float = 0.15,
+        stable_observations: int = 1,
+        stable_seconds: float = 0.0,
         clear_after_seconds: float = 0.9,
     ) -> None:
         if not zone_id.strip():
@@ -110,14 +111,30 @@ class StableTextTracker:
         removed: list[str] = []
         for track_id in tuple(unmatched_tracks):
             track = self._tracks[track_id]
-            if now - track.last_seen >= self.clear_after_seconds:
+            missing_since = (
+                track.last_seen if track.missing_since is None else track.missing_since
+            )
+            if now - missing_since >= self.clear_after_seconds:
                 removed.append(track_id)
                 del self._tracks[track_id]
+            elif track.missing_since is None:
+                self._tracks[track_id] = replace(track, missing_since=now)
 
         return TrackerUpdate(tuple(stable_sources), self.visible_tracks, tuple(removed))
 
     def expire(self, now: float) -> TrackerUpdate:
         return self.observe((), now)
+
+    def expire_missing(self, now: float) -> TrackerUpdate:
+        removed: list[str] = []
+        for track_id, track in tuple(self._tracks.items()):
+            if (
+                track.missing_since is not None
+                and now - track.missing_since >= self.clear_after_seconds
+            ):
+                removed.append(track_id)
+                del self._tracks[track_id]
+        return TrackerUpdate((), self.visible_tracks, tuple(removed))
 
     def apply_translations(self, results: Iterable[TranslationResult]) -> tuple[TrackedText, ...]:
         for result in results:
@@ -156,6 +173,7 @@ class StableTextTracker:
                 bounds=observation.bounds,
                 last_seen=now,
                 observations=track.observations + 1,
+                missing_since=None,
             )
         return replace(
             track,
@@ -166,6 +184,7 @@ class StableTextTracker:
             first_seen=now,
             last_seen=now,
             observations=1,
+            missing_since=None,
             stable_emitted=False,
             translated_text=None,
         )

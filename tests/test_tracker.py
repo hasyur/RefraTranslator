@@ -84,6 +84,27 @@ def test_track_clears_only_after_an_empty_ocr_observation() -> None:
     assert tracker.visible_tracks == ()
 
 
+def test_timer_expires_only_tracks_already_missing_from_an_ocr_scan() -> None:
+    tracker = StableTextTracker(
+        "zone",
+        stable_observations=1,
+        stable_seconds=0,
+        clear_after_seconds=0.9,
+    )
+    tracker.observe((_ocr("残る"),), 1.0)
+
+    still_visible = tracker.expire_missing(10.0)
+    tracker.observe((_ocr("残る"),), 10.0)
+    tracker.observe((), 10.1)
+    waiting = tracker.expire_missing(10.5)
+    removed = tracker.expire_missing(11.01)
+
+    assert still_visible.removed_track_ids == ()
+    assert waiting.removed_track_ids == ()
+    assert len(removed.removed_track_ids) == 1
+    assert tracker.visible_tracks == ()
+
+
 def test_far_boxes_do_not_share_a_track() -> None:
     tracker = StableTextTracker(
         "zone",

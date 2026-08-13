@@ -83,7 +83,14 @@ class HyMtResponseParser:
         if len(set(expected)) != len(expected):
             raise ValueError("expected_ids 不能重复")
 
-        xml_text = self._extract_xml(response_text)
+        try:
+            xml_text = self._extract_xml(response_text)
+        except TranslationProtocolError:
+            if len(expected) == 1:
+                translated = self._plain_single_translation(response_text)
+                if translated:
+                    return {expected[0]: translated}
+            raise
         # HY-MT occasionally emits `<sn id="r1>` while keeping the exact ID.
         # Repair only that narrow syntax error; the exact ID-set validation
         # below still rejects changed, missing, duplicated or invented IDs.
@@ -93,11 +100,21 @@ class HyMtResponseParser:
         except ElementTree.ParseError as exc:
             raise TranslationProtocolError(f"模型返回了无效 XML：{exc}") from exc
 
+        sn_elements = tuple(
+            element
+            for element in root.iter()
+            if self._local_name(element.tag).lower() == "sn"
+        )
+        if not sn_elements and len(expected) == 1:
+            translated = "".join(root.itertext()).strip()
+            if translated:
+                return {expected[0]: translated}
+
         parsed: dict[str, str] = {}
-        for element in root.iter():
-            if self._local_name(element.tag).lower() != "sn":
-                continue
+        for element in sn_elements:
             wire_id = (element.attrib.get("id") or "").strip()
+            if not wire_id and len(expected) == 1 and len(sn_elements) == 1:
+                wire_id = expected[0]
             if not wire_id:
                 raise TranslationProtocolError("返回的 <sn> 缺少 id 属性")
             if wire_id in parsed:
@@ -144,3 +161,11 @@ class HyMtResponseParser:
             return "<target>" + "".join(fragments) + "</target>"
 
         raise TranslationProtocolError("模型返回中没有 <target> 或 <sn> 标签")
+
+    @staticmethod
+    def _plain_single_translation(response_text: str) -> str:
+        candidate = response_text.strip()
+        fenced = _CODE_FENCE_RE.match(candidate)
+        if fenced:
+            candidate = fenced.group(1).strip()
+        return candidate

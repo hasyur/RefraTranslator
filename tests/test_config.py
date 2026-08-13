@@ -43,10 +43,11 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.ocr.translate_latin is True
     assert config.ocr.translate_han_only is False
     assert config.live.capture_backend == "dxgi"
-    assert config.live.stable_observations == 2
+    assert config.live.stable_observations == 1
+    assert config.live.stable_ms == 0
     assert config.live.capture_fps == 15
     assert config.live.change_poll_fps == 6
-    assert config.live.ocr_cooldown_ms == 350
+    assert config.live.ocr_cooldown_ms == 0
     assert config.profiles.root_dir == "profiles"
 
 

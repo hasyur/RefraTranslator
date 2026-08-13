@@ -48,11 +48,11 @@ monitor_index = 0
 capture_fps = 15
 change_poll_fps = 6
 change_threshold = 3.0
-stable_observations = 2
-stable_ms = 150
+stable_observations = 1
+stable_ms = 0
 clear_after_ms = 900
 context_pairs = 8
 max_batch_size = 8
 capture_backend = "dxgi"
-# 每次 OCR 完成后的休息时间；增大可进一步降占用，但字幕响应会变慢。
-ocr_cooldown_ms = 350
+# 每次 OCR 完成后的额外休息时间；0 优先避免短字幕被跳过。
+ocr_cooldown_ms = 0
