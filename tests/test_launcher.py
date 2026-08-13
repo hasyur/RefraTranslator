@@ -75,6 +75,7 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.model_combo.currentText() == "hy-mt1.5-7b"
     assert window.max_concurrency_spin.value() == 2
     assert window.ocr_device_combo.currentData() == "cpu"
+    assert window.ocr_filter_checkbox.isChecked()
     assert window._current_region() == (100, 200, 800, 300)
     assert window._glossary_editor.pairs() == (("仕事", "委托"),)
     assert window._correction_editor.pairs() == (("待て。", "等等。"),)
@@ -228,6 +229,26 @@ def test_launcher_saves_selected_gpu_device(tmp_path: Path) -> None:
 
     assert load_config(config_path).ocr.device == "gpu:1"
     window.close()
+    app.processEvents()
+
+
+def test_launcher_saves_and_restores_ocr_filter_switch(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path)
+    assert window.ocr_filter_checkbox.isChecked()
+    window.ocr_filter_checkbox.setChecked(False)
+
+    assert window._save_translation_settings(announce=False)
+    assert load_config(config_path).ocr.text_filter_enabled is False
+    assert "过滤关" in window.service_status_label.text()
+    window.close()
+    app.processEvents()
+
+    restored = LauncherWindow(config_path)
+    assert not restored.ocr_filter_checkbox.isChecked()
+    restored.close()
     app.processEvents()
 
 

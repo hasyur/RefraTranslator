@@ -43,6 +43,16 @@ class FakeOcr:
         )
 
 
+class FakeEmptyOcr:
+    def recognize_frame(self, frame):
+        return ()
+
+
+class FakeFailingOcr:
+    def recognize_frame(self, frame):
+        raise RuntimeError("temporary OCR failure")
+
+
 class FakeNoisyOcr:
     def recognize_frame(self, frame):
         return (
@@ -246,6 +256,136 @@ def test_ocr_backlog_waits_for_cooldown_after_completion(monkeypatch) -> None:
     controller._tick()
     assert controller._ocr_future is not None
     controller._ocr_future.result(timeout=2)
+    controller.close()
+
+
+def test_live_controller_confirms_once_after_scene_settles(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(settle_rescan_ms=500, idle_rescan_ms=0),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeEmptyOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.1
+    controller._tick()
+    assert controller._ocr_scan_count == 1
+    assert controller._ocr_future is None
+
+    clock[0] = 10.49
+    controller._tick()
+    assert controller._ocr_future is None
+
+    clock[0] = 10.5
+    controller._tick()
+    assert controller._ocr_future is not None
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.6
+    controller._tick()
+    assert controller._ocr_scan_count == 2
+    assert controller._ocr_future is None
+
+    clock[0] = 11.5
+    controller._tick()
+    assert controller._ocr_future is None
+    controller.close()
+
+
+def test_live_controller_rechecks_an_unchanged_frame_at_idle_interval(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(settle_rescan_ms=0, idle_rescan_ms=2000),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeEmptyOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [20.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 20.1
+    controller._tick()
+
+    clock[0] = 22.09
+    controller._tick()
+    assert controller._ocr_future is None
+
+    clock[0] = 22.1
+    controller._tick()
+    assert controller._ocr_future is not None
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 22.2
+    controller._tick()
+    assert controller._ocr_scan_count == 2
+    assert controller._ocr_future is None
+    controller.close()
+
+
+def test_failed_ocr_retries_on_idle_interval_without_new_frame_change(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(settle_rescan_ms=0, idle_rescan_ms=2000),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeFailingOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [30.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.exception(timeout=2)
+    clock[0] = 30.1
+    controller._tick()
+    assert controller._last_ocr_completed == 30.1
+
+    clock[0] = 32.09
+    controller._tick()
+    assert controller._ocr_future is None
+
+    clock[0] = 32.1
+    controller._tick()
+    assert controller._ocr_future is not None
+    controller._ocr_future.exception(timeout=2)
     controller.close()
 
 

@@ -406,6 +406,14 @@ class LauncherWindow(QMainWindow):
             "GPU OCR 需要通过 bootstrap.ps1 -WithGpuOcr 安装项目内运行库"
         )
         service_form.addRow("OCR 设备", self.ocr_device_combo)
+
+        self.ocr_filter_checkbox = QCheckBox("启用文字过滤")
+        self.ocr_filter_checkbox.setChecked(self._config.ocr.text_filter_enabled)
+        self.ocr_filter_checkbox.setToolTip(
+            "关闭后，图标、数字、中文和其他非源语言 OCR 文本也会进入跟踪与翻译；"
+            "OCR 置信度阈值仍然有效。"
+        )
+        service_form.addRow("OCR 过滤", self.ocr_filter_checkbox)
         layout.addLayout(service_form)
 
         service_actions = QHBoxLayout()
@@ -413,7 +421,8 @@ class LauncherWindow(QMainWindow):
             f"当前：{self._config.translation.model} · "
             f"{self._config.translation.normalized_base_url} · "
             f"并发 {self._config.translation.max_concurrency} · "
-            f"OCR {self._config.ocr.device}；"
+            f"OCR {self._config.ocr.device} · "
+            f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'}；"
             "可手动填写，读取列表不会自动保存。"
         )
         self.service_status_label.setObjectName("secondaryText")
@@ -500,7 +509,11 @@ class LauncherWindow(QMainWindow):
         device = self.ocr_device_combo.currentData()
         if not isinstance(device, str):
             raise ConfigError("当前没有可用的 OCR 设备")
-        return replace(self._config.ocr, device=device)
+        return replace(
+            self._config.ocr,
+            device=device,
+            text_filter_enabled=self.ocr_filter_checkbox.isChecked(),
+        )
 
     def _refresh_models(self) -> None:
         if self._model_reply is not None:
@@ -602,6 +615,7 @@ class LauncherWindow(QMainWindow):
                 model=translation.model,
                 ocr_device=ocr.device,
                 max_concurrency=translation.max_concurrency,
+                ocr_text_filter_enabled=ocr.text_filter_enabled,
             )
         except (ConfigError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("保存服务与 OCR 设置失败", exc)
@@ -614,11 +628,13 @@ class LauncherWindow(QMainWindow):
         device_index = self.ocr_device_combo.findData(self._config.ocr.device)
         if device_index >= 0:
             self.ocr_device_combo.setCurrentIndex(device_index)
+        self.ocr_filter_checkbox.setChecked(self._config.ocr.text_filter_enabled)
         self.service_status_label.setText(
             f"当前：{self._config.translation.model} · "
             f"{self._config.translation.normalized_base_url} · "
             f"并发 {self._config.translation.max_concurrency} · "
-            f"OCR {self._config.ocr.device}"
+            f"OCR {self._config.ocr.device} · "
+            f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'}"
         )
         if announce:
             self.statusBar().showMessage(

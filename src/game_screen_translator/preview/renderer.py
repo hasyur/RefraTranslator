@@ -64,14 +64,14 @@ def _fit_text(
     height: int,
     configured_path: str,
 ) -> tuple[ImageFont.ImageFont, list[str], int]:
-    upper = max(10, min(48, int(height * 0.78)))
-    for size in range(upper, 8, -1):
+    upper = max(9, min(40, int(height * 0.62)))
+    for size in range(upper, 7, -1):
         font = _load_font(size, configured_path)
         lines = _wrap_by_width(text, draw, font, width)
         line_height = max(1, draw.textbbox((0, 0), "国Ag", font=font, stroke_width=1)[3] + 2)
         if line_height * len(lines) <= height:
             return font, lines, line_height
-    font = _load_font(9, configured_path)
+    font = _load_font(8, configured_path)
     lines = _wrap_by_width(text, draw, font, width)
     line_height = max(1, draw.textbbox((0, 0), "国Ag", font=font, stroke_width=1)[3] + 1)
     return font, lines, line_height

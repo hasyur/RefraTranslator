@@ -127,6 +127,8 @@ class LiveConfig:
     max_batch_size: int = 8
     capture_backend: str = "dxgi"
     ocr_cooldown_ms: int = 0
+    settle_rescan_ms: int = 500
+    idle_rescan_ms: int = 2000
 
     def __post_init__(self) -> None:
         if self.left < 0 or self.top < 0:
@@ -153,6 +155,10 @@ class LiveConfig:
             raise ConfigError("live.capture_backend 必须是 dxgi 或 winrt")
         if not 0 <= self.ocr_cooldown_ms <= 10_000:
             raise ConfigError("live.ocr_cooldown_ms 必须在 0 到 10000 之间")
+        if not 0 <= self.settle_rescan_ms <= 60_000:
+            raise ConfigError("live.settle_rescan_ms 必须在 0 到 60000 之间")
+        if not 0 <= self.idle_rescan_ms <= 60_000:
+            raise ConfigError("live.idle_rescan_ms 必须在 0 到 60000 之间")
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,7 +232,9 @@ _TOML_SECTION_RE = re.compile(
 _TRANSLATION_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>base_url|model|max_concurrency)[ \t]*="
 )
-_OCR_DEVICE_VALUE_RE = re.compile(r"^(?P<indent>[ \t]*)device[ \t]*=")
+_OCR_VALUE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<key>device|text_filter_enabled)[ \t]*="
+)
 
 
 def save_translation_selection(
@@ -242,6 +250,7 @@ def save_translation_selection(
         model=model,
         max_concurrency=None,
         ocr_device=None,
+        ocr_text_filter_enabled=None,
     )
 
 
@@ -252,6 +261,7 @@ def save_runtime_selection(
     model: str,
     ocr_device: str,
     max_concurrency: int | None = None,
+    ocr_text_filter_enabled: bool | None = None,
 ) -> AppConfig:
     """Atomically update the launcher-owned API, concurrency and OCR selections."""
     return _save_selected_values(
@@ -260,6 +270,7 @@ def save_runtime_selection(
         model=model,
         max_concurrency=max_concurrency,
         ocr_device=ocr_device,
+        ocr_text_filter_enabled=ocr_text_filter_enabled,
     )
 
 
@@ -270,6 +281,7 @@ def _save_selected_values(
     model: str,
     max_concurrency: int | None,
     ocr_device: str | None,
+    ocr_text_filter_enabled: bool | None,
 ) -> AppConfig:
     config_path = Path(path).resolve()
     current = load_config(config_path)
@@ -283,10 +295,14 @@ def _save_selected_values(
             else max_concurrency
         ),
     )
-    candidate_ocr = (
-        current.ocr
-        if ocr_device is None
-        else replace(current.ocr, device=ocr_device.strip())
+    candidate_ocr = replace(
+        current.ocr,
+        device=current.ocr.device if ocr_device is None else ocr_device.strip(),
+        text_filter_enabled=(
+            current.ocr.text_filter_enabled
+            if ocr_text_filter_enabled is None
+            else ocr_text_filter_enabled
+        ),
     )
     if (
         candidate_translation == current.translation
@@ -336,8 +352,16 @@ def _save_selected_values(
     if max_concurrency is not None and "max_concurrency" not in replaced_keys:
         _upsert_translation_concurrency(lines, candidate_translation.max_concurrency)
 
-    if ocr_device is not None:
-        _upsert_ocr_device(lines, candidate_ocr.device)
+    if ocr_device is not None or ocr_text_filter_enabled is not None:
+        _upsert_ocr_values(
+            lines,
+            device=candidate_ocr.device if ocr_device is not None else None,
+            text_filter_enabled=(
+                candidate_ocr.text_filter_enabled
+                if ocr_text_filter_enabled is not None
+                else None
+            ),
+        )
 
     temporary = config_path.with_name(f"{config_path.name}.{os.getpid()}.tmp")
     try:
@@ -370,11 +394,25 @@ def _upsert_translation_concurrency(lines: list[str], value: int) -> None:
     lines.insert(translation_end_index, f"max_concurrency = {value}{newline}")
 
 
-def _upsert_ocr_device(lines: list[str], device: str) -> None:
+def _upsert_ocr_values(
+    lines: list[str],
+    *,
+    device: str | None,
+    text_filter_enabled: bool | None,
+) -> None:
     newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+    values = {
+        key: value
+        for key, value in (
+            ("device", device),
+            ("text_filter_enabled", text_filter_enabled),
+        )
+        if value is not None
+    }
     current_section: str | None = None
     ocr_header_index: int | None = None
     ocr_end_index = len(lines)
+    replaced_keys: set[str] = set()
     for index, line in enumerate(lines):
         body = line.rstrip("\r\n")
         section_match = _TOML_SECTION_RE.fullmatch(body)
@@ -387,25 +425,37 @@ def _upsert_ocr_device(lines: list[str], device: str) -> None:
             continue
         if current_section != "ocr":
             continue
-        value_match = _OCR_DEVICE_VALUE_RE.match(body)
-        if value_match is None:
+        value_match = _OCR_VALUE_RE.match(body)
+        if value_match is None or value_match.group("key") not in values:
             continue
+        key = value_match.group("key")
         ending = line[len(body) :]
         lines[index] = (
-            f'{value_match.group("indent")}device = '
-            f'{json.dumps(device, ensure_ascii=False)}{ending}'
+            f'{value_match.group("indent")}{key} = '
+            f'{json.dumps(values[key], ensure_ascii=False)}{ending}'
         )
-        return
+        replaced_keys.add(key)
 
-    device_line = f'device = {json.dumps(device, ensure_ascii=False)}{newline}'
+    missing_keys = tuple(key for key in values if key not in replaced_keys)
+    if not missing_keys:
+        return
     if ocr_header_index is None:
         if lines and not lines[-1].endswith(("\n", "\r")):
             lines[-1] += newline
         if lines and lines[-1].strip():
             lines.append(newline)
-        lines.extend((f"[ocr]{newline}", device_line))
+        lines.append(f"[ocr]{newline}")
+        lines.extend(
+            f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}"
+            for key in missing_keys
+        )
         return
 
     if ocr_end_index > 0 and not lines[ocr_end_index - 1].endswith(("\n", "\r")):
         lines[ocr_end_index - 1] += newline
-    lines.insert(ocr_end_index, device_line)
+    for key in missing_keys:
+        lines.insert(
+            ocr_end_index,
+            f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}",
+        )
+        ocr_end_index += 1

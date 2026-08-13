@@ -6,32 +6,57 @@ import numpy as np
 class FrameChangeDetector:
     """Cheap low-resolution luminance comparison used to gate expensive OCR."""
 
-    def __init__(self, threshold: float = 3.0, sample_size: tuple[int, int] = (160, 90)) -> None:
+    def __init__(
+        self,
+        threshold: float = 3.0,
+        sample_size: tuple[int, int] = (320, 180),
+        *,
+        local_fraction: float = 0.01,
+        local_multiplier: float = 4.0,
+    ) -> None:
         if threshold < 0:
             raise ValueError("threshold 不能为负数")
         if sample_size[0] < 1 or sample_size[1] < 1:
             raise ValueError("sample_size 必须为正数")
+        if not 0 < local_fraction <= 1:
+            raise ValueError("local_fraction 必须在 0 到 1 之间")
+        if local_multiplier <= 0:
+            raise ValueError("local_multiplier 必须大于 0")
         self.threshold = threshold
         self.sample_size = sample_size
+        self.local_fraction = local_fraction
+        self.local_multiplier = local_multiplier
         self._previous: np.ndarray | None = None
         self.last_score: float = 0.0
+        self.last_local_score: float = 0.0
 
     def reset(self) -> None:
         self._previous = None
         self.last_score = 0.0
+        self.last_local_score = 0.0
 
     def changed(self, frame: np.ndarray) -> bool:
         sample = self._sample(frame)
         if self._previous is None:
             self._previous = sample
             self.last_score = float("inf")
+            self.last_local_score = float("inf")
             return True
 
-        self.last_score = float(
-            np.mean(np.abs(sample.astype(np.float32) - self._previous.astype(np.float32)))
+        difference = np.abs(
+            sample.astype(np.float32) - self._previous.astype(np.float32)
+        )
+        self.last_score = float(np.mean(difference))
+        local_count = max(1, round(difference.size * self.local_fraction))
+        local_start = difference.size - local_count
+        self.last_local_score = float(
+            np.mean(np.partition(difference.ravel(), local_start)[local_start:])
         )
         self._previous = sample
-        return self.last_score >= self.threshold
+        return (
+            self.last_score >= self.threshold
+            or self.last_local_score >= self.threshold * self.local_multiplier
+        )
 
     def _sample(self, frame: np.ndarray) -> np.ndarray:
         if not isinstance(frame, np.ndarray):

@@ -24,6 +24,19 @@ def test_luminance_change_above_threshold_triggers() -> None:
     assert detector.last_score == pytest.approx(20.0, abs=0.01)
 
 
+def test_small_local_text_like_change_is_not_lost_in_global_average() -> None:
+    detector = FrameChangeDetector(threshold=3.0, sample_size=(20, 20))
+    unchanged = np.zeros((20, 20, 3), dtype=np.uint8)
+    small_change = unchanged.copy()
+    small_change[:2, :2] = 30
+
+    detector.changed(unchanged)
+
+    assert detector.changed(small_change)
+    assert detector.last_score == pytest.approx(0.3, abs=0.01)
+    assert detector.last_local_score == pytest.approx(30.0, abs=0.01)
+
+
 def test_invalid_frame_shape_is_rejected() -> None:
     detector = FrameChangeDetector()
 

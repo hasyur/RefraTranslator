@@ -247,6 +247,8 @@ class LiveController:
         self._latency_stats = LiveLatencyStats()
         self._last_ocr_completed = 0.0
         self._next_ocr_allowed = 0.0
+        self._settle_rescan_due: float | None = None
+        self._settle_rescan_triggered_at: float | None = None
         self._shutting_down = False
         self._translated_count = 0
         self._manual_hit_count = 0
@@ -287,8 +289,10 @@ class LiveController:
             "实时翻译运行中",
             f"捕获：{self._capture.active_backend} {region} · "
             f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
+            f"静态复查 {self._config.live.idle_rescan_ms / 1000:g} 秒 · "
             f"LLM 并发 {self._config.translation.max_concurrency} · "
-            f"OCR {ocr_runtime} / 最长边 "
+            f"OCR {ocr_runtime} / 过滤"
+            f"{'开' if self._config.ocr.text_filter_enabled else '关'} / 最长边 "
             f"{self._config.ocr.detection_max_side} · {profile_label}{region_hint}",
         )
         self._timer.start()
@@ -333,15 +337,40 @@ class LiveController:
         self._latest_frame = frame
         now = time.monotonic()
         changed = self._detector.changed(frame)
+        if changed and self._config.live.settle_rescan_ms > 0:
+            self._settle_rescan_due = (
+                now + self._config.live.settle_rescan_ms / 1000
+            )
+            self._settle_rescan_triggered_at = now
+        settle_rescan_due = (
+            self._settle_rescan_due is not None
+            and now >= self._settle_rescan_due
+        )
+        idle_rescan_due = (
+            self._config.live.idle_rescan_ms > 0
+            and self._ocr_future is None
+            and self._last_ocr_completed > 0
+            and now - self._last_ocr_completed
+            >= self._config.live.idle_rescan_ms / 1000
+        )
         needs_stability_scan = any(
             not track.stable_emitted or track.missing_since is not None
             for track in self._tracker.visible_tracks
         ) and now - self._last_ocr_completed >= self._config.live.stable_ms / 1000
 
-        if changed or needs_stability_scan:
+        if changed or needs_stability_scan or settle_rescan_due or idle_rescan_due:
             self._pending_ocr_frame = frame
-            if changed or self._pending_ocr_triggered_at is None:
+            if changed:
                 self._pending_ocr_triggered_at = now
+            elif self._pending_ocr_triggered_at is None:
+                self._pending_ocr_triggered_at = (
+                    self._settle_rescan_triggered_at
+                    if settle_rescan_due
+                    else now
+                )
+        if settle_rescan_due:
+            self._settle_rescan_due = None
+            self._settle_rescan_triggered_at = None
         if (
             self._ocr_future is None
             and self._pending_ocr_frame is not None
@@ -387,10 +416,13 @@ class LiveController:
         self._next_ocr_allowed = (
             now + self._config.live.ocr_cooldown_ms / 1000
         )
+        # A failed OCR attempt also starts the idle retry interval. Otherwise a
+        # static frame could wait forever after the settle retry is exhausted.
+        self._last_ocr_completed = now
         try:
             task_result = future.result()
         except Exception as exc:
-            self._control.set_status("OCR 暂时失败，等待画面变化后重试", str(exc))
+            self._control.set_status("OCR 暂时失败，等待画面变化或定时复查后重试", str(exc))
             print(f"OCR 错误：{exc}", file=sys.stderr)
             return
 
@@ -430,7 +462,6 @@ class LiveController:
                 )
             if observations:
                 print("OCR 保留：" + " | ".join(item.text for item in observations))
-        self._last_ocr_completed = now
         previous_keys = {
             (track.track_id, track.revision) for track in self._tracker.visible_tracks
         }

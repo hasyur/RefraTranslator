@@ -3,7 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
@@ -46,5 +46,57 @@ def test_overlay_renders_only_translated_track_region() -> None:
         and target.pixelColor(x, y).blue() >= 245
         for y in range(30, 90)
         for x in range(40, 280)
+    )
+    app.processEvents()
+
+
+def test_overlay_uses_smaller_translation_font() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 320, 120),
+        style=OverlayStyle(),
+    )
+
+    font = overlay._fit_font("短译文", QRect(0, 0, 240, 60))
+
+    assert font.pixelSize() <= 31
+    app.processEvents()
+
+
+def test_long_translation_is_clipped_to_its_own_text_region() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 160, 100),
+        style=OverlayStyle(blur_radius=0),
+    )
+    track = TrackedText(
+        "tiny-track",
+        1,
+        "原文",
+        0.99,
+        (50, 40, 70, 52),
+        0,
+        1,
+        1,
+        True,
+        "这是一段远远放不进原文字框的译文",
+    )
+    overlay.set_scene(None, (track,))
+    target = QImage(160, 100, QImage.Format.Format_ARGB32)
+    target.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(target)
+    overlay.render(painter, QPoint())
+    painter.end()
+
+    assert any(
+        target.pixelColor(x, y).alpha() > 0
+        for y in range(40, 52)
+        for x in range(50, 70)
+    )
+    assert all(
+        target.pixelColor(x, y).alpha() == 0
+        for y in range(100)
+        for x in range(160)
+        if not (50 <= x < 70 and 40 <= y < 52)
     )
     app.processEvents()

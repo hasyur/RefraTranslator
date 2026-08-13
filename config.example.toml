@@ -24,7 +24,7 @@ device = "cpu"
 cpu_threads = 2
 # 整屏输入会在检测阶段等比缩小，OCR 坐标仍会还原到原始画面。
 detection_max_side = 1280
-# OCR 后、稳定跟踪和 LLM 前过滤图标、数字及非源语言文字。
+# OCR 后、稳定跟踪和 LLM 前过滤图标、数字及非源语言文字；也可在启动器中切换。
 text_filter_enabled = true
 # 保留英文文本；关闭后可以进一步排除英文桌面图标和游戏 UI。
 translate_latin = true
@@ -57,3 +57,7 @@ max_batch_size = 8
 capture_backend = "dxgi"
 # 每次 OCR 完成后的额外休息时间；0 优先避免短字幕被跳过。
 ocr_cooldown_ms = 0
+# 画面变化停止后再确认一次，避免首帧处于字幕绘制中途或 OCR 偶发漏检；0 可关闭。
+settle_rescan_ms = 500
+# 静止画面的低频兜底复查，避免小范围变化未过阈值后永久漏译；0 可关闭。
+idle_rescan_ms = 2000

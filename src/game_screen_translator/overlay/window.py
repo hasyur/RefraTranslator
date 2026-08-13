@@ -175,19 +175,27 @@ class TranslationOverlay(QWidget):
             painter.setPen(QT["QPen"](QT["QColor"](0, 220, 255, 220), 1))
             painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
-        text_rect = rect.adjusted(4, 2, -4, -2)
+        # Keep glyphs inside the original OCR bounds. The surrounding four
+        # pixels belong to the blur only; letting text use them makes adjacent
+        # subtitle lines paint over one another.
+        text_rect = rect.adjusted(4, 4, -4, -4)
+        if text_rect.isEmpty():
+            return
         font = self._fit_font(track.translated_text or "", text_rect)
         painter.setFont(font)
         metrics = QT["QFontMetrics"](font)
         lines = self._wrap(track.translated_text or "", metrics, text_rect.width())
         line_height = metrics.lineSpacing()
         y = text_rect.top() + max(0, (text_rect.height() - line_height * len(lines)) // 2)
+        painter.save()
+        painter.setClipRect(text_rect)
         for line in lines:
             line_width = metrics.horizontalAdvance(line)
             x = text_rect.left() + max(0, (text_rect.width() - line_width) // 2)
             baseline = y + metrics.ascent()
             self._draw_text_line(painter, x, baseline, line)
             y += line_height
+        painter.restore()
 
     @staticmethod
     def _draw_text_line(painter, x: int, baseline: int, text: str) -> None:
@@ -234,14 +242,14 @@ class TranslationOverlay(QWidget):
         return QT["QPixmap"].fromImage(image)
 
     def _fit_font(self, text: str, rect):
-        upper = max(12, min(48, int(rect.height() * 0.64)))
-        for size in range(upper, 9, -1):
+        upper = max(10, min(40, int(rect.height() * 0.52)))
+        for size in range(upper, 7, -1):
             font = self._make_font(size)
             metrics = QT["QFontMetrics"](font)
             lines = self._wrap(text, metrics, rect.width())
             if metrics.lineSpacing() * len(lines) <= rect.height():
                 return font
-        return self._make_font(10)
+        return self._make_font(8)
 
     def _make_font(self, pixel_size: int):
         font = QT["QFont"](self._font_family)
