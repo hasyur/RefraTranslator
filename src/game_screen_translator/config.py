@@ -35,8 +35,8 @@ class TranslationConfig:
             raise ConfigError("translation.model 不能为空")
         if self.timeout_seconds <= 0:
             raise ConfigError("translation.timeout_seconds 必须大于 0")
-        if self.max_concurrency < 1:
-            raise ConfigError("translation.max_concurrency 必须至少为 1")
+        if not 1 <= self.max_concurrency <= 32:
+            raise ConfigError("translation.max_concurrency 必须在 1 到 32 之间")
         if not 0 <= self.temperature <= 2:
             raise ConfigError("translation.temperature 必须在 0 到 2 之间")
         if not 0 < self.top_p <= 1:
@@ -224,7 +224,7 @@ _TOML_SECTION_RE = re.compile(
     r"^[ \t]*\[([^\[\]\r\n]+)\][ \t]*(?:#.*)?$"
 )
 _TRANSLATION_VALUE_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<key>base_url|model)[ \t]*="
+    r"^(?P<indent>[ \t]*)(?P<key>base_url|model|max_concurrency)[ \t]*="
 )
 _OCR_DEVICE_VALUE_RE = re.compile(r"^(?P<indent>[ \t]*)device[ \t]*=")
 
@@ -240,6 +240,7 @@ def save_translation_selection(
         path,
         base_url=base_url,
         model=model,
+        max_concurrency=None,
         ocr_device=None,
     )
 
@@ -250,12 +251,14 @@ def save_runtime_selection(
     base_url: str,
     model: str,
     ocr_device: str,
+    max_concurrency: int | None = None,
 ) -> AppConfig:
-    """Atomically update the launcher-owned API and OCR device selections."""
+    """Atomically update the launcher-owned API, concurrency and OCR selections."""
     return _save_selected_values(
         path,
         base_url=base_url,
         model=model,
+        max_concurrency=max_concurrency,
         ocr_device=ocr_device,
     )
 
@@ -265,6 +268,7 @@ def _save_selected_values(
     *,
     base_url: str,
     model: str,
+    max_concurrency: int | None,
     ocr_device: str | None,
 ) -> AppConfig:
     config_path = Path(path).resolve()
@@ -273,6 +277,11 @@ def _save_selected_values(
         current.translation,
         base_url=base_url.strip(),
         model=model.strip(),
+        max_concurrency=(
+            current.translation.max_concurrency
+            if max_concurrency is None
+            else max_concurrency
+        ),
     )
     candidate_ocr = (
         current.ocr
@@ -292,6 +301,7 @@ def _save_selected_values(
     values = {
         "base_url": candidate_translation.base_url,
         "model": candidate_translation.model,
+        "max_concurrency": candidate_translation.max_concurrency,
     }
     for index, line in enumerate(lines):
         if line.endswith("\r\n"):
@@ -323,6 +333,9 @@ def _save_selected_values(
             + ", ".join(sorted(missing))
         )
 
+    if max_concurrency is not None and "max_concurrency" not in replaced_keys:
+        _upsert_translation_concurrency(lines, candidate_translation.max_concurrency)
+
     if ocr_device is not None:
         _upsert_ocr_device(lines, candidate_ocr.device)
 
@@ -335,6 +348,26 @@ def _save_selected_values(
     finally:
         temporary.unlink(missing_ok=True)
     return validated
+
+
+def _upsert_translation_concurrency(lines: list[str], value: int) -> None:
+    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+    current_section: str | None = None
+    translation_end_index = len(lines)
+    for index, line in enumerate(lines):
+        section_match = _TOML_SECTION_RE.fullmatch(line.rstrip("\r\n"))
+        if section_match is None:
+            continue
+        if current_section == "translation":
+            translation_end_index = index
+            break
+        current_section = section_match.group(1).strip()
+
+    if translation_end_index > 0 and not lines[translation_end_index - 1].endswith(
+        ("\n", "\r")
+    ):
+        lines[translation_end_index - 1] += newline
+    lines.insert(translation_end_index, f"max_concurrency = {value}{newline}")
 
 
 def _upsert_ocr_device(lines: list[str], device: str) -> None:

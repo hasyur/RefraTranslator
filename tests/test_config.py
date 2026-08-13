@@ -83,6 +83,23 @@ def test_load_config_rejects_excessive_ocr_threads(tmp_path: Path) -> None:
         load_config(path)
 
 
+def test_load_config_rejects_excessive_translation_concurrency(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "max_concurrency = 3",
+            "max_concurrency = 33",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="max_concurrency"):
+        load_config(path)
+
+
 def test_load_config_rejects_invalid_ocr_device(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     _write(path, "\n[ocr]\ndevice='cuda'\n")
@@ -156,15 +173,18 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         base_url="http://gpu.test/v1",
         model="small-model",
         ocr_device="gpu:1",
+        max_concurrency=7,
     )
 
     assert saved.translation.base_url == "http://gpu.test/v1"
     assert saved.translation.model == "small-model"
+    assert saved.translation.max_concurrency == 7
     assert saved.ocr.device == "gpu:1"
     assert saved.live.capture_fps == 12
     text = path.read_text(encoding="utf-8")
     assert "[ocr]" in text
     assert 'device = "gpu:1"' in text
+    assert "max_concurrency = 7" in text
 
     saved = save_runtime_selection(
         path,

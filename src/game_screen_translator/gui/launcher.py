@@ -379,6 +379,16 @@ class LauncherWindow(QMainWindow):
         model_layout.addWidget(self.refresh_models_button)
         service_form.addRow("API 模型", model_widget)
 
+        self.max_concurrency_spin = QSpinBox()
+        self.max_concurrency_spin.setRange(1, 32)
+        self.max_concurrency_spin.setValue(self._config.translation.max_concurrency)
+        self.max_concurrency_spin.setSuffix(" 路")
+        self.max_concurrency_spin.setToolTip(
+            "同时处理的翻译批次数。实际并发还受 LLM 后端限制；"
+            "过高可能增加显存占用和单批延迟。"
+        )
+        service_form.addRow("LLM 并发", self.max_concurrency_spin)
+
         self.ocr_device_combo = QComboBox()
         self.ocr_device_combo.addItem("CPU", "cpu")
         for index, name in discover_nvidia_gpus():
@@ -402,6 +412,7 @@ class LauncherWindow(QMainWindow):
         self.service_status_label = QLabel(
             f"当前：{self._config.translation.model} · "
             f"{self._config.translation.normalized_base_url} · "
+            f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device}；"
             "可手动填写，读取列表不会自动保存。"
         )
@@ -482,6 +493,7 @@ class LauncherWindow(QMainWindow):
             self._config.translation,
             base_url=base_url,
             model=model,
+            max_concurrency=self.max_concurrency_spin.value(),
         )
 
     def _ocr_candidate(self):
@@ -589,18 +601,23 @@ class LauncherWindow(QMainWindow):
                 base_url=translation.base_url,
                 model=translation.model,
                 ocr_device=ocr.device,
+                max_concurrency=translation.max_concurrency,
             )
         except (ConfigError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("保存服务与 OCR 设置失败", exc)
             return False
         self.server_url_combo.setCurrentText(self._config.translation.base_url)
         self.model_combo.setCurrentText(self._config.translation.model)
+        self.max_concurrency_spin.setValue(
+            self._config.translation.max_concurrency
+        )
         device_index = self.ocr_device_combo.findData(self._config.ocr.device)
         if device_index >= 0:
             self.ocr_device_combo.setCurrentIndex(device_index)
         self.service_status_label.setText(
             f"当前：{self._config.translation.model} · "
             f"{self._config.translation.normalized_base_url} · "
+            f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device}"
         )
         if announce:

@@ -287,6 +287,7 @@ class LiveController:
             "实时翻译运行中",
             f"捕获：{self._capture.active_backend} {region} · "
             f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
+            f"LLM 并发 {self._config.translation.max_concurrency} · "
             f"OCR {ocr_runtime} / 最长边 "
             f"{self._config.ocr.detection_max_side} · {profile_label}{region_hint}",
         )

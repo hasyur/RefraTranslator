@@ -73,6 +73,7 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.profile_combo.currentData() == "game"
     assert window.server_url_combo.currentText() == "http://127.0.0.1:1234/v1"
     assert window.model_combo.currentText() == "hy-mt1.5-7b"
+    assert window.max_concurrency_spin.value() == 2
     assert window.ocr_device_combo.currentData() == "cpu"
     assert window._current_region() == (100, 200, 800, 300)
     assert window._glossary_editor.pairs() == (("仕事", "委托"),)
@@ -128,6 +129,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     monkeypatch.setattr(QProcess, "startDetached", fake_start_detached)
     window.server_url_combo.setCurrentText("http://10.20.30.40:9000/v1")
     window.model_combo.setCurrentText("alternate-model")
+    window.max_concurrency_spin.setValue(6)
 
     window._start_live()
 
@@ -144,6 +146,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     saved = load_config(config_path)
     assert saved.translation.base_url == "http://10.20.30.40:9000/v1"
     assert saved.translation.model == "alternate-model"
+    assert saved.translation.max_concurrency == 6
     assert saved.ocr.device == "cpu"
     window.close()
     app.processEvents()

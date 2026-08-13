@@ -111,6 +111,29 @@ def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
     assert capture.closed
 
 
+def test_live_controller_uses_configured_translation_concurrency() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+            max_concurrency=6,
+        )
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+
+    assert controller._translation_executor._max_workers == 6
+    controller.close()
+
+
 def test_ocr_filter_rejects_noise_before_tracking_and_translation() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
