@@ -39,6 +39,9 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.ocr.device == "cpu"
     assert config.ocr.cpu_threads == 2
     assert config.ocr.detection_max_side == 1280
+    assert config.ocr.text_filter_enabled is True
+    assert config.ocr.translate_latin is True
+    assert config.ocr.translate_han_only is False
     assert config.live.capture_backend == "dxgi"
     assert config.live.stable_observations == 2
     assert config.live.capture_fps == 15
@@ -84,6 +87,14 @@ def test_load_config_rejects_invalid_ocr_device(tmp_path: Path) -> None:
     _write(path, "\n[ocr]\ndevice='cuda'\n")
 
     with pytest.raises(ConfigError, match="ocr.device"):
+        load_config(path)
+
+
+def test_load_config_rejects_non_boolean_text_filter_option(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, "\n[ocr]\ntext_filter_enabled='yes'\n")
+
+    with pytest.raises(ConfigError, match="text_filter_enabled"):
         load_config(path)
 
 

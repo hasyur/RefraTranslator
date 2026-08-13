@@ -10,6 +10,7 @@ from typing import Sequence
 from game_screen_translator.config import ConfigError, load_config
 from game_screen_translator.domain import SourceText, TranslationBatch
 from game_screen_translator.ocr.paddle import OcrDependencyError, OcrResultError, PaddleOcrEngine
+from game_screen_translator.ocr.text_filter import OcrTextFilter
 from game_screen_translator.preview.renderer import render_preview
 from game_screen_translator.profiles import (
     GameProfile,
@@ -198,10 +199,25 @@ async def _preview(
         recognition_model=config.ocr.recognition_model,
         model_source=config.ocr.model_source,
         device=config.ocr.device,
+        cpu_threads=config.ocr.cpu_threads,
+        detection_max_side=config.ocr.detection_max_side,
     )
-    observations = engine.recognize(image_path)
-    if not observations:
+    raw_observations = engine.recognize(image_path)
+    if not raw_observations:
         raise RuntimeError("截图中没有识别出满足置信度阈值的文字")
+    filtered = OcrTextFilter(
+        config.ocr.language,
+        enabled=config.ocr.text_filter_enabled,
+        translate_latin=config.ocr.translate_latin,
+        translate_han_only=config.ocr.translate_han_only,
+    ).apply(raw_observations)
+    observations = filtered.accepted
+    print(
+        f"OCR 过滤：识别 {len(raw_observations)} 条，保留 {len(observations)} 条，"
+        f"过滤 {len(filtered.rejected)} 条"
+    )
+    if not observations:
+        raise RuntimeError("OCR 识别结果均被文字过滤器跳过，没有内容需要翻译")
 
     sources = tuple(
         SourceText(

@@ -65,6 +65,9 @@ class OcrConfig:
     device: str = "cpu"
     cpu_threads: int = 2
     detection_max_side: int = 1280
+    text_filter_enabled: bool = True
+    translate_latin: bool = True
+    translate_han_only: bool = False
 
     def __post_init__(self) -> None:
         if not self.language.strip():
@@ -83,6 +86,13 @@ class OcrConfig:
             raise ConfigError("ocr.cpu_threads 必须在 1 到 32 之间")
         if not 320 <= self.detection_max_side <= 4096:
             raise ConfigError("ocr.detection_max_side 必须在 320 到 4096 之间")
+        for key, value in (
+            ("text_filter_enabled", self.text_filter_enabled),
+            ("translate_latin", self.translate_latin),
+            ("translate_han_only", self.translate_han_only),
+        ):
+            if type(value) is not bool:
+                raise ConfigError(f"ocr.{key} 必须是 true 或 false")
 
 
 @dataclass(frozen=True, slots=True)

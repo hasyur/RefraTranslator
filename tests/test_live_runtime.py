@@ -31,7 +31,16 @@ class FakeCapture:
 class FakeOcr:
     def recognize_frame(self, frame):
         return (
-            OcrText("固定字幕", 0.99, ((10, 20), (200, 20), (200, 60), (10, 60))),
+            OcrText("待って。", 0.99, ((10, 20), (200, 20), (200, 60), (10, 60))),
+        )
+
+
+class FakeNoisyOcr:
+    def recognize_frame(self, frame):
+        return (
+            OcrText("设置", 0.99, ((10, 10), (80, 10), (80, 30), (10, 30))),
+            OcrText("⚙", 0.99, ((90, 10), (110, 10), (110, 30), (90, 30))),
+            OcrText("待って。", 0.99, ((10, 50), (200, 50), (200, 90), (10, 90))),
         )
 
 
@@ -48,6 +57,7 @@ class FakeControl:
         self.status = ""
         self.detail = ""
         self.latency = ""
+        self.filter_status = ""
 
     def set_status(self, status, detail="") -> None:
         self.status = status
@@ -55,6 +65,9 @@ class FakeControl:
 
     def set_latency(self, summary) -> None:
         self.latency = summary
+
+    def set_filter_status(self, summary) -> None:
+        self.filter_status = summary
 
 
 def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
@@ -84,10 +97,42 @@ def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
     controller._tick()
 
     assert controller._ocr_scan_count == 1
-    assert "OCR：固定字幕" in capsys.readouterr().out
+    assert "OCR 保留：待って。" in capsys.readouterr().out
     assert overlay.scenes == 2
     controller.close()
     assert capture.closed
+
+
+def test_ocr_filter_rejects_noise_before_tracking_and_translation() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(stable_observations=99),
+    )
+    control = FakeControl()
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeNoisyOcr(),
+        overlay=FakeOverlay(),
+        control=control,
+        app=app,
+    )
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    controller._tick()
+
+    assert [track.text for track in controller._tracker.visible_tracks] == ["待って。"]
+    assert controller._translation_futures == {}
+    assert controller._ocr_text_count == 3
+    assert controller._filtered_text_count == 2
+    assert "识别 3 条，保留 1 条，过滤 2 条" in control.filter_status
+    controller.close()
 
 
 def test_live_translation_path_uses_profile_manual_correction(tmp_path: Path) -> None:
@@ -187,7 +232,7 @@ def test_live_latency_display_covers_ocr_queue_and_cached_translation(
     )
     profile = create_game_profile(tmp_path / "config.toml", config, "timing-game")
     profile.cache.set_manual_correction(
-        "固定字幕",
+        "待って。",
         "固定译文",
         source_language=config.ocr.language,
         target_language=config.translation.target_language,

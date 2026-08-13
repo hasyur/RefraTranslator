@@ -25,6 +25,7 @@ from game_screen_translator.live.change_detector import FrameChangeDetector
 from game_screen_translator.live.latency import LiveLatencyStats
 from game_screen_translator.live.tracker import StableTextTracker
 from game_screen_translator.ocr.paddle import PaddleOcrEngine
+from game_screen_translator.ocr.text_filter import OcrTextFilter, RejectedOcrText
 from game_screen_translator.ocr.types import OcrText
 from game_screen_translator.overlay.window import (
     OverlayStyle,
@@ -59,6 +60,8 @@ BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 @dataclass(frozen=True, slots=True)
 class _OcrTaskResult:
     observations: tuple[OcrText, ...]
+    rejected: tuple[RejectedOcrText, ...]
+    raw_count: int
     triggered_at: float
     started_at: float
     completed_at: float
@@ -123,11 +126,15 @@ class LiveControlWindow(QWidget):
             "OCR 是单轮识别；稳定是首轮识别后等待一致结果；"
             "排队是等待翻译线程；总计从画面变化触发 OCR 到译文可显示。"
         )
+        self._filter = QLabel("文字过滤：等待首个 OCR 样本……")
+        self._filter.setWordWrap(True)
+        self._filter.setStyleSheet("color: #777;")
         stop_button = QPushButton("停止翻译")
         stop_button.clicked.connect(stop_callback)
         layout = QVBoxLayout(self)
         layout.addWidget(self._status)
         layout.addWidget(self._detail)
+        layout.addWidget(self._filter)
         layout.addWidget(self._latency)
         layout.addWidget(stop_button)
 
@@ -142,6 +149,9 @@ class LiveControlWindow(QWidget):
 
     def set_latency(self, summary: str) -> None:
         self._latency.setText(summary)
+
+    def set_filter_status(self, summary: str) -> None:
+        self._filter.setText(summary)
 
 
 class LiveController:
@@ -172,6 +182,12 @@ class LiveController:
             stable_seconds=config.live.stable_ms / 1000,
             clear_after_seconds=config.live.clear_after_ms / 1000,
         )
+        self._text_filter = OcrTextFilter(
+            config.ocr.language,
+            enabled=config.ocr.text_filter_enabled,
+            translate_latin=config.ocr.translate_latin,
+            translate_han_only=config.ocr.translate_han_only,
+        )
         self._context: deque[ContextPair] = deque(maxlen=config.live.context_pairs)
         self._revisions = RevisionRegistry()
         self._ocr_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ocr")
@@ -198,6 +214,8 @@ class LiveController:
         self._cache_hit_count = 0
         self._model_result_count = 0
         self._ocr_scan_count = 0
+        self._ocr_text_count = 0
+        self._filtered_text_count = 0
         self._stale_result_count = 0
         self._timer = QTimer()
         self._timer.setInterval(max(10, round(1000 / config.live.change_poll_fps)))
@@ -240,7 +258,8 @@ class LiveController:
         self._ocr_executor.shutdown(wait=True, cancel_futures=True)
         self._translation_executor.shutdown(wait=True, cancel_futures=True)
         print(
-            f"实时统计：OCR {self._ocr_scan_count} 次，覆盖 {self._translated_count} 条，"
+            f"实时统计：OCR {self._ocr_scan_count} 次/识别 {self._ocr_text_count} 条，"
+            f"过滤 {self._filtered_text_count} 条，覆盖 {self._translated_count} 条，"
             f"人工修订 {self._manual_hit_count} 条，缓存 {self._cache_hit_count} 条，"
             f"模型 {self._model_result_count} 条，丢弃过期译文 {self._stale_result_count} 条"
         )
@@ -296,10 +315,13 @@ class LiveController:
 
     def _run_ocr(self, frame: np.ndarray, triggered_at: float) -> _OcrTaskResult:
         started_at = time.monotonic()
-        observations = tuple(self._ocr.recognize_frame(frame))
+        raw_observations = tuple(self._ocr.recognize_frame(frame))
+        filtered = self._text_filter.apply(raw_observations)
         completed_at = time.monotonic()
         return _OcrTaskResult(
-            observations,
+            filtered.accepted,
+            filtered.rejected,
+            len(raw_observations),
             triggered_at,
             started_at,
             completed_at,
@@ -322,14 +344,35 @@ class LiveController:
             return
 
         observations = task_result.observations
+        self._ocr_text_count += task_result.raw_count
+        self._filtered_text_count += len(task_result.rejected)
+        set_filter_status = getattr(self._control, "set_filter_status", None)
+        if callable(set_filter_status):
+            set_filter_status(
+                f"文字过滤：本轮识别 {task_result.raw_count} 条，"
+                f"保留 {len(observations)} 条，过滤 {len(task_result.rejected)} 条 · "
+                f"累计过滤 {self._filtered_text_count} 条"
+            )
         ocr_seconds = max(0.0, task_result.completed_at - task_result.started_at)
         self._latency_stats.record_ocr(ocr_seconds)
         self._refresh_latency_display()
         self._ocr_scan_count += 1
         if self._debug:
             print(f"耗时：OCR {ocr_seconds:.3f}s")
+            print(
+                f"OCR 过滤：识别 {task_result.raw_count} 条，"
+                f"保留 {len(observations)} 条，过滤 {len(task_result.rejected)} 条"
+            )
+            if task_result.rejected:
+                print(
+                    "已过滤："
+                    + " | ".join(
+                        f"{item.observation.text}（{item.reason}）"
+                        for item in task_result.rejected
+                    )
+                )
             if observations:
-                print("OCR：" + " | ".join(item.text for item in observations))
+                print("OCR 保留：" + " | ".join(item.text for item in observations))
         self._last_ocr_completed = now
         previous_keys = {
             (track.track_id, track.revision) for track in self._tracker.visible_tracks
