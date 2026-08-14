@@ -39,6 +39,21 @@ jobs:
       - name: Check dependency consistency
         run: python -m pip check
 
+      - name: Parse bootstrap with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ".\bootstrap.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
       - name: Run offline tests
         run: python -m pytest -m "not integration"
 

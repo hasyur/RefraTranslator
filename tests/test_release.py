@@ -66,3 +66,9 @@ def test_source_release_manifest_includes_first_run_files() -> None:
     for relative_path in SOURCE_RELEASE_FILES:
         assert (PROJECT_ROOT / relative_path).is_file()
         assert f"include {relative_path}" in manifest
+
+
+def test_bootstrap_script_is_ascii_for_windows_powershell_51() -> None:
+    script = (PROJECT_ROOT / "bootstrap.ps1").read_bytes()
+
+    assert script.decode("ascii")
