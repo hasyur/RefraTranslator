@@ -708,15 +708,16 @@ def test_concurrent_batches_publish_in_top_to_bottom_order(monkeypatch) -> None:
             now=1.1,
         )
         controller._submit_translations(follow_up_update.stable_sources)
-        follow_up = next(
-            submission
-            for submission in controller._translation_futures.values()
+        follow_up_future, follow_up = next(
+            (future, submission)
+            for future, submission in controller._translation_futures.items()
             if submission.batch.items[0].text == "后续。"
         )
         assert [pair.source for pair in follow_up.context] == ["下方。"]
 
         release_top.set()
         futures_by_text["上方。"].result(timeout=2)
+        follow_up_future.result(timeout=2)
         controller._collect_translations()
 
         assert [
