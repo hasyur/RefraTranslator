@@ -29,7 +29,7 @@ RefraTranslator 是一款处于 Alpha 阶段的 Windows 游戏屏幕实时翻译
 powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
 ```
 
-安装脚本会询问 OCR 使用 `[1] NVIDIA GPU（默认）` 还是 `[2] CPU`，直接按回车即选择 NVIDIA。选择 NVIDIA 会安装 Paddle GPU 版，并让首次生成的 `config.toml` 使用 `gpu:0`；选择 CPU 则安装 CPU 版。安装脚本只会写入项目目录内的 `.venv` 和 `.cache`。首次安装还会在缺少时将 `config.example.toml` 复制为本机 `config.toml`；重新运行不会覆盖已有配置。
+安装脚本会询问 OCR 使用 `[1] NVIDIA GPU（默认）` 还是 `[2] CPU`，直接按回车即选择 NVIDIA。选择 NVIDIA 会安装 Paddle GPU 版，并让首次生成的 `config.toml` 使用 `gpu:0`；选择 CPU 则安装 CPU 版。依赖安装成功后，脚本会自动删除可能占用数 GB 的 `.cache\pip` 下载缓存，但保留实际运行环境和 OCR 模型；安装中途失败则保留缓存以便重试。首次安装还会在缺少时将 `config.example.toml` 复制为本机 `config.toml`；重新运行不会覆盖已有配置。
 
 启动你自己的 LLM 服务，然后双击 `start_gui.bat`。在启动器中填写服务器地址、读取模型列表并选择模型，再创建游戏 Profile、框选字幕区域并启动实时翻译。公开模板默认使用 `http://127.0.0.1:1234/v1`；这只是本机回环地址示例，不代表程序自带 1234 端口的服务。
 
@@ -66,7 +66,13 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
 
 ## 环境隔离
 
-所有 Python 包都安装在项目目录的 `.venv`，不会写入系统或 Anaconda 的全局 site-packages。脚本和文档中的命令也始终显式调用 `.venv\Scripts\python.exe`，无需激活环境。安装缓存位于 `.cache\pip`，PaddleOCR 模型位于 `.cache\paddlex`，不会使用用户级 `~/.paddlex`。
+所有 Python 包都安装在项目目录的 `.venv`，不会写入系统或 Anaconda 的全局 site-packages。脚本和文档中的命令也始终显式调用 `.venv\Scripts\python.exe`，无需激活环境。安装过程中下载缓存位于 `.cache\pip`，成功后默认自动删除；需要保留它以便离线重复安装时，可向任意安装命令添加 `-KeepInstallCache`。PaddleOCR 模型位于 `.cache\paddlex`，不会随安装缓存一起删除，也不会使用用户级 `~/.paddlex`。
+
+旧版本安装后遗留的 pip 缓存不参与程序运行，可在项目根目录手动清理；请只删除 `.cache\pip`，不要删除保存 OCR 模型的整个 `.cache`：
+
+```powershell
+Remove-Item -LiteralPath .\.cache\pip -Recurse -Force
+```
 
 仅安装核心 HTTP 与图像依赖：
 
@@ -98,7 +104,7 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
 .\bootstrap.ps1 -WithGui -OcrDevice NVIDIA
 ```
 
-GPU 默认使用 CUDA 12.9 wheel；可通过 `-GpuCuda cu118|cu126|cu129|cu130` 选择其他官方构建。旧的 `-WithOcr`（CPU）和 `-WithGpuOcr`（NVIDIA）参数继续兼容，但不能和 `-OcrDevice` 同时使用。GPU Paddle 本身仍可在 GUI 中切回 CPU 推理。首次 GPU 安装需要下载约数 GB 的隔离运行库，不要求向系统 Python 安装包。
+GPU 默认使用 CUDA 12.9 wheel；可通过 `-GpuCuda cu118|cu126|cu129|cu130` 选择其他官方构建。旧的 `-WithOcr`（CPU）和 `-WithGpuOcr`（NVIDIA）参数继续兼容，但不能和 `-OcrDevice` 同时使用。GPU Paddle 本身仍可在 GUI 中切回 CPU 推理。首次 GPU 安装需要下载约数 GB 的隔离运行库，不要求向系统 Python 安装包；这些库安装在 `.venv` 中，下载用的重复 wheel 则会在成功后清理。
 
 `.venv/`、`.cache/`、本机的 `config.toml` 和 `.gui-settings.toml` 都已加入 `.gitignore`。可公开的配置模板是 `config.example.toml`。安装脚本和 `start_gui.bat` 都只会在 `config.toml` 不存在时复制模板，不会覆盖用户设置。
 

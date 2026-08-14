@@ -6,7 +6,8 @@ param(
     [ValidateSet("cu118", "cu126", "cu129", "cu130")]
     [string]$GpuCuda = "cu129",
     [switch]$WithGui,
-    [switch]$WithDev
+    [switch]$WithDev,
+    [switch]$KeepInstallCache
 )
 
 $ErrorActionPreference = "Stop"
@@ -104,6 +105,63 @@ function Invoke-VenvPython {
     }
 }
 
+function Clear-PipInstallCache {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$PipCachePath
+    )
+
+    $resolvedProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+    $expectedPipCache = [System.IO.Path]::GetFullPath(
+        (Join-Path (Join-Path $resolvedProjectRoot ".cache") "pip")
+    )
+    $resolvedPipCache = [System.IO.Path]::GetFullPath($PipCachePath)
+    if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals(
+        $resolvedPipCache,
+        $expectedPipCache
+    )) {
+        throw "Refusing to remove an unexpected pip cache path: $resolvedPipCache"
+    }
+    if (-not (Test-Path -LiteralPath $resolvedPipCache)) {
+        Write-Host "No installer download cache to remove"
+        return
+    }
+
+    $cacheItem = Get-Item -LiteralPath $resolvedPipCache -Force
+    if (($cacheItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Refusing to remove a pip cache that is a reparse point: $resolvedPipCache"
+    }
+    $cacheMeasurement = Get-ChildItem -LiteralPath $resolvedPipCache `
+        -Recurse -Force -File -ErrorAction SilentlyContinue |
+        Measure-Object -Property Length -Sum
+    $cacheSizeBytes = if ($null -eq $cacheMeasurement.Sum) {
+        [int64]0
+    }
+    else {
+        [int64]$cacheMeasurement.Sum
+    }
+
+    try {
+        Remove-Item -LiteralPath $resolvedPipCache -Recurse -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Could not remove installer download cache: $($_.Exception.Message)"
+        Write-Warning "You can remove it later: $resolvedPipCache"
+        return
+    }
+
+    $releasedLabel = if ($cacheSizeBytes -ge 1GB) {
+        "{0:N2} GiB" -f ($cacheSizeBytes / 1GB)
+    }
+    else {
+        "{0:N1} MiB" -f ($cacheSizeBytes / 1MB)
+    }
+    Write-Host "Removed installer download cache: $resolvedPipCache"
+    Write-Host "Released disk space: $releasedLabel"
+}
+
 $extras = @()
 if ($WithDev) { $extras += "dev" }
 if ($installCpuOcr) { $extras += "ocr" }
@@ -159,6 +217,13 @@ else {
     if ($installGpuOcr) {
         Write-Host "Select gpu:0 in the GUI if this existing configuration still uses CPU OCR"
     }
+}
+
+if ($KeepInstallCache) {
+    Write-Host "Keeping installer download cache: $pipCache"
+}
+else {
+    Clear-PipInstallCache -ProjectRoot $projectRoot -PipCachePath $pipCache
 }
 
 Write-Host "Isolated environment is ready: $venvPython"

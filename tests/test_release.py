@@ -86,6 +86,28 @@ def test_bootstrap_gui_install_prompts_for_ocr_device_with_nvidia_default() -> N
     assert 'Write-Host "  [2] CPU"' in script
 
 
+def test_bootstrap_removes_only_pip_cache_after_success_unless_kept() -> None:
+    script = (PROJECT_ROOT / "bootstrap.ps1").read_text(encoding="ascii")
+
+    assert "[switch]$KeepInstallCache" in script
+    assert 'Join-Path (Join-Path $resolvedProjectRoot ".cache") "pip"' in script
+    assert "[System.StringComparer]::OrdinalIgnoreCase.Equals(" in script
+    assert "[System.IO.FileAttributes]::ReparsePoint" in script
+    assert (
+        "Remove-Item -LiteralPath $resolvedPipCache -Recurse -Force "
+        "-ErrorAction Stop"
+    ) in script
+    cleanup_call = (
+        "Clear-PipInstallCache -ProjectRoot $projectRoot "
+        "-PipCachePath $pipCache"
+    )
+    assert cleanup_call in script
+    assert script.index("Invoke-VenvPython -m pip install --cache-dir $pipCache --editable") < (
+        script.index(cleanup_call)
+    )
+    assert 'Write-Host "Keeping installer download cache: $pipCache"' in script
+
+
 def test_gui_batch_preserves_native_crash_diagnostics() -> None:
     script = (PROJECT_ROOT / "start_gui.bat").read_text(encoding="ascii")
 
