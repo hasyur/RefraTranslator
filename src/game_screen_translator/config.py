@@ -8,6 +8,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
+from game_screen_translator.branding import API_KEY_ENV, LEGACY_API_KEY_ENV
+
 
 class ConfigError(ValueError):
     """Raised when a local configuration file is invalid."""
@@ -24,7 +26,7 @@ class TranslationConfig:
     temperature: float = 0.7
     top_p: float = 0.6
     max_output_tokens: int = 2048
-    api_key_env: str = "GAME_SCREEN_TRANSLATOR_API_KEY"
+    api_key_env: str = API_KEY_ENV
 
     def __post_init__(self) -> None:
         if self.provider != "openai_compatible":
@@ -51,6 +53,8 @@ class TranslationConfig:
     @property
     def api_key(self) -> str | None:
         value = os.getenv(self.api_key_env, "").strip()
+        if not value and self.api_key_env == API_KEY_ENV:
+            value = os.getenv(LEGACY_API_KEY_ENV, "").strip()
         return value or None
 
 

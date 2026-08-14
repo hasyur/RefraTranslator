@@ -7,6 +7,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.gui.region_selector import RegionSelector, scale_selection_region
 
 
@@ -48,6 +49,8 @@ def test_region_selector_accepts_a_mouse_drag() -> None:
     selector = RegionSelector(app.primaryScreen())
     selector.show()
     app.processEvents()
+
+    assert selector.windowTitle().startswith(PRODUCT_NAME)
 
     QTest.mousePress(
         selector,

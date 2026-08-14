@@ -10,6 +10,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
+from game_screen_translator.branding import PRODUCT_NAME
+
 
 THEME_SYSTEM = "system"
 THEME_LIGHT = "light"
@@ -125,7 +127,7 @@ def save_gui_preferences(config_path: Path, preferences: GuiPreferences) -> Path
     path = gui_settings_path(config_path)
     temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     content = (
-        "# 游戏屏幕翻译器的本机 GUI 设置；不会写入 Windows 注册表。\n"
+        f"# {PRODUCT_NAME} 的本机 GUI 设置；不会写入 Windows 注册表。\n"
         "[appearance]\n"
         f'theme = "{preferences.theme}"\n'
     )

@@ -3,9 +3,9 @@ requires = ["setuptools>=80"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "game-screen-translator"
+name = "RefraTranslator"
 version = "0.1.0"
-description = "Windows game screen translation prototype with an OpenAI-compatible local LLM API"
+description = "RefraTranslator: real-time Windows game screen translation with a local LLM API"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
@@ -32,7 +32,7 @@ gui = [
 ]
 
 [project.scripts]
-game-screen-translator = "game_screen_translator.cli:main"
+refra-translator = "game_screen_translator.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -10,6 +10,7 @@ from typing import Sequence
 import numpy as np
 from PIL import Image, ImageFilter
 
+from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.live.tracker import TrackedText
 
 
@@ -109,7 +110,7 @@ class TranslationOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setWindowTitle("Game Screen Translator Overlay")
+        self.setWindowTitle(f"{PRODUCT_NAME} Overlay")
         self.setGeometry(*geometry)
         self._style = style
         self._debug_border = debug_border

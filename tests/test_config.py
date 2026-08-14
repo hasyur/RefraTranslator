@@ -4,6 +4,7 @@ import pytest
 
 from game_screen_translator.config import (
     ConfigError,
+    TranslationConfig,
     load_config,
     save_runtime_selection,
     save_translation_selection,
@@ -32,6 +33,7 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
 
     assert config.translation.normalized_base_url == "http://127.0.0.1:1234/v1/"
     assert config.translation.max_concurrency == 3
+    assert config.translation.api_key_env == "REFRA_TRANSLATOR_API_KEY"
     assert config.ocr.language == "japan"
     assert config.ocr.cache_dir == ".cache/paddlex"
     assert config.ocr.detection_model == "PP-OCRv6_small_det"
@@ -51,6 +53,30 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.live.settle_rescan_ms == 500
     assert config.live.idle_rescan_ms == 2000
     assert config.profiles.root_dir == "profiles"
+
+
+def test_default_api_key_name_falls_back_to_legacy_name(monkeypatch) -> None:
+    monkeypatch.delenv("REFRA_TRANSLATOR_API_KEY", raising=False)
+    monkeypatch.setenv("GAME_SCREEN_TRANSLATOR_API_KEY", "legacy-secret")
+    config = TranslationConfig(
+        provider="openai_compatible",
+        base_url="http://127.0.0.1:1234/v1",
+        model="model",
+    )
+
+    assert config.api_key == "legacy-secret"
+
+
+def test_new_api_key_name_takes_priority(monkeypatch) -> None:
+    monkeypatch.setenv("REFRA_TRANSLATOR_API_KEY", "new-secret")
+    monkeypatch.setenv("GAME_SCREEN_TRANSLATOR_API_KEY", "legacy-secret")
+    config = TranslationConfig(
+        provider="openai_compatible",
+        base_url="http://127.0.0.1:1234/v1",
+        model="model",
+    )
+
+    assert config.api_key == "new-secret"
 
 
 def test_load_config_rejects_unknown_field(tmp_path: Path) -> None:

@@ -1,3 +1,3 @@
-"""Game screen translator prototype."""
+"""RefraTranslator package."""
 
 __version__ = "0.1.0"

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from game_screen_translator.branding import PRODUCT_NAME
+
 try:
     from PySide6.QtCore import QPoint, QRect, Qt
     from PySide6.QtGui import QColor, QFont, QKeyEvent, QMouseEvent, QPainter, QPen
@@ -57,7 +59,7 @@ class RegionSelector(QDialog):
         self._origin: QPoint | None = None
         self._selection = QRect()
         self.selected_region: tuple[int, int, int, int] | None = None
-        self.setWindowTitle("框选游戏字幕区域")
+        self.setWindowTitle(f"{PRODUCT_NAME} - 框选游戏字幕区域")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint

@@ -7,6 +7,7 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
+from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.live.tracker import TrackedText
 from game_screen_translator.overlay.window import OverlayStyle, TranslationOverlay
 
@@ -17,6 +18,7 @@ def test_overlay_renders_only_translated_track_region() -> None:
         geometry=(0, 0, 320, 120),
         style=OverlayStyle(blur_radius=4),
     )
+    assert overlay.windowTitle() == f"{PRODUCT_NAME} Overlay"
     frame = np.full((120, 320, 3), (30, 40, 50), dtype=np.uint8)
     track = TrackedText(
         "track",

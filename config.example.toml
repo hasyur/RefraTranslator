@@ -9,7 +9,7 @@ max_concurrency = 2
 temperature = 0.7
 top_p = 0.6
 max_output_tokens = 2048
-api_key_env = "GAME_SCREEN_TRANSLATOR_API_KEY"
+api_key_env = "REFRA_TRANSLATOR_API_KEY"
 
 [ocr]
 language = "japan"

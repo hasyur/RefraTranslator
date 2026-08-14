@@ -18,7 +18,7 @@ def test_japanese_filter_keeps_kana_and_latin_sentences() -> None:
 def test_japanese_filter_drops_chinese_icons_numbers_and_status_codes() -> None:
     outcome = OcrTextFilter("japan").apply(
         (
-            _observation("游戏屏幕翻译器"),
+            _observation("系统设置菜单"),
             _observation("⚙"),
             _observation("12:34"),
             _observation("A"),

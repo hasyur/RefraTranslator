@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from game_screen_translator.branding import LEGACY_LIVE_TEST_ENV, LIVE_TEST_ENV
 from game_screen_translator.config import load_config
 from game_screen_translator.domain import SourceText, TranslationBatch
 from game_screen_translator.profiles import create_game_profile, load_game_profile
@@ -19,8 +20,11 @@ pytestmark = pytest.mark.integration
 
 @pytest.mark.asyncio
 async def test_live_model_and_glossary_contract(tmp_path: Path) -> None:
-    if os.getenv("GAME_TRANSLATOR_LIVE") != "1":
-        pytest.skip("设置 GAME_TRANSLATOR_LIVE=1 后才访问本地 LLM 服务")
+    if not any(
+        os.getenv(name) == "1"
+        for name in (LIVE_TEST_ENV, LEGACY_LIVE_TEST_ENV)
+    ):
+        pytest.skip(f"设置 {LIVE_TEST_ENV}=1 后才访问本地 LLM 服务")
 
     config_path = Path(__file__).parents[2] / "config.toml"
     config = load_config(config_path)

@@ -1,6 +1,6 @@
-# 游戏屏幕翻译器（原型）
+# RefraTranslator
 
-这是 Windows 游戏屏幕翻译软件的实时原型：
+RefraTranslator 是一款 Windows 游戏屏幕实时翻译软件：
 
 1. DXcam 持续采集一个显示器区域，低分辨率变化检测负责限制 OCR 频率；
 2. PP-OCRv6 small 识别日文/英文，首轮有效结果即建立 track/revision 并进入翻译；
@@ -85,7 +85,7 @@ model = "hy-mt1.5-7b"
 device = "gpu:1" # 第二张 NVIDIA GPU；CPU 使用 "cpu"
 ```
 
-API key 不是必填。若以后服务器要求鉴权，只通过 `GAME_SCREEN_TRANSLATOR_API_KEY` 环境变量提供，不写进配置文件。
+API key 不是必填。若以后服务器要求鉴权，只通过 `REFRA_TRANSLATOR_API_KEY` 环境变量提供，不写进配置文件。旧配置中显式指定的 `GAME_SCREEN_TRANSLATOR_API_KEY` 仍然兼容。
 
 ## 每个游戏独立的 Profile
 
@@ -209,7 +209,7 @@ target = "夜之城"
 实时服务器联调测试默认跳过。显式设置开关后才会访问本地服务：
 
 ```powershell
-$env:GAME_TRANSLATOR_LIVE = "1"
+$env:REFRA_TRANSLATOR_LIVE = "1"
 .\.venv\Scripts\python.exe -m pytest -m integration
 ```
 

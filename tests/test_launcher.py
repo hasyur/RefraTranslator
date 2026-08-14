@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
+from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.config import load_config
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.gui import launcher as launcher_module
@@ -70,6 +71,7 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
 
     window = LauncherWindow(config_path)
 
+    assert window.windowTitle() == PRODUCT_NAME
     assert window.profile_combo.currentData() == "game"
     assert window.server_url_combo.currentText() == "http://127.0.0.1:1234/v1"
     assert window.model_combo.currentText() == "hy-mt1.5-7b"

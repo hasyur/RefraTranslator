@@ -4,6 +4,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
+from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.live.runtime import LiveControlWindow
 
 
@@ -16,6 +17,8 @@ def test_live_control_collapses_and_restores_runtime_information() -> None:
     expanded_width = window.width()
     expanded_height = window.height()
     expanded_right = window.geometry().right()
+
+    assert window.windowTitle() == PRODUCT_NAME
 
     window._shrink_button.click()
     app.processEvents()

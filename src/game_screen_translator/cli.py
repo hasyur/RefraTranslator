@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Sequence
 
+from game_screen_translator.branding import PRODUCT_NAME, PROJECT_SLUG
 from game_screen_translator.config import ConfigError, load_config
 from game_screen_translator.domain import SourceText, TranslationBatch
 from game_screen_translator.ocr.paddle import OcrDependencyError, OcrResultError, PaddleOcrEngine
@@ -33,8 +34,8 @@ from game_screen_translator.translation.transport import (
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="game-screen-translator",
-        description="游戏屏幕翻译原型",
+        prog=PROJECT_SLUG,
+        description=f"{PRODUCT_NAME} 游戏屏幕实时翻译",
     )
     parser.add_argument(
         "--config",

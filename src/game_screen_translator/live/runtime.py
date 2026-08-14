@@ -13,6 +13,7 @@ from typing import Sequence
 
 import numpy as np
 
+from game_screen_translator.branding import LIVE_PROCESS_NAME, PRODUCT_NAME
 from game_screen_translator.capture.dxcam_capture import DxcamCapture
 from game_screen_translator.config import AppConfig
 from game_screen_translator.domain import (
@@ -163,7 +164,7 @@ def prefer_game_process_priority() -> bool:
 class LiveControlWindow(QWidget):
     def __init__(self, stop_callback) -> None:
         super().__init__(None, Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
-        self.setWindowTitle("游戏屏幕翻译器")
+        self.setWindowTitle(PRODUCT_NAME)
         self.setFixedWidth(520)
         self._status = QLabel("正在初始化……")
         self._status.setWordWrap(True)
@@ -1355,7 +1356,9 @@ def run_live(
 ) -> int:
     if not prefer_game_process_priority():
         print("警告：未能将翻译器进程调整为低于游戏的 CPU 优先级。")
-    app = QApplication.instance() or QApplication(["game-screen-translator"])
+    app = QApplication.instance() or QApplication([LIVE_PROCESS_NAME])
+    app.setApplicationName(PRODUCT_NAME)
+    app.setApplicationDisplayName(PRODUCT_NAME)
     app.setQuitOnLastWindowClosed(False)
 
     ocr = PaddleOcrEngine(
@@ -1392,7 +1395,7 @@ def run_live(
             capture.close()
             raise FileNotFoundError(f"无法加载实时测试图片：{source_path}")
         test_window = QLabel()
-        test_window.setWindowTitle("Game Translator Live Test Source")
+        test_window.setWindowTitle(f"{PRODUCT_NAME} Live Test Source")
         test_window.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
         )

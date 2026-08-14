@@ -7,6 +7,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from game_screen_translator.branding import GUI_PROCESS_NAME, PRODUCT_NAME
 from game_screen_translator.config import (
     AppConfig,
     ConfigError,
@@ -250,7 +251,7 @@ class LauncherWindow(QMainWindow):
         self._capture_excluded = False
         self._network_manager = QNetworkAccessManager(self)
         self._model_reply: QNetworkReply | None = None
-        self.setWindowTitle("游戏屏幕翻译器")
+        self.setWindowTitle(PRODUCT_NAME)
         self.resize(960, 700)
         self.setMinimumSize(780, 580)
         self._apply_theme()
@@ -1018,7 +1019,9 @@ def run_launcher(
 ) -> int:
     if duration_seconds is not None and duration_seconds <= 0:
         raise ValueError("--duration 必须大于 0")
-    app = QApplication.instance() or QApplication(["game-screen-translator-gui"])
+    app = QApplication.instance() or QApplication([GUI_PROCESS_NAME])
+    app.setApplicationName(PRODUCT_NAME)
+    app.setApplicationDisplayName(PRODUCT_NAME)
     window = LauncherWindow(config_path)
     window.show()
     if duration_seconds is not None:

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from game_screen_translator.cli import _parse_region, main
+from game_screen_translator.cli import _parse_region, _parser, main
 from game_screen_translator.config import load_config
 from game_screen_translator.profiles import (
     ProfileCaptureSettings,
@@ -14,6 +14,13 @@ from game_screen_translator.profiles import (
 
 def test_parse_region() -> None:
     assert _parse_region("10, 20, 800, 300") == (10, 20, 800, 300)
+
+
+def test_cli_uses_refra_translator_name() -> None:
+    parser = _parser()
+
+    assert parser.prog == "refra-translator"
+    assert "RefraTranslator" in parser.description
 
 
 @pytest.mark.parametrize("value", ["1,2,3", "1,2,no,4", "-1,2,3,4"])
