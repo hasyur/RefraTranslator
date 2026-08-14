@@ -15,7 +15,7 @@ set "QT_QPA_PLATFORM_PLUGIN_PATH="
 
 if not exist "%VENV_PYTHON%" (
   echo Error: project virtual environment not found.
-  echo Run: powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithOcr -WithGui
+  echo Run: powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
   pause
   exit /b 1
 )

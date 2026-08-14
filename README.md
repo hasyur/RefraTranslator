@@ -23,13 +23,13 @@ RefraTranslator 是一款处于 Alpha 阶段的 Windows 游戏屏幕实时翻译
 - 64 位 Python 3.11、3.12 或 3.13，并确保命令行可以运行 `python`；
 - 一个由你自行部署的 OpenAI-compatible 翻译服务，至少提供 `/v1/models` 和 `/v1/chat/completions`。
 
-下载或克隆源码后，在项目根目录打开 PowerShell。CPU OCR 的推荐安装命令是：
+下载或克隆源码后，在项目根目录打开 PowerShell。推荐安装命令是：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithOcr -WithGui
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
 ```
 
-安装脚本只会写入项目目录内的 `.venv` 和 `.cache`。首次安装还会在缺少时将 `config.example.toml` 复制为本机 `config.toml`；重新运行不会覆盖已有配置。
+安装脚本会询问 OCR 使用 `[1] NVIDIA GPU（默认）` 还是 `[2] CPU`，直接按回车即选择 NVIDIA。选择 NVIDIA 会安装 Paddle GPU 版，并让首次生成的 `config.toml` 使用 `gpu:0`；选择 CPU 则安装 CPU 版。安装脚本只会写入项目目录内的 `.venv` 和 `.cache`。首次安装还会在缺少时将 `config.example.toml` 复制为本机 `config.toml`；重新运行不会覆盖已有配置。
 
 启动你自己的 LLM 服务，然后双击 `start_gui.bat`。在启动器中填写服务器地址、读取模型列表并选择模型，再创建游戏 Profile、框选字幕区域并启动实时翻译。公开模板默认使用 `http://127.0.0.1:1234/v1`；这只是本机回环地址示例，不代表程序自带 1234 端口的服务。
 
@@ -74,31 +74,31 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithOcr -WithGui
 .\bootstrap.ps1
 ```
 
-需要使用 CPU OCR 时：
+只安装 CPU OCR 时：
 
 ```powershell
-.\bootstrap.ps1 -WithOcr
+.\bootstrap.ps1 -OcrDevice CPU
 ```
 
 安装 CPU OCR、GUI 和采集依赖：
 
 ```powershell
-.\bootstrap.ps1 -WithOcr -WithGui
+.\bootstrap.ps1 -WithGui -OcrDevice CPU
 ```
 
 贡献代码或运行完整单元测试时，额外安装开发和 GUI 依赖：
 
 ```powershell
-.\bootstrap.ps1 -WithDev -WithGui
+.\bootstrap.ps1 -WithDev -WithGui -OcrDevice None
 ```
 
-NVIDIA GPU OCR 使用独立开关；它会先移除 `.venv` 中的 CPU Paddle，再从 Paddle 官方 CUDA 仓库安装 GPU 版本及运行库：
+不带 `-OcrDevice` 的 GUI 安装会显示交互选择；自动安装或脚本部署可显式传入 `NVIDIA`、`CPU` 或 `None`。NVIDIA GPU OCR 会先移除 `.venv` 中的 CPU Paddle，再从 Paddle 官方 CUDA 仓库安装 GPU 版本及运行库：
 
 ```powershell
-.\bootstrap.ps1 -WithGpuOcr -WithGui
+.\bootstrap.ps1 -WithGui -OcrDevice NVIDIA
 ```
 
-GPU 默认使用 CUDA 12.9 wheel；可通过 `-GpuCuda cu118|cu126|cu129|cu130` 选择其他官方构建。`-WithOcr` 与 `-WithGpuOcr` 互斥，但 GPU Paddle 本身仍可在 GUI 中切回 CPU 推理。首次 GPU 安装需要下载约数 GB 的隔离运行库，不要求向系统 Python 安装包。
+GPU 默认使用 CUDA 12.9 wheel；可通过 `-GpuCuda cu118|cu126|cu129|cu130` 选择其他官方构建。旧的 `-WithOcr`（CPU）和 `-WithGpuOcr`（NVIDIA）参数继续兼容，但不能和 `-OcrDevice` 同时使用。GPU Paddle 本身仍可在 GUI 中切回 CPU 推理。首次 GPU 安装需要下载约数 GB 的隔离运行库，不要求向系统 Python 安装包。
 
 `.venv/`、`.cache/`、本机的 `config.toml` 和 `.gui-settings.toml` 都已加入 `.gitignore`。可公开的配置模板是 `config.example.toml`。安装脚本和 `start_gui.bat` 都只会在 `config.toml` 不存在时复制模板，不会覆盖用户设置。
 

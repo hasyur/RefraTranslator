@@ -75,6 +75,17 @@ def test_bootstrap_script_is_ascii_for_windows_powershell_51() -> None:
     assert script.decode("ascii")
 
 
+def test_bootstrap_gui_install_prompts_for_ocr_device_with_nvidia_default() -> None:
+    script = (PROJECT_ROOT / "bootstrap.ps1").read_text(encoding="ascii")
+
+    assert '[ValidateSet("CPU", "NVIDIA", "None")]' in script
+    assert 'elseif ($WithGui)' in script
+    assert '$ocrInstallDevice = Read-OcrDeviceChoice' in script
+    assert 'Write-Host "  [1] NVIDIA GPU (default)"' in script
+    assert 'if ([string]::IsNullOrWhiteSpace($choice)) { return "nvidia" }' in script
+    assert 'Write-Host "  [2] CPU"' in script
+
+
 def test_gui_batch_preserves_native_crash_diagnostics() -> None:
     script = (PROJECT_ROOT / "start_gui.bat").read_text(encoding="ascii")
 

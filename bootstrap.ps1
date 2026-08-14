@@ -1,6 +1,8 @@
 param(
     [switch]$WithOcr,
     [switch]$WithGpuOcr,
+    [ValidateSet("CPU", "NVIDIA", "None")]
+    [string]$OcrDevice,
     [ValidateSet("cu118", "cu126", "cu129", "cu130")]
     [string]$GpuCuda = "cu129",
     [switch]$WithGui,
@@ -16,6 +18,49 @@ $localConfig = Join-Path $projectRoot "config.toml"
 
 if ($WithOcr -and $WithGpuOcr) {
     throw "-WithOcr (CPU) and -WithGpuOcr (GPU) cannot be used together"
+}
+if ($PSBoundParameters.ContainsKey("OcrDevice") -and ($WithOcr -or $WithGpuOcr)) {
+    throw "-OcrDevice cannot be combined with -WithOcr or -WithGpuOcr"
+}
+
+function Read-OcrDeviceChoice {
+    Write-Host "Select the PaddleOCR runtime to install:"
+    Write-Host "  [1] NVIDIA GPU (default)"
+    Write-Host "  [2] CPU"
+    while ($true) {
+        $choice = Read-Host "OCR device [1]"
+        if ([string]::IsNullOrWhiteSpace($choice)) { return "nvidia" }
+        switch ($choice.Trim().ToLowerInvariant()) {
+            "1" { return "nvidia" }
+            "nvidia" { return "nvidia" }
+            "gpu" { return "nvidia" }
+            "2" { return "cpu" }
+            "cpu" { return "cpu" }
+            default { Write-Host "Enter 1 for NVIDIA GPU or 2 for CPU." }
+        }
+    }
+}
+
+$ocrInstallDevice = "none"
+if ($WithOcr) {
+    $ocrInstallDevice = "cpu"
+}
+elseif ($WithGpuOcr) {
+    $ocrInstallDevice = "nvidia"
+}
+elseif ($PSBoundParameters.ContainsKey("OcrDevice")) {
+    $ocrInstallDevice = $OcrDevice.ToLowerInvariant()
+}
+elseif ($WithGui) {
+    $ocrInstallDevice = Read-OcrDeviceChoice
+}
+$installCpuOcr = $ocrInstallDevice -eq "cpu"
+$installGpuOcr = $ocrInstallDevice -eq "nvidia"
+
+switch ($ocrInstallDevice) {
+    "nvidia" { Write-Host "OCR installation selected: NVIDIA GPU ($GpuCuda)" }
+    "cpu" { Write-Host "OCR installation selected: CPU" }
+    default { Write-Host "OCR installation skipped" }
 }
 
 function Assert-SupportedPython {
@@ -61,8 +106,8 @@ function Invoke-VenvPython {
 
 $extras = @()
 if ($WithDev) { $extras += "dev" }
-if ($WithOcr) { $extras += "ocr" }
-if ($WithGpuOcr) { $extras += "ocr-gpu" }
+if ($installCpuOcr) { $extras += "ocr" }
+if ($installGpuOcr) { $extras += "ocr-gpu" }
 if ($WithGui) { $extras += "gui" }
 $installTarget = $projectRoot
 if ($extras.Count -gt 0) {
@@ -71,10 +116,10 @@ if ($extras.Count -gt 0) {
 
 $env:PIP_REQUIRE_VIRTUALENV = "true"
 Invoke-VenvPython -m pip install --cache-dir $pipCache --upgrade pip
-if ($WithOcr) {
+if ($installCpuOcr) {
     Invoke-VenvPython -m pip uninstall --yes paddlepaddle-gpu
 }
-if ($WithGpuOcr) {
+if ($installGpuOcr) {
     $gpuIndex = "https://www.paddlepaddle.org.cn/packages/stable/$GpuCuda/"
     $gpuWheelDir = Join-Path $pipCache "gpu"
     New-Item -ItemType Directory -Force -Path $gpuWheelDir | Out-Null
@@ -97,10 +142,23 @@ if (-not (Test-Path -LiteralPath $localConfig)) {
         throw "Public configuration template not found: $configTemplate"
     }
     Copy-Item -LiteralPath $configTemplate -Destination $localConfig
+    if ($installGpuOcr) {
+        $configText = [System.IO.File]::ReadAllText($localConfig)
+        $devicePattern = [regex]'(?m)^device\s*=\s*"cpu"\s*$'
+        $updatedConfig = $devicePattern.Replace($configText, 'device = "gpu:0"', 1)
+        if ($updatedConfig -eq $configText) {
+            throw "Could not set the new configuration to NVIDIA GPU OCR"
+        }
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($localConfig, $updatedConfig, $utf8NoBom)
+    }
     Write-Host "Created local configuration: $localConfig"
 }
 else {
     Write-Host "Keeping existing local configuration: $localConfig"
+    if ($installGpuOcr) {
+        Write-Host "Select gpu:0 in the GUI if this existing configuration still uses CPU OCR"
+    }
 }
 
 Write-Host "Isolated environment is ready: $venvPython"
