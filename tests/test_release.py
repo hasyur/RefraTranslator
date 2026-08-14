@@ -58,6 +58,7 @@ def test_release_metadata_declares_and_bundles_notices() -> None:
     assert set(project["license-files"]) == {"LICENSE", "THIRD_PARTY_NOTICES.md"}
     assert (PROJECT_ROOT / "LICENSE").is_file()
     assert (PROJECT_ROOT / "THIRD_PARTY_NOTICES.md").is_file()
+    assert "dxcam[winrt]>=0.3,<0.4" in project["optional-dependencies"]["gui"]
 
 
 def test_source_release_manifest_includes_first_run_files() -> None:
@@ -83,4 +84,5 @@ def test_gui_batch_preserves_native_crash_diagnostics() -> None:
     assert 'set "QT_QPA_PLATFORM=windows"' in script
     assert 'set "QT_PLUGIN_PATH="' in script
     assert 'if not "%launcher_exit%"=="0" goto :launch_failed' in script
+    assert "launcher exited unexpectedly" in script
     assert "if errorlevel 1 pause" not in script.lower()

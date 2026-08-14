@@ -12,7 +12,7 @@ from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.config import load_config
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.gui import launcher as launcher_module
-from game_screen_translator.gui.launcher import LauncherWindow, PairTableEditor, QProcess
+from game_screen_translator.gui.launcher import LauncherWindow, PairTableEditor
 from game_screen_translator.gui.theme import (
     THEME_DARK,
     THEME_LIGHT,
@@ -128,11 +128,18 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     window = LauncherWindow(config_path)
     calls = []
 
-    def fake_start_detached(program, arguments, working_directory):
-        calls.append((program, arguments, working_directory))
-        return True, 4321
+    class FakeProcess:
+        pid = 4321
 
-    monkeypatch.setattr(QProcess, "startDetached", fake_start_detached)
+        @staticmethod
+        def poll():
+            return None
+
+    def fake_popen(arguments, **kwargs):
+        calls.append((arguments, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(launcher_module.subprocess, "Popen", fake_popen)
     window.server_url_combo.setCurrentText("http://203.0.113.10:9000/v1")
     window.model_combo.setCurrentText("alternate-model")
     window.max_concurrency_spin.setValue(6)
@@ -142,16 +149,22 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
 
     window._start_live()
 
-    assert calls[0][0] == sys.executable
-    assert calls[0][1][:5] == [
+    assert calls[0][0][0] == sys.executable
+    assert calls[0][0][1:6] == [
         "-m",
         "game_screen_translator",
         "--config",
         str(config_path.resolve()),
         "live",
     ]
-    assert calls[0][1][-2:] == ["--profile", "game"]
-    assert calls[0][2] == str(tmp_path)
+    assert calls[0][0][-2:] == ["--profile", "game"]
+    assert calls[0][1]["cwd"] == tmp_path
+    assert calls[0][1]["stderr"] is launcher_module.subprocess.STDOUT
+    assert calls[0][1]["env"]["PYTHONUNBUFFERED"] == "1"
+    assert window._live_log_path == tmp_path / "output" / "live.log"
+    assert window._live_log_path.read_text(encoding="utf-8").startswith(
+        "RefraTranslator live diagnostics"
+    )
     saved = load_config(config_path)
     assert saved.translation.base_url == "http://203.0.113.10:9000/v1"
     assert saved.translation.model == "alternate-model"
@@ -160,6 +173,43 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.live.settle_rescan_ms == 800
     assert saved.live.idle_rescan_ms == 4000
     assert saved.live.ocr_cooldown_ms == 100
+    window._live_monitor.stop()
+    window.close()
+    app.processEvents()
+
+
+def test_launcher_restores_and_reports_live_process_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path)
+    window._live_log_path.parent.mkdir(parents=True)
+    window._live_log_path.write_text("OCR ready\nactual capture error\n", encoding="utf-8")
+
+    class FailedProcess:
+        @staticmethod
+        def poll():
+            return 7
+
+    errors = []
+    monkeypatch.setattr(
+        window,
+        "_show_error",
+        lambda title, error: errors.append((title, str(error))),
+    )
+    window._live_process = FailedProcess()
+    window._live_monitor.start()
+
+    window._check_live_process()
+
+    assert window._live_process is None
+    assert not window._live_monitor.isActive()
+    assert errors[0][0] == "实时翻译进程异常退出"
+    assert "退出码：7" in errors[0][1]
+    assert "actual capture error" in errors[0][1]
     window.close()
     app.processEvents()
 

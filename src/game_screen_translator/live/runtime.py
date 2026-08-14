@@ -74,6 +74,10 @@ _TRANSLATION_RETRY_BASE_SECONDS = 0.35
 _PENDING_TRANSLATION_BATCHES_PER_WORKER = 2
 
 
+def _live_message(message: str) -> None:
+    print(f"[{PRODUCT_NAME} Live] {message}", flush=True)
+
+
 def _bounds_distance_squared(first: Bounds | None, second: Bounds) -> float:
     if first is None:
         return 0.0
@@ -1356,11 +1360,13 @@ def run_live(
 ) -> int:
     if not prefer_game_process_priority():
         print("警告：未能将翻译器进程调整为低于游戏的 CPU 优先级。")
+    _live_message("creating QApplication")
     app = QApplication.instance() or QApplication([LIVE_PROCESS_NAME])
     app.setApplicationName(PRODUCT_NAME)
     app.setApplicationDisplayName(PRODUCT_NAME)
     app.setQuitOnLastWindowClosed(False)
 
+    _live_message(f"initializing OCR on {config.ocr.device}")
     ocr = PaddleOcrEngine(
         language=config.ocr.language,
         min_score=config.ocr.min_score,
@@ -1371,6 +1377,12 @@ def run_live(
         device=config.ocr.device,
         cpu_threads=config.ocr.cpu_threads,
         detection_max_side=config.ocr.detection_max_side,
+    )
+    _live_message(f"OCR ready: {ocr.runtime_description}")
+    _live_message(
+        f"starting capture: monitor={config.live.monitor_index} "
+        f"region={config.live.left},{config.live.top},"
+        f"{config.live.width},{config.live.height}"
     )
     capture = DxcamCapture(
         monitor_index=config.live.monitor_index,
@@ -1384,6 +1396,7 @@ def run_live(
         backend=config.live.capture_backend,
     )
     capture.start()
+    _live_message(f"capture ready: backend={capture.active_backend}")
     screen, geometry = _overlay_geometry(app, capture, config)
     test_window = None
     if test_source is not None:
@@ -1435,9 +1448,11 @@ def run_live(
         debug=debug_border,
     )
     app.aboutToQuit.connect(controller.close)
+    _live_message("showing overlay and control windows")
     overlay.show()
     control.show()
     controller.start()
+    _live_message("ready")
     if duration_seconds is not None:
         if duration_seconds <= 0:
             raise ValueError("--duration 必须大于 0")

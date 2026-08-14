@@ -13,7 +13,7 @@ RefraTranslator 自身的源代码采用 [Apache License 2.0](LICENSE)。第三�
 | [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) | 可选 OCR 引擎 | Apache-2.0 |
 | [PaddlePaddle / PaddlePaddle GPU](https://github.com/PaddlePaddle/Paddle) | 可选 OCR 推理运行时 | Apache-2.0 |
 | [PySide6 / Qt for Python](https://doc.qt.io/qtforpython-6/) | 可选 GUI 与覆盖层 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only，另有 Qt 商业许可；以所用 Qt 组件和发行包为准 |
-| [DXcam](https://github.com/ra1nty/DXcam) | 可选 Windows 屏幕采集 | MIT |
+| [DXcam](https://github.com/ra1nty/DXcam) | 可选 Windows DXGI / WinRT 屏幕采集 | MIT |
 
 主要的间接运行时组件包括：
 

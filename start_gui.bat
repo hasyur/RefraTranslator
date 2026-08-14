@@ -58,7 +58,7 @@ exit /b 0
 
 :launch_failed
 echo.
-echo Error: RefraTranslator GUI failed to start ^(exit code %launcher_exit%^).
+echo Error: RefraTranslator launcher exited unexpectedly ^(exit code %launcher_exit%^).
 echo Diagnostic log: "%CD%\%LOG_FILE%"
 echo.
 type "%LOG_FILE%"

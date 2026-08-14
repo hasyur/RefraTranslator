@@ -43,7 +43,7 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithOcr -WithGui
 .\.venv\Scripts\python.exe -m game_screen_translator --config config.toml gui
 ```
 
-`start_gui.bat` 会先检查隔离环境中的 Python 与 PySide6，并固定使用虚拟环境自带的 Windows Qt 平台插件，避免系统中其他 Qt 配置使窗口进入不可见的 offscreen 模式。GUI 启动失败时，终端会保留并显示错误，同时把 Python、PySide6 版本、窗口可见状态及原生崩溃信息写入 `output\launcher.log`；排查其他电脑的启动问题时请附上这个文件。
+`start_gui.bat` 会先检查隔离环境中的 Python 与 PySide6，并固定使用虚拟环境自带的 Windows Qt 平台插件，避免系统中其他 Qt 配置使窗口进入不可见的 offscreen 模式。启动器异常退出时，终端会保留并显示错误，同时把 Python、PySide6 版本、窗口可见状态及原生崩溃信息写入 `output\launcher.log`。实时 OCR/采集进程使用独立的 `output\live.log`；它异常退出时启动器会自动恢复窗口，并显示该日志末尾的实际错误。
 
 启动器可以直接完成：
 
@@ -62,7 +62,7 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithOcr -WithGui
 
 启动页中的“API 服务器”和“API 模型”均可编辑。点击“读取模型列表”会异步请求当前地址的 `/models`（例如地址填写到 `/v1` 时，实际请求 `/v1/models`），不会阻塞 GUI；返回的模型可以下拉选择，也可以保留手填 ID。“LLM 并发”控制同时处理的翻译批次数，“OCR 设备”会直接列出 CPU 与 GPU 0–7，不在 GUI 启动时调用可能被驱动阻塞的 `nvidia-smi`；选择的 GPU 会在启动实时翻译时由 Paddle 隔离校验。“OCR 过滤”可以随时勾选或取消；关闭后图标、数字、中文及其他非源语言 OCR 文本也会进入跟踪和翻译，但 OCR 置信度阈值仍然生效。“画面稳定补扫”“静止画面兜底”和“OCR 冷却”可直接以毫秒调整，前两项设为 `0` 会关闭，冷却设为 `0` 表示不额外等待。点击“保存运行设置”或直接启动实时翻译，会原子更新本机 `config.toml` 中 API、模型、并发、OCR 设备与过滤，以及三项实时 OCR 时间。已有实时翻译进程不会中途切换，设置从下一次启动开始生效。
 
-框选坐标会按照 Windows DPI 缩放换算为屏幕采集像素，并保存到当前 Profile 的 `settings.toml`。启动实时翻译前，启动器会先自动最小化，因此不会对启动器窗口调用可能受显卡驱动影响的捕获排除 API；实时覆盖层与右上角控制窗仍会从屏幕采集中排除。
+框选坐标会按照 Windows DPI 缩放换算为屏幕采集像素，并保存到当前 Profile 的 `settings.toml`。启动实时翻译前，启动器会先自动最小化，因此不会对启动器窗口调用可能受显卡驱动影响的捕获排除 API；实时覆盖层与右上角控制窗仍会从屏幕采集中排除。GUI 安装项包含 DXcam 的 WinRT 可选依赖；DXGI 初始化失败时，采集器才有条件执行实际可用的 WinRT 回退。
 
 ## 环境隔离
 

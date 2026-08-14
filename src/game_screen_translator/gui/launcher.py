@@ -47,8 +47,18 @@ def _startup_message(message: str) -> None:
     print(f"[{PRODUCT_NAME} GUI] {message}", flush=True)
 
 
+def _log_tail(path: Path, *, max_characters: int = 4000) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError as exc:
+        return f"无法读取日志：{exc}"
+    if not text:
+        return "日志尚无输出。"
+    return text[-max_characters:]
+
+
 try:
-    from PySide6.QtCore import QProcess, QTimer, Qt, QUrl
+    from PySide6.QtCore import QTimer, Qt, QUrl
     from PySide6.QtGui import QFont, QFontDatabase
     from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
     from PySide6.QtWidgets import (
@@ -253,6 +263,11 @@ class LauncherWindow(QMainWindow):
         self._profile: GameProfile | None = None
         self._network_manager = QNetworkAccessManager(self)
         self._model_reply: QNetworkReply | None = None
+        self._live_process: subprocess.Popen | None = None
+        self._live_log_path = self._config_path.parent / "output" / "live.log"
+        self._live_monitor = QTimer(self)
+        self._live_monitor.setInterval(500)
+        self._live_monitor.timeout.connect(self._check_live_process)
         self.setWindowTitle(PRODUCT_NAME)
         self.resize(960, 700)
         self.setMinimumSize(780, 580)
@@ -931,6 +946,9 @@ class LauncherWindow(QMainWindow):
         profile = self._require_profile()
         if profile is None:
             return
+        if self._live_process is not None and self._live_process.poll() is None:
+            self._show_error("实时翻译已在运行", RuntimeError("请先关闭现有翻译进程"))
+            return
         try:
             selected_device = self._ocr_candidate().device
             self.statusBar().showMessage(f"正在检查 OCR 设备 {selected_device}……")
@@ -954,26 +972,69 @@ class LauncherWindow(QMainWindow):
         ]
         if self.debug_checkbox.isChecked():
             arguments.append("--debug-border")
+        try:
+            self._live_log_path.parent.mkdir(parents=True, exist_ok=True)
+            environment = os.environ.copy()
+            environment.update(
+                PYTHONFAULTHANDLER="1",
+                PYTHONUNBUFFERED="1",
+                PYTHONUTF8="1",
+            )
+            creation_flags = (
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+            with self._live_log_path.open("w", encoding="utf-8") as log_file:
+                log_file.write(f"{PRODUCT_NAME} live diagnostics\n")
+                log_file.flush()
+                process = subprocess.Popen(
+                    [sys.executable, *arguments],
+                    cwd=self._config_path.parent,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    env=environment,
+                    creationflags=creation_flags,
+                    close_fds=True,
+                )
+        except OSError as exc:
+            self._show_error("启动失败", exc)
+            return
+        self._live_process = process
+        self._live_monitor.start()
         # The launcher itself does not use SetWindowDisplayAffinity: that API
         # can block in some Windows graphics/remote-session configurations.
-        # Minimize before the live process starts so it does not enter OCR.
+        # Minimize after the child is created so it does not enter OCR.
         self.showMinimized()
-        QApplication.processEvents()
-        started, process_id = QProcess.startDetached(
-            sys.executable,
-            arguments,
-            str(self._config_path.parent),
-        )
-        if not started:
-            self.showNormal()
-            self.raise_()
-            self.activateWindow()
-            self._show_error("启动失败", RuntimeError("无法创建实时翻译进程"))
-            return
         self.statusBar().showMessage(
-            f"实时翻译已启动（进程 {process_id}，{runtime_description}）；"
-            "可在右上角控制窗停止",
+            f"实时翻译正在启动（进程 {process.pid}，{runtime_description}）；"
+            f"诊断日志：{self._live_log_path}",
             10000,
+        )
+
+    def _check_live_process(self) -> None:
+        process = self._live_process
+        if process is None:
+            self._live_monitor.stop()
+            return
+        exit_code = process.poll()
+        if exit_code is None:
+            return
+        self._live_monitor.stop()
+        self._live_process = None
+        if exit_code == 0:
+            self.statusBar().showMessage("实时翻译已关闭", 5000)
+            return
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self._show_error(
+            "实时翻译进程异常退出",
+            RuntimeError(
+                f"退出码：{exit_code}\n"
+                f"日志：{self._live_log_path}\n\n"
+                f"{_log_tail(self._live_log_path)}"
+            ),
         )
 
     def _update_info(self) -> None:
@@ -1050,4 +1111,6 @@ def run_launcher(
     QTimer.singleShot(0, announce_ready)
     if duration_seconds is not None:
         QTimer.singleShot(round(duration_seconds * 1000), app.quit)
-    return app.exec()
+    exit_code = app.exec()
+    _startup_message(f"event loop exited with code {exit_code}")
+    return exit_code

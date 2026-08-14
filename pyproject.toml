@@ -39,7 +39,7 @@ ocr-gpu = [
 ]
 gui = [
   "PySide6>=6.9,<6.10",
-  "dxcam>=0.3,<0.4",
+  "dxcam[winrt]>=0.3,<0.4",
 ]
 
 [project.scripts]
