@@ -3,9 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -21,40 +19,6 @@ class OcrResultError(RuntimeError):
 
 
 _NVIDIA_DLL_HANDLES: dict[str, Any] = {}
-
-
-@lru_cache(maxsize=1)
-def discover_nvidia_gpus() -> tuple[tuple[int, str], ...]:
-    """Return NVIDIA devices without importing the heavyweight Paddle runtime."""
-    try:
-        completed = subprocess.run(
-            (
-                "nvidia-smi",
-                "--query-gpu=index,name",
-                "--format=csv,noheader,nounits",
-            ),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=3,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except (FileNotFoundError, OSError, subprocess.SubprocessError):
-        return ()
-
-    devices: list[tuple[int, str]] = []
-    for line in completed.stdout.splitlines():
-        index_text, separator, name = line.partition(",")
-        if not separator:
-            continue
-        try:
-            index = int(index_text.strip())
-        except ValueError:
-            continue
-        normalized_name = name.strip()
-        if normalized_name:
-            devices.append((index, normalized_name))
-    return tuple(devices)
 
 
 def _configure_bundled_nvidia_dlls() -> tuple[Path, ...]:

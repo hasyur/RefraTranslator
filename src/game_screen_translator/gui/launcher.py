@@ -15,8 +15,6 @@ from game_screen_translator.config import (
     save_runtime_selection,
 )
 from game_screen_translator.domain import GlossaryEntry
-from game_screen_translator.ocr.paddle import discover_nvidia_gpus
-from game_screen_translator.overlay.window import exclude_window_from_capture
 from game_screen_translator.profiles import (
     GameProfile,
     ProfileCaptureSettings,
@@ -43,6 +41,11 @@ from .theme import (
     theme_palette,
     theme_stylesheet,
 )
+
+
+def _startup_message(message: str) -> None:
+    print(f"[{PRODUCT_NAME} GUI] {message}", flush=True)
+
 
 try:
     from PySide6.QtCore import QProcess, QTimer, Qt, QUrl
@@ -248,7 +251,6 @@ class LauncherWindow(QMainWindow):
         self._theme_preference = preferences.theme
         self._effective_theme = ""
         self._profile: GameProfile | None = None
-        self._capture_excluded = False
         self._network_manager = QNetworkAccessManager(self)
         self._model_reply: QNetworkReply | None = None
         self.setWindowTitle(PRODUCT_NAME)
@@ -392,8 +394,8 @@ class LauncherWindow(QMainWindow):
 
         self.ocr_device_combo = QComboBox()
         self.ocr_device_combo.addItem("CPU", "cpu")
-        for index, name in discover_nvidia_gpus():
-            self.ocr_device_combo.addItem(f"GPU {index} · {name}", f"gpu:{index}")
+        for index in range(8):
+            self.ocr_device_combo.addItem(f"GPU {index}", f"gpu:{index}")
         configured_device = self._config.ocr.device
         device_index = self.ocr_device_combo.findData(configured_device)
         if device_index < 0:
@@ -404,6 +406,7 @@ class LauncherWindow(QMainWindow):
             device_index = self.ocr_device_combo.count() - 1
         self.ocr_device_combo.setCurrentIndex(device_index)
         self.ocr_device_combo.setToolTip(
+            "GPU 编号会在启动实时翻译时通过 Paddle 隔离校验；"
             "GPU OCR 需要通过 bootstrap.ps1 -WithGpuOcr 安装项目内运行库"
         )
         service_form.addRow("OCR 设备", self.ocr_device_combo)
@@ -717,16 +720,6 @@ class LauncherWindow(QMainWindow):
         layout.addWidget(refresh_button)
         return widget
 
-    def showEvent(self, event) -> None:  # noqa: N802
-        super().showEvent(event)
-        if QApplication.platformName() == "offscreen":
-            self._capture_excluded = True
-            return
-        if not self._capture_excluded:
-            self._capture_excluded = exclude_window_from_capture(int(self.winId()))
-            if not self._capture_excluded:
-                self.statusBar().showMessage("警告：启动器未能从屏幕采集中排除", 8000)
-
     def refresh_profiles(self, select_profile_id: str | None = None) -> None:
         current_id = select_profile_id
         if current_id is None and self.profile_combo.currentIndex() >= 0:
@@ -961,12 +954,20 @@ class LauncherWindow(QMainWindow):
         ]
         if self.debug_checkbox.isChecked():
             arguments.append("--debug-border")
+        # The launcher itself does not use SetWindowDisplayAffinity: that API
+        # can block in some Windows graphics/remote-session configurations.
+        # Minimize before the live process starts so it does not enter OCR.
+        self.showMinimized()
+        QApplication.processEvents()
         started, process_id = QProcess.startDetached(
             sys.executable,
             arguments,
             str(self._config_path.parent),
         )
         if not started:
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
             self._show_error("启动失败", RuntimeError("无法创建实时翻译进程"))
             return
         self.statusBar().showMessage(
@@ -974,7 +975,6 @@ class LauncherWindow(QMainWindow):
             "可在右上角控制窗停止",
             10000,
         )
-        self.showMinimized()
 
     def _update_info(self) -> None:
         profile = self._profile
@@ -1019,11 +1019,35 @@ def run_launcher(
 ) -> int:
     if duration_seconds is not None and duration_seconds <= 0:
         raise ValueError("--duration 必须大于 0")
+    _startup_message("creating QApplication")
     app = QApplication.instance() or QApplication([GUI_PROCESS_NAME])
     app.setApplicationName(PRODUCT_NAME)
     app.setApplicationDisplayName(PRODUCT_NAME)
+    _startup_message(f"Qt platform: {app.platformName()}")
+    _startup_message("building launcher window")
     window = LauncherWindow(config_path)
+    screen = app.primaryScreen()
+    if screen is not None:
+        available = screen.availableGeometry()
+        window.move(
+            max(available.left(), available.left() + (available.width() - window.width()) // 2),
+            max(available.top(), available.top() + (available.height() - window.height()) // 2),
+        )
+    _startup_message("showing launcher window")
     window.show()
+
+    def announce_ready() -> None:
+        if app.platformName() == "windows":
+            window.raise_()
+            window.activateWindow()
+        geometry = window.geometry()
+        _startup_message(
+            "event loop ready; "
+            f"visible={window.isVisible()} geometry="
+            f"{geometry.x()},{geometry.y()},{geometry.width()},{geometry.height()}"
+        )
+
+    QTimer.singleShot(0, announce_ready)
     if duration_seconds is not None:
         QTimer.singleShot(round(duration_seconds * 1000), app.quit)
     return app.exec()

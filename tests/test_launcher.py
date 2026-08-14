@@ -310,3 +310,16 @@ def test_gpu_device_probe_runs_in_isolated_interpreter(monkeypatch) -> None:
     assert calls[0][0][0] == sys.executable
     assert calls[0][0][-1] == "gpu:1"
     assert calls[0][1]["timeout"] == 20
+
+
+def test_launcher_lists_gpu_indices_without_a_startup_driver_probe(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path)
+
+    assert window.ocr_device_combo.currentData() == "cpu"
+    assert window.ocr_device_combo.findData("gpu:0") >= 0
+    assert window.ocr_device_combo.findData("gpu:7") >= 0
+    window.close()
+    app.processEvents()

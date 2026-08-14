@@ -72,3 +72,15 @@ def test_bootstrap_script_is_ascii_for_windows_powershell_51() -> None:
     script = (PROJECT_ROOT / "bootstrap.ps1").read_bytes()
 
     assert script.decode("ascii")
+
+
+def test_gui_batch_preserves_native_crash_diagnostics() -> None:
+    script = (PROJECT_ROOT / "start_gui.bat").read_text(encoding="ascii")
+
+    assert "-X faulthandler" in script
+    assert "QApplication([])" in script
+    assert "launcher.log" in script
+    assert 'set "QT_QPA_PLATFORM=windows"' in script
+    assert 'set "QT_PLUGIN_PATH="' in script
+    assert 'if not "%launcher_exit%"=="0" goto :launch_failed' in script
+    assert "if errorlevel 1 pause" not in script.lower()
