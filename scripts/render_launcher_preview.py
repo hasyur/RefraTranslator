@@ -31,7 +31,7 @@ def main() -> int:
             """
 [translation]
 provider = "openai_compatible"
-base_url = "http://192.168.5.2:1234/v1"
+base_url = "http://127.0.0.1:1234/v1"
 model = "hy-mt1.5-7b"
 target_language = "简体中文"
 """,

@@ -133,7 +133,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
         return True, 4321
 
     monkeypatch.setattr(QProcess, "startDetached", fake_start_detached)
-    window.server_url_combo.setCurrentText("http://10.20.30.40:9000/v1")
+    window.server_url_combo.setCurrentText("http://203.0.113.10:9000/v1")
     window.model_combo.setCurrentText("alternate-model")
     window.max_concurrency_spin.setValue(6)
     window.settle_rescan_spin.setValue(800)
@@ -153,7 +153,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert calls[0][1][-2:] == ["--profile", "game"]
     assert calls[0][2] == str(tmp_path)
     saved = load_config(config_path)
-    assert saved.translation.base_url == "http://10.20.30.40:9000/v1"
+    assert saved.translation.base_url == "http://203.0.113.10:9000/v1"
     assert saved.translation.model == "alternate-model"
     assert saved.translation.max_concurrency == 6
     assert saved.ocr.device == "cpu"

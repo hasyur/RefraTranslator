@@ -361,7 +361,7 @@ class LauncherWindow(QMainWindow):
         self.server_url_combo.addItem(self._config.translation.base_url)
         if self.server_url_combo.lineEdit() is not None:
             self.server_url_combo.lineEdit().setPlaceholderText(
-                "例如 http://192.168.5.2:1234/v1"
+                "例如 http://127.0.0.1:1234/v1"
             )
         service_form.addRow("API 服务器", self.server_url_combo)
 

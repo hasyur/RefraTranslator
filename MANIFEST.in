@@ -1,0 +1,8 @@
+include LICENSE
+include README.md
+include THIRD_PARTY_NOTICES.md
+include bootstrap.ps1
+include config.example.toml
+include start_gui.bat
+recursive-include scripts *.py
+recursive-include tests *.py

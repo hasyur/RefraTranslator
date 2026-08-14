@@ -1,17 +1,39 @@
 # RefraTranslator
 
-RefraTranslator 是一款 Windows 游戏屏幕实时翻译软件：
+RefraTranslator 是一款处于 Alpha 阶段的 Windows 游戏屏幕实时翻译软件：
 
 1. DXcam 持续采集一个显示器区域，低分辨率变化检测负责限制 OCR 频率；
 2. PP-OCRv6 small 识别日文/英文，首轮有效结果即建立 track/revision 并进入翻译；
 3. 在跟踪前过滤图标、纯数字、中文/纯汉字及无关文字，避免发送给 LLM；
-4. 通过 OpenAI-compatible API 调用 `hy-mt1.5-7b`；
+4. 通过 OpenAI-compatible API 调用用户自行部署的翻译模型；
 5. 严格校验批量翻译的 `<sn id="...">` 对应关系，失败时自动重试并拆分故障批次；
 6. 在鼠标穿透的透明窗口中仅模糊原文字区域，并用带细描边的清晰字体绘制中文译文；
 7. 使用 `WDA_EXCLUDEFROMCAPTURE` 排除覆盖层，避免翻译结果被再次 OCR。
 8. 可为每个游戏选择独立 Profile，隔离术语表、模型缓存和人工修订。
 
 程序不注入游戏进程、不区分说话人，也不管理 LLM 推理服务器。当前支持普通窗口和无边框窗口；独占全屏不在原型保证范围内。
+
+**本仓库不包含、下载或启动任何 LLM 后端、模型代码或模型权重。** 使用前需要由用户准备一个可访问的 OpenAI-compatible API 服务。
+
+## 快速开始（Windows 源码 Alpha）
+
+前置条件：
+
+- 64 位 Windows 10 或 Windows 11；
+- 64 位 Python 3.11、3.12 或 3.13，并确保命令行可以运行 `python`；
+- 一个由你自行部署的 OpenAI-compatible 翻译服务，至少提供 `/v1/models` 和 `/v1/chat/completions`。
+
+下载或克隆源码后，在项目根目录打开 PowerShell。CPU OCR 的推荐安装命令是：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithOcr -WithGui
+```
+
+安装脚本只会写入项目目录内的 `.venv` 和 `.cache`。首次安装还会在缺少时将 `config.example.toml` 复制为本机 `config.toml`；重新运行不会覆盖已有配置。
+
+启动你自己的 LLM 服务，然后双击 `start_gui.bat`。在启动器中填写服务器地址、读取模型列表并选择模型，再创建游戏 Profile、框选字幕区域并启动实时翻译。公开模板默认使用 `http://127.0.0.1:1234/v1`；这只是本机回环地址示例，不代表程序自带 1234 端口的服务。
+
+第一次启动 OCR 时会下载所选 PaddleOCR 模型到项目的 `.cache\paddlex`。如果安装或启动失败，请先确认 Python 版本、LLM API 地址和模型 ID，再运行下文的 `doctor` 命令定位服务连接问题。
 
 ## 图形化启动器（推荐）
 
@@ -44,7 +66,7 @@ RefraTranslator 是一款 Windows 游戏屏幕实时翻译软件：
 
 所有 Python 包都安装在项目目录的 `.venv`，不会写入系统或 Anaconda 的全局 site-packages。脚本和文档中的命令也始终显式调用 `.venv\Scripts\python.exe`，无需激活环境。安装缓存位于 `.cache\pip`，PaddleOCR 模型位于 `.cache\paddlex`，不会使用用户级 `~/.paddlex`。
 
-安装核心与开发依赖：
+仅安装核心 HTTP 与图像依赖：
 
 ```powershell
 .\bootstrap.ps1
@@ -62,6 +84,12 @@ RefraTranslator 是一款 Windows 游戏屏幕实时翻译软件：
 .\bootstrap.ps1 -WithOcr -WithGui
 ```
 
+贡献代码或运行完整单元测试时，额外安装开发和 GUI 依赖：
+
+```powershell
+.\bootstrap.ps1 -WithDev -WithGui
+```
+
 NVIDIA GPU OCR 使用独立开关；它会先移除 `.venv` 中的 CPU Paddle，再从 Paddle 官方 CUDA 仓库安装 GPU 版本及运行库：
 
 ```powershell
@@ -70,20 +98,22 @@ NVIDIA GPU OCR 使用独立开关；它会先移除 `.venv` 中的 CPU Paddle，
 
 GPU 默认使用 CUDA 12.9 wheel；可通过 `-GpuCuda cu118|cu126|cu129|cu130` 选择其他官方构建。`-WithOcr` 与 `-WithGpuOcr` 互斥，但 GPU Paddle 本身仍可在 GUI 中切回 CPU 推理。首次 GPU 安装需要下载约数 GB 的隔离运行库，不要求向系统 Python 安装包。
 
-`.venv/`、`.cache/`、本机的 `config.toml` 和 `.gui-settings.toml` 都已加入 `.gitignore`。可公开的配置模板是 `config.example.toml`。
+`.venv/`、`.cache/`、本机的 `config.toml` 和 `.gui-settings.toml` 都已加入 `.gitignore`。可公开的配置模板是 `config.example.toml`。安装脚本和 `start_gui.bat` 都只会在 `config.toml` 不存在时复制模板，不会覆盖用户设置。
 
 ## 配置
 
-本机 `config.toml` 已指向当前测试服务：
+公开模板使用本机回环地址和一个经过开发验证的示例模型 ID：
 
 ```toml
 [translation]
-base_url = "http://192.168.5.2:1234/v1"
+base_url = "http://127.0.0.1:1234/v1"
 model = "hy-mt1.5-7b"
 
 [ocr]
-device = "gpu:1" # 第二张 NVIDIA GPU；CPU 使用 "cpu"
+device = "cpu"
 ```
+
+请将地址和模型 ID 改为你自己的服务实际提供的值，也可以直接在图形化启动器中点击“读取模型列表”后保存。HY-MT1.5 只是已测试选项之一，并不是必需模型。
 
 API key 不是必填。若以后服务器要求鉴权，只通过 `REFRA_TRANSLATOR_API_KEY` 环境变量提供，不写进配置文件。旧配置中显式指定的 `GAME_SCREEN_TRANSLATOR_API_KEY` 仍然兼容。
 
@@ -206,6 +236,8 @@ target = "夜之城"
 .\.venv\Scripts\python.exe -m pytest
 ```
 
+仓库的 Windows CI 会在 Python 3.11、3.12 和 3.13 上安装核心、开发及 GUI 依赖，运行 `pip check` 和非联调测试；它不会下载 PaddleOCR 模型，也不会连接任何 LLM 服务。
+
 实时服务器联调测试默认跳过。显式设置开关后才会访问本地服务：
 
 ```powershell
@@ -236,3 +268,9 @@ $env:REFRA_TRANSLATOR_LIVE = "1"
 - 暂不自动识别说话人或区分人物语气；
 - 暂无自动识别游戏窗口、随窗口移动以及 Profile 删除界面；
 - GPU OCR 当前依赖 NVIDIA CUDA 版 Paddle；非 NVIDIA 显卡仍使用 CPU 路径。
+
+## 许可证与第三方组件
+
+RefraTranslator 自身源代码采用 [Apache License 2.0](LICENSE)。依赖项继续适用各自的上游许可证，具体清单和二进制再分发提醒见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+LLM 推理后端与模型不属于本项目发行物。HY-MT1.5 等模型的许可条款需要由使用者独立审阅；RefraTranslator 的 Apache-2.0 许可证不会覆盖模型、推理服务器或其他第三方软件。

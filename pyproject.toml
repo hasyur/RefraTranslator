@@ -8,6 +8,17 @@ version = "0.1.0"
 description = "RefraTranslator: real-time Windows game screen translation with a local LLM API"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Win32 (MS Windows)",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
 dependencies = [
   "httpx>=0.28,<1",
   "Pillow>=11,<13",
