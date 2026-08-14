@@ -462,6 +462,184 @@ def _two_visible_sources(controller: LiveController):
     return update.stable_sources
 
 
+def _many_visible_sources(controller: LiveController, count: int):
+    observations = tuple(
+        OcrText(
+            f"字幕{index}です。",
+            0.99,
+            ((10, index * 30), (180, index * 30), (180, index * 30 + 20), (10, index * 30 + 20)),
+        )
+        for index in range(count)
+    )
+    return controller._tracker.observe(observations, now=1.0).stable_sources
+
+
+def test_translation_scheduler_bounds_pending_work(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-1.8b",
+            max_concurrency=2,
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0, max_batch_size=1),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    release = threading.Event()
+
+    def translate(batch, context):
+        del context
+        release.wait(timeout=5)
+        return _successful_worker_result(batch)
+
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
+    sources = _many_visible_sources(controller, 10)
+
+    try:
+        controller._submit_translations(sources)
+
+        assert len(controller._translation_futures) == 2
+        assert len(controller._pending_translations) == 4
+        assert len(controller._scheduled_translation_keys()) == 6
+
+        controller._queue_untranslated_visible_sources()
+        assert len(controller._translation_futures) == 2
+        assert len(controller._pending_translations) == 4
+    finally:
+        release.set()
+        controller.close()
+
+
+def test_pending_translation_is_replaced_by_latest_track_revision(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-1.8b",
+            max_concurrency=1,
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0, max_batch_size=1),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    release_first = threading.Event()
+    calls: list[str] = []
+
+    def translate(batch, context):
+        del context
+        text = batch.items[0].text
+        calls.append(text)
+        if text == "先处理。":
+            release_first.wait(timeout=5)
+        return _successful_worker_result(batch)
+
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
+    initial = controller._tracker.observe(
+        (
+            OcrText("先处理。", 0.99, ((10, 10), (150, 10), (150, 40), (10, 40))),
+            OcrText("旧识别。", 0.99, ((10, 60), (150, 60), (150, 90), (10, 90))),
+        ),
+        now=1.0,
+    )
+
+    try:
+        controller._submit_translations(initial.stable_sources)
+        revised = controller._tracker.observe(
+            (
+                OcrText("先处理。", 0.99, ((10, 10), (150, 10), (150, 40), (10, 40))),
+                OcrText("最新识别。", 0.99, ((10, 60), (150, 60), (150, 90), (10, 90))),
+            ),
+            now=1.1,
+        )
+        controller._submit_translations(revised.stable_sources)
+
+        assert [
+            submission.batch.items[0].text
+            for submission in controller._pending_translations
+        ] == ["最新识别。"]
+        assert controller._translation_coalesced_count == 1
+
+        release_first.set()
+        next(iter(controller._translation_futures)).result(timeout=2)
+        controller._collect_translations()
+        next(iter(controller._translation_futures)).result(timeout=2)
+        controller._collect_translations()
+
+        assert calls == ["先处理。", "最新识别。"]
+        assert [
+            track.translated_text for track in controller._tracker.visible_tracks
+        ] == ["译文：先处理。", "译文：最新识别。"]
+    finally:
+        release_first.set()
+        controller.close()
+
+
+def test_deferred_visible_text_returns_when_queue_has_capacity(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-1.8b",
+            max_concurrency=1,
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0, max_batch_size=1),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    calls: list[str] = []
+
+    def translate(batch, context):
+        del context
+        calls.extend(source.text for source in batch.items)
+        return _successful_worker_result(batch)
+
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
+    sources = _many_visible_sources(controller, 7)
+    controller._submit_translations(sources)
+
+    for _ in range(20):
+        for future in tuple(controller._translation_futures):
+            future.result(timeout=2)
+        controller._collect_translations()
+        controller._queue_untranslated_visible_sources()
+        controller._dispatch_translation_work()
+        if all(
+            track.translated_text is not None
+            for track in controller._tracker.visible_tracks
+        ):
+            break
+
+    assert set(calls) == {source.text for source in sources}
+    assert all(
+        track.translated_text is not None
+        for track in controller._tracker.visible_tracks
+    )
+    assert controller._pending_translations == []
+    controller.close()
+
+
 def test_concurrent_batches_publish_in_top_to_bottom_order(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
@@ -521,9 +699,15 @@ def test_concurrent_batches_publish_in_top_to_bottom_order(monkeypatch) -> None:
         assert tuple(controller._context) == ()
         assert [pair.source for pair in controller._context_snapshot()] == ["下方。"]
 
-        controller._submit_translations(
-            (SourceText("live-zone-1", "follow-up", 1, "后续。"),)
+        follow_up_update = controller._tracker.observe(
+            (
+                OcrText("上方。", 0.99, ((10, 10), (150, 10), (150, 40), (10, 40))),
+                OcrText("下方。", 0.99, ((10, 60), (150, 60), (150, 90), (10, 90))),
+                OcrText("后续。", 0.99, ((10, 110), (150, 110), (150, 140), (10, 140))),
+            ),
+            now=1.1,
         )
+        controller._submit_translations(follow_up_update.stable_sources)
         follow_up = next(
             submission
             for submission in controller._translation_futures.values()
@@ -537,8 +721,12 @@ def test_concurrent_batches_publish_in_top_to_bottom_order(monkeypatch) -> None:
 
         assert [
             track.translated_text for track in controller._tracker.visible_tracks
-        ] == ["译文：上方。", "译文：下方。"]
-        assert [pair.source for pair in controller._context] == ["上方。", "下方。"]
+        ] == ["译文：上方。", "译文：下方。", "译文：后续。"]
+        assert [pair.source for pair in controller._context] == [
+            "上方。",
+            "下方。",
+            "后续。",
+        ]
         assert controller._early_context == {}
     finally:
         release_top.set()
@@ -596,6 +784,63 @@ def test_protocol_failure_splits_batch_and_recovers_every_visible_text(
         "译文：急げ。",
     }
     assert controller._translation_failure_count == 0
+    controller.close()
+
+
+def test_split_retries_share_the_configured_concurrency_limit(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-1.8b",
+            max_concurrency=1,
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0, max_batch_size=8),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [300.0]
+    calls: list[int] = []
+
+    def translate(batch, context):
+        del context
+        calls.append(len(batch.items))
+        if len(batch.items) > 1:
+            raise TranslationProtocolError("缺少 id")
+        return _successful_worker_result(batch)
+
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
+    controller._submit_translations(_two_visible_sources(controller))
+    next(iter(controller._translation_futures)).exception(timeout=2)
+    controller._collect_translations()
+
+    assert len(controller._translation_retries) == 2
+    clock[0] = 300.36
+    controller._submit_ready_translation_retries()
+    assert len(controller._translation_futures) == 1
+    assert len(controller._translation_retries) == 1
+
+    next(iter(controller._translation_futures)).result(timeout=2)
+    controller._collect_translations()
+    assert len(controller._translation_futures) == 1
+    assert controller._translation_retries == []
+
+    next(iter(controller._translation_futures)).result(timeout=2)
+    controller._collect_translations()
+
+    assert calls == [2, 1, 1]
+    assert all(
+        track.translated_text is not None
+        for track in controller._tracker.visible_tracks
+    )
     controller.close()
 
 

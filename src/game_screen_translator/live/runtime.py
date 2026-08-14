@@ -7,7 +7,7 @@ import sys
 import time
 from collections import Counter, deque
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Sequence
 
@@ -70,6 +70,7 @@ except ImportError as exc:  # pragma: no cover - exercised only without GUI extr
 BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 _MAX_TRANSLATION_ATTEMPTS = 3
 _TRANSLATION_RETRY_BASE_SECONDS = 0.35
+_PENDING_TRANSLATION_BATCHES_PER_WORKER = 2
 
 
 def _bounds_distance_squared(first: Bounds | None, second: Bounds) -> float:
@@ -299,6 +300,12 @@ class LiveController:
         self._translation_futures: dict[
             Future[_TranslationWorkerResult], _TranslationSubmission
         ] = {}
+        self._pending_translations: list[_TranslationSubmission] = []
+        self._max_pending_translation_batches = max(
+            1,
+            config.translation.max_concurrency
+            * _PENDING_TRANSLATION_BATCHES_PER_WORKER,
+        )
         self._translation_retries: list[_PendingTranslationRetry] = []
         self._completed_translations: dict[
             tuple[int, tuple[int, ...]], _CompletedTranslation
@@ -330,6 +337,9 @@ class LiveController:
         self._stale_result_count = 0
         self._translation_retry_count = 0
         self._translation_failure_count = 0
+        self._translation_coalesced_count = 0
+        self._translation_queue_peak = 0
+        self._translation_exhausted_keys: set[tuple[str, int]] = set()
         self._cancelled_stale_count = 0
         self._reattached_result_count = 0
         self._timer = QTimer()
@@ -381,6 +391,8 @@ class LiveController:
             f"人工修订 {self._manual_hit_count} 条，缓存 {self._cache_hit_count} 条，"
             f"模型 {self._model_result_count} 条，重试 {self._translation_retry_count} 次，"
             f"最终失败 {self._translation_failure_count} 条，"
+            f"合并过期排队 {self._translation_coalesced_count} 条，"
+            f"排队峰值 {self._translation_queue_peak} 批，"
             f"丢弃过期译文 {self._stale_result_count} 条，"
             f"取消过期排队 {self._cancelled_stale_count} 条，"
             f"接回晚到译文 {self._reattached_result_count} 条"
@@ -394,7 +406,8 @@ class LiveController:
         self._collect_ocr()
         self._expire_missing_tracks(time.monotonic())
         self._collect_translations()
-        self._submit_ready_translation_retries()
+        self._queue_untranslated_visible_sources()
+        self._dispatch_translation_work()
 
         try:
             frame = self._capture.latest_frame()
@@ -556,8 +569,9 @@ class LiveController:
             self._submit_translations(update.stable_sources)
 
     def _submit_translations(self, sources: Sequence[SourceText]) -> None:
+        if not sources:
+            return
         batch_size = self._config.live.max_batch_size
-        context = self._context_snapshot()
         visible_by_key = {
             (track.track_id, track.revision): track
             for track in self._tracker.visible_tracks
@@ -575,11 +589,37 @@ class LiveController:
                 ),
             )
         )
+        queued_sources = self._coalesce_pending_translations(
+            ordered_sources,
+            visible_by_key,
+        )
+        self._prune_obsolete_pending_translations()
+        self._dispatch_translation_work()
+        scheduled_keys = self._scheduled_translation_keys()
+        queued_sources = tuple(
+            source
+            for source in queued_sources
+            if (source.track_id, source.revision) not in scheduled_keys
+            and (source.track_id, source.revision)
+            not in self._translation_exhausted_keys
+        )
+        if not queued_sources:
+            self._dispatch_translation_work()
+            return
+
+        context = self._context_snapshot()
         order_group = self._next_translation_order_group
         self._next_translation_order_group += 1
-        for batch_index, offset in enumerate(range(0, len(ordered_sources), batch_size)):
+        admission_limit = self._max_pending_translation_batches + max(
+            0,
+            self._config.translation.max_concurrency
+            - len(self._translation_futures),
+        )
+        for batch_index, offset in enumerate(range(0, len(queued_sources), batch_size)):
+            if len(self._pending_translations) >= admission_limit:
+                break
             batch = TranslationBatch(
-                tuple(ordered_sources[offset : offset + batch_size])
+                tuple(queued_sources[offset : offset + batch_size])
             )
             origins = tuple(
                 self._source_latency_origins.get((source.track_id, source.revision))
@@ -605,15 +645,153 @@ class LiveController:
                 )
                 for source in batch.items
             )
-            self._submit_translation_batch(
-                batch,
-                context=context,
-                order_group=order_group,
-                order_path=(batch_index,),
-                pipeline_started_at=pipeline_started_at,
-                first_recognized_at=first_recognized_at,
-                source_bounds=source_bounds,
-                attempt=1,
+            queued_at = time.monotonic()
+            self._pending_translations.append(
+                _TranslationSubmission(
+                    batch,
+                    context,
+                    order_group,
+                    (batch_index,),
+                    queued_at,
+                    pipeline_started_at,
+                    first_recognized_at,
+                    source_bounds,
+                    1,
+                )
+            )
+        self._dispatch_translation_work()
+        self._translation_queue_peak = max(
+            self._translation_queue_peak,
+            len(self._pending_translations),
+        )
+
+    def _coalesce_pending_translations(
+        self,
+        sources: Sequence[SourceText],
+        visible_by_key: dict[tuple[str, int], TrackedText],
+    ) -> tuple[SourceText, ...]:
+        replacements = {source.track_id: source for source in sources}
+        if not replacements or not self._pending_translations:
+            return tuple(sources)
+
+        coalesced: list[_TranslationSubmission] = []
+        for submission in self._pending_translations:
+            items: list[SourceText] = []
+            bounds: list[Bounds | None] = []
+            changed = False
+            for source, source_bounds in zip(
+                submission.batch.items,
+                submission.source_bounds,
+                strict=True,
+            ):
+                replacement = replacements.pop(source.track_id, None)
+                if replacement is None:
+                    items.append(source)
+                    bounds.append(source_bounds)
+                    continue
+                items.append(replacement)
+                track = visible_by_key.get((replacement.track_id, replacement.revision))
+                bounds.append(track.bounds if track is not None else source_bounds)
+                if replacement.revision != source.revision or replacement.text != source.text:
+                    self._translation_coalesced_count += 1
+                    changed = True
+            coalesced.append(
+                replace(
+                    submission,
+                    batch=TranslationBatch(tuple(items)),
+                    source_bounds=tuple(bounds),
+                )
+                if changed
+                else submission
+            )
+        self._pending_translations = coalesced
+        return tuple(
+            source for source in sources if source.track_id in replacements
+        )
+
+    def _prune_obsolete_pending_translations(self) -> None:
+        current: list[_TranslationSubmission] = []
+        for submission in self._pending_translations:
+            batch, source_bounds = self._rebind_visible_sources(
+                submission.batch,
+                submission.source_bounds,
+            )
+            if batch is None:
+                self._cancelled_stale_count += len(submission.batch.items)
+                continue
+            removed = len(submission.batch.items) - len(batch.items)
+            self._cancelled_stale_count += removed
+            current.append(
+                replace(
+                    submission,
+                    batch=batch,
+                    source_bounds=source_bounds,
+                )
+            )
+        self._pending_translations = current
+
+    def _scheduled_translation_keys(self) -> set[tuple[str, int]]:
+        scheduled: set[tuple[str, int]] = set()
+        for submission in self._pending_translations:
+            scheduled.update(
+                (source.track_id, source.revision) for source in submission.batch.items
+            )
+        for submission in self._translation_futures.values():
+            scheduled.update(
+                (source.track_id, source.revision) for source in submission.batch.items
+            )
+        for retry in self._translation_retries:
+            scheduled.update(
+                (source.track_id, source.revision) for source in retry.batch.items
+            )
+        for completed in self._completed_translations.values():
+            scheduled.update(
+                (source.track_id, source.revision)
+                for source in completed.submission.batch.items
+            )
+        return scheduled
+
+    def _queue_untranslated_visible_sources(self) -> None:
+        visible = self._tracker.visible_tracks
+        visible_keys = {
+            (track.track_id, track.revision) for track in visible
+        }
+        self._translation_exhausted_keys.intersection_update(visible_keys)
+        scheduled = self._scheduled_translation_keys()
+        deferred = tuple(
+            track.source(self._tracker.zone_id)
+            for track in visible
+            if track.stable_emitted
+            and track.translated_text is None
+            and (track.track_id, track.revision) not in scheduled
+            and (track.track_id, track.revision)
+            not in self._translation_exhausted_keys
+        )
+        if deferred:
+            self._submit_translations(deferred)
+
+    def _dispatch_translation_work(self) -> None:
+        self._dispatch_ready_translation_retries()
+        self._dispatch_pending_translations()
+
+    def _dispatch_pending_translations(self) -> None:
+        concurrency = self._config.translation.max_concurrency
+        while self._pending_translations and len(self._translation_futures) < concurrency:
+            submission = self._pending_translations.pop(0)
+            batch, source_bounds = self._rebind_visible_sources(
+                submission.batch,
+                submission.source_bounds,
+                skip_active=True,
+            )
+            if batch is None:
+                self._cancelled_stale_count += len(submission.batch.items)
+                continue
+            self._start_translation_submission(
+                replace(
+                    submission,
+                    batch=batch,
+                    source_bounds=source_bounds,
+                )
             )
 
     def _context_snapshot(self) -> tuple[ContextPair, ...]:
@@ -626,32 +804,14 @@ class LiveController:
                 combined.extend(pairs)
         return tuple(combined[-limit:])
 
-    def _submit_translation_batch(
+    def _start_translation_submission(
         self,
-        batch: TranslationBatch,
-        *,
-        context: tuple[ContextPair, ...],
-        order_group: int,
-        order_path: tuple[int, ...],
-        pipeline_started_at: float,
-        first_recognized_at: float,
-        source_bounds: tuple[Bounds | None, ...],
-        attempt: int,
+        submission: _TranslationSubmission,
     ) -> None:
-        queued_at = time.monotonic()
-        submission = _TranslationSubmission(
-            batch,
-            context,
-            order_group,
-            order_path,
-            queued_at,
-            pipeline_started_at,
-            first_recognized_at,
-            source_bounds,
-            attempt,
-        )
         future = self._translation_executor.submit(
-            self._translate_blocking_timed, batch, context
+            self._translate_blocking_timed,
+            submission.batch,
+            submission.context,
         )
         self._translation_futures[future] = submission
 
@@ -759,6 +919,7 @@ class LiveController:
             )
 
         self._publish_ready_translations()
+        self._dispatch_translation_work()
 
     def _publish_ready_translations(self) -> None:
         scene_changed = False
@@ -836,6 +997,10 @@ class LiveController:
         update therefore cannot block text found by a later OCR pass.
         """
         first_path_by_group: dict[int, tuple[int, ...]] = {}
+        for submission in self._pending_translations:
+            current = first_path_by_group.get(submission.order_group)
+            if current is None or submission.order_path < current:
+                first_path_by_group[submission.order_group] = submission.order_path
         for submission in self._translation_futures.values():
             current = first_path_by_group.get(submission.order_group)
             if current is None or submission.order_path < current:
@@ -896,6 +1061,9 @@ class LiveController:
     ) -> bool:
         if not isinstance(error, (TranslationProtocolError, TranslationTransportError)):
             self._translation_failure_count += len(submission.batch.items)
+            self._translation_exhausted_keys.update(
+                (source.track_id, source.revision) for source in submission.batch.items
+            )
             return False
 
         rebound_batch, rebound_bounds = self._rebind_visible_sources(
@@ -947,6 +1115,9 @@ class LiveController:
 
         if submission.attempt >= _MAX_TRANSLATION_ATTEMPTS:
             self._translation_failure_count += len(rebound_batch.items)
+            self._translation_exhausted_keys.update(
+                (source.track_id, source.revision) for source in rebound_batch.items
+            )
             return False
 
         delay = _TRANSLATION_RETRY_BASE_SECONDS * (2 ** (submission.attempt - 1))
@@ -992,16 +1163,23 @@ class LiveController:
         self._translation_retry_count += 1
 
     def _submit_ready_translation_retries(self) -> None:
-        if not self._translation_retries:
-            return
+        self._dispatch_translation_work()
+
+    def _dispatch_ready_translation_retries(self) -> None:
         now = time.monotonic()
-        ready = tuple(item for item in self._translation_retries if item.ready_at <= now)
-        if not ready:
-            return
-        self._translation_retries = [
-            item for item in self._translation_retries if item.ready_at > now
-        ]
-        for retry in ready:
+        concurrency = self._config.translation.max_concurrency
+        while len(self._translation_futures) < concurrency:
+            retry_index = next(
+                (
+                    index
+                    for index, item in enumerate(self._translation_retries)
+                    if item.ready_at <= now
+                ),
+                None,
+            )
+            if retry_index is None:
+                break
+            retry = self._translation_retries.pop(retry_index)
             batch, source_bounds = self._rebind_visible_sources(
                 retry.batch,
                 retry.source_bounds,
@@ -1010,15 +1188,18 @@ class LiveController:
             if batch is None:
                 self._cancelled_stale_count += len(retry.batch.items)
                 continue
-            self._submit_translation_batch(
-                batch,
-                context=retry.context,
-                order_group=retry.order_group,
-                order_path=retry.order_path,
-                pipeline_started_at=retry.pipeline_started_at,
-                first_recognized_at=retry.first_recognized_at,
-                source_bounds=source_bounds,
-                attempt=retry.attempt,
+            self._start_translation_submission(
+                _TranslationSubmission(
+                    batch,
+                    retry.context,
+                    retry.order_group,
+                    retry.order_path,
+                    now,
+                    retry.pipeline_started_at,
+                    retry.first_recognized_at,
+                    source_bounds,
+                    retry.attempt,
+                )
             )
 
     def _rebind_visible_sources(
