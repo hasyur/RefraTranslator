@@ -15,6 +15,7 @@ SOURCE_RELEASE_FILES = (
     "bootstrap.ps1",
     "config.example.toml",
     "start_gui.bat",
+    "start_test_scenes.bat",
 )
 PUBLIC_ENDPOINT_FILES = (
     PROJECT_ROOT / "README.md",

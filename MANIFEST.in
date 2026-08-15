@@ -4,5 +4,7 @@ include THIRD_PARTY_NOTICES.md
 include bootstrap.ps1
 include config.example.toml
 include start_gui.bat
+include start_test_scenes.bat
 recursive-include scripts *.py
 recursive-include tests *.py
+recursive-include tests/manual *.md
