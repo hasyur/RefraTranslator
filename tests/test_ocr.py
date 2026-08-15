@@ -10,6 +10,7 @@ from game_screen_translator.ocr import paddle as paddle_module
 from game_screen_translator.ocr.paddle import (
     OcrResultError,
     PaddleOcrEngine,
+    available_ocr_devices,
     parse_paddle_results,
     validate_ocr_device,
 )
@@ -122,3 +123,39 @@ def test_validate_gpu_device_rejects_cpu_paddle(monkeypatch) -> None:
 
     with pytest.raises(paddle_module.OcrDependencyError, match="CPU 版 Paddle"):
         validate_ocr_device("gpu:0")
+
+
+def test_available_ocr_devices_lists_only_cuda_devices_seen_by_paddle(
+    monkeypatch,
+) -> None:
+    fake_paddle = SimpleNamespace(
+        device=SimpleNamespace(
+            is_compiled_with_cuda=lambda: True,
+            cuda=SimpleNamespace(
+                device_count=lambda: 2,
+                get_device_name=lambda index: (
+                    "NVIDIA GeForce RTX 4070 Laptop GPU"
+                    if index == 0
+                    else "NVIDIA RTX A2000"
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "paddle", fake_paddle)
+    monkeypatch.setattr(paddle_module, "_configure_bundled_nvidia_dlls", lambda: ())
+
+    assert available_ocr_devices() == (
+        ("cpu", "CPU"),
+        ("gpu:0", "GPU 0 · NVIDIA GeForce RTX 4070 Laptop GPU"),
+        ("gpu:1", "GPU 1 · NVIDIA RTX A2000"),
+    )
+
+
+def test_available_ocr_devices_hides_gpu_choices_for_cpu_paddle(monkeypatch) -> None:
+    fake_paddle = SimpleNamespace(
+        device=SimpleNamespace(is_compiled_with_cuda=lambda: False),
+    )
+    monkeypatch.setitem(sys.modules, "paddle", fake_paddle)
+    monkeypatch.setattr(paddle_module, "_configure_bundled_nvidia_dlls", lambda: ())
+
+    assert available_ocr_devices() == (("cpu", "CPU"),)

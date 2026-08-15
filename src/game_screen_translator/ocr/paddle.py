@@ -78,6 +78,31 @@ def validate_ocr_device(device: str) -> str:
     return f"{normalized} · Paddle {paddle.__version__} · CUDA {cuda_version}"
 
 
+def available_ocr_devices() -> tuple[tuple[str, str], ...]:
+    """Return CPU plus CUDA devices that the installed Paddle runtime can use."""
+    devices: list[tuple[str, str]] = [("cpu", "CPU")]
+    _configure_bundled_nvidia_dlls()
+    try:
+        import paddle
+    except (ImportError, OSError):
+        return tuple(devices)
+    try:
+        if not paddle.device.is_compiled_with_cuda():
+            return tuple(devices)
+        count = int(paddle.device.cuda.device_count())
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return tuple(devices)
+
+    for index in range(count):
+        try:
+            name = str(paddle.device.cuda.get_device_name(index)).strip()
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            name = ""
+        label = f"GPU {index} · {name}" if name else f"GPU {index}"
+        devices.append((f"gpu:{index}", label))
+    return tuple(devices)
+
+
 def _plain_payload(result: Any) -> Mapping[str, Any]:
     value = getattr(result, "json", result)
     if callable(value):

@@ -18,6 +18,7 @@ from game_screen_translator.gui.theme import (
     THEME_LIGHT,
     gui_settings_path,
     load_gui_preferences,
+    theme_stylesheet,
 )
 from game_screen_translator.profiles import (
     ProfileCaptureSettings,
@@ -69,7 +70,7 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
         target_language=config.translation.target_language,
     )
 
-    window = LauncherWindow(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
 
     assert window.windowTitle() == PRODUCT_NAME
     assert window.profile_combo.currentData() == "game"
@@ -125,7 +126,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     _write_config(config_path)
     config = load_config(config_path)
     create_game_profile(config_path, config, "game")
-    window = LauncherWindow(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
     calls = []
 
     class FakeProcess:
@@ -185,7 +186,7 @@ def test_launcher_restores_and_reports_live_process_failure(
     app = QApplication.instance() or QApplication([])
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
-    window = LauncherWindow(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
     window._live_log_path.parent.mkdir(parents=True)
     window._live_log_path.write_text("OCR ready\nactual capture error\n", encoding="utf-8")
 
@@ -220,7 +221,7 @@ def test_launcher_theme_switch_has_contrast_and_persists_project_locally(
     app = QApplication.instance() or QApplication([])
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
-    window = LauncherWindow(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
 
     settings_path = gui_settings_path(config_path)
     assert settings_path.parent == tmp_path
@@ -237,7 +238,7 @@ def test_launcher_theme_switch_has_contrast_and_persists_project_locally(
     window.close()
     app.processEvents()
 
-    restored = LauncherWindow(config_path)
+    restored = LauncherWindow(config_path, probe_ocr_devices=False)
     assert restored.theme_combo.currentData() == THEME_DARK
     assert restored.property("effectiveTheme") == THEME_DARK
     restored.theme_combo.setCurrentIndex(restored.theme_combo.findData(THEME_LIGHT))
@@ -255,7 +256,7 @@ def test_launcher_model_choices_keep_manual_model_until_user_changes_it(
     app = QApplication.instance() or QApplication([])
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
-    window = LauncherWindow(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
     window.model_combo.setCurrentText("manual-model")
 
     retained = window._set_model_choices(("server-a", "server-b", "server-a"))
@@ -279,7 +280,7 @@ def test_launcher_saves_selected_gpu_device(tmp_path: Path) -> None:
     app = QApplication.instance() or QApplication([])
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
-    window = LauncherWindow(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
     gpu_index = window.ocr_device_combo.findData("gpu:1")
     if gpu_index < 0:
         window.ocr_device_combo.addItem("GPU 1 · test", "gpu:1")
@@ -297,7 +298,7 @@ def test_launcher_saves_and_restores_ocr_filter_switch(tmp_path: Path) -> None:
     app = QApplication.instance() or QApplication([])
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
-    window = LauncherWindow(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
     assert window.ocr_filter_checkbox.isChecked()
     window.ocr_filter_checkbox.setChecked(False)
 
@@ -307,7 +308,7 @@ def test_launcher_saves_and_restores_ocr_filter_switch(tmp_path: Path) -> None:
     window.close()
     app.processEvents()
 
-    restored = LauncherWindow(config_path)
+    restored = LauncherWindow(config_path, probe_ocr_devices=False)
     assert not restored.ocr_filter_checkbox.isChecked()
     restored.close()
     app.processEvents()
@@ -317,7 +318,7 @@ def test_launcher_saves_and_restores_live_ocr_timings(tmp_path: Path) -> None:
     app = QApplication.instance() or QApplication([])
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
-    window = LauncherWindow(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
     window.settle_rescan_spin.setValue(750)
     window.idle_rescan_spin.setValue(3500)
     window.ocr_cooldown_spin.setValue(125)
@@ -333,7 +334,7 @@ def test_launcher_saves_and_restores_live_ocr_timings(tmp_path: Path) -> None:
     window.close()
     app.processEvents()
 
-    restored = LauncherWindow(config_path)
+    restored = LauncherWindow(config_path, probe_ocr_devices=False)
     assert restored.settle_rescan_spin.value() == 750
     assert restored.idle_rescan_spin.value() == 3500
     assert restored.ocr_cooldown_spin.value() == 125
@@ -362,14 +363,41 @@ def test_gpu_device_probe_runs_in_isolated_interpreter(monkeypatch) -> None:
     assert calls[0][1]["timeout"] == 20
 
 
-def test_launcher_lists_gpu_indices_without_a_startup_driver_probe(tmp_path: Path) -> None:
+def test_launcher_lists_only_gpu_devices_reported_by_paddle(tmp_path: Path) -> None:
     app = QApplication.instance() or QApplication([])
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
-    window = LauncherWindow(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+
+    window._set_ocr_device_choices(
+        (
+            ("cpu", "CPU"),
+            ("gpu:0", "GPU 0 · NVIDIA GeForce RTX 4070 Laptop GPU"),
+        )
+    )
 
     assert window.ocr_device_combo.currentData() == "cpu"
     assert window.ocr_device_combo.findData("gpu:0") >= 0
-    assert window.ocr_device_combo.findData("gpu:7") >= 0
+    assert window.ocr_device_combo.findData("gpu:1") < 0
+    assert "RTX 4070 Laptop GPU" in window.ocr_device_combo.itemText(1)
     window.close()
     app.processEvents()
+
+
+def test_ocr_device_probe_parser_ignores_paddle_diagnostics() -> None:
+    output = """Paddle diagnostic line
+REFRA_OCR_DEVICES=[[\"cpu\", \"CPU\"], [\"gpu:0\", \"GPU 0 · NVIDIA RTX\"]]
+"""
+
+    assert launcher_module._parse_ocr_device_probe_output(output) == (
+        ("cpu", "CPU"),
+        ("gpu:0", "GPU 0 · NVIDIA RTX"),
+    )
+
+
+def test_light_theme_checkbox_uses_a_contrasting_checked_indicator() -> None:
+    stylesheet = theme_stylesheet(THEME_LIGHT)
+
+    assert "QCheckBox::indicator:checked" in stylesheet
+    assert "background-color: #1677ff" in stylesheet
+    assert "checkmark.svg" in stylesheet

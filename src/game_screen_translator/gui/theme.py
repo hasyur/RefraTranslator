@@ -211,6 +211,9 @@ def theme_palette(theme: str) -> QPalette:
 
 def theme_stylesheet(theme: str) -> str:
     colors = _colors(theme)
+    checkmark_url = (
+        Path(__file__).resolve().parent / "assets" / "checkmark.svg"
+    ).as_posix()
     return f"""
         QMainWindow, QDialog {{
             background-color: {colors.window};
@@ -287,6 +290,27 @@ def theme_stylesheet(theme: str) -> str:
         }}
         QPushButton#startButton:hover {{ background-color: {colors.accent_hover}; }}
         QCheckBox {{ spacing: 7px; background-color: transparent; }}
+        QCheckBox::indicator {{
+            width: 16px;
+            height: 16px;
+            background-color: {colors.input};
+            border: 1px solid {colors.border};
+            border-radius: 3px;
+        }}
+        QCheckBox::indicator:hover {{ border-color: {colors.accent}; }}
+        QCheckBox::indicator:checked {{
+            image: url("{checkmark_url}");
+            background-color: {colors.accent};
+            border-color: {colors.accent};
+        }}
+        QCheckBox::indicator:disabled {{
+            background-color: {colors.alternate};
+            border-color: {colors.disabled};
+        }}
+        QCheckBox::indicator:checked:disabled {{
+            image: url("{checkmark_url}");
+            background-color: {colors.disabled};
+        }}
         QStatusBar {{
             color: {colors.muted};
             background-color: {colors.window};

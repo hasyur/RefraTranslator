@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -142,6 +143,41 @@ def _validate_ocr_device_isolated(device: str) -> str:
     return lines[-1]
 
 
+_OCR_DEVICE_PROBE_MARKER = "REFRA_OCR_DEVICES="
+_OCR_DEVICE_PROBE_TIMEOUT_SECONDS = 20.0
+
+
+def _parse_ocr_device_probe_output(output: str) -> tuple[tuple[str, str], ...]:
+    payload = None
+    for line in reversed(output.splitlines()):
+        stripped = line.strip()
+        if stripped.startswith(_OCR_DEVICE_PROBE_MARKER):
+            payload = json.loads(stripped[len(_OCR_DEVICE_PROBE_MARKER) :])
+            break
+    if not isinstance(payload, list):
+        raise RuntimeError("OCR 硬件检测没有返回设备列表")
+
+    devices: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for item in payload:
+        if not isinstance(item, list) or len(item) != 2:
+            raise RuntimeError("OCR 硬件检测返回了无效设备")
+        device, label = item
+        if not isinstance(device, str) or not isinstance(label, str):
+            raise RuntimeError("OCR 硬件检测返回了无效设备")
+        if device != "cpu" and not (
+            device.startswith("gpu:") and device[4:].isdigit()
+        ):
+            raise RuntimeError(f"OCR 硬件检测返回了未知设备：{device}")
+        if not label.strip() or device in seen:
+            continue
+        devices.append((device, label.strip()))
+        seen.add(device)
+    if "cpu" not in seen:
+        devices.insert(0, ("cpu", "CPU"))
+    return tuple(devices)
+
+
 class NewProfileDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -245,7 +281,12 @@ class PairTableEditor(QWidget):
 
 
 class LauncherWindow(QMainWindow):
-    def __init__(self, config_path: Path) -> None:
+    def __init__(
+        self,
+        config_path: Path,
+        *,
+        probe_ocr_devices: bool = True,
+    ) -> None:
         super().__init__()
         self._config_path = config_path.resolve()
         self._config: AppConfig = load_config(self._config_path)
@@ -268,6 +309,11 @@ class LauncherWindow(QMainWindow):
         self._live_monitor = QTimer(self)
         self._live_monitor.setInterval(500)
         self._live_monitor.timeout.connect(self._check_live_process)
+        self._ocr_device_probe_process: subprocess.Popen | None = None
+        self._ocr_device_probe_started_at: float | None = None
+        self._ocr_device_probe_monitor = QTimer(self)
+        self._ocr_device_probe_monitor.setInterval(100)
+        self._ocr_device_probe_monitor.timeout.connect(self._check_ocr_device_probe)
         self.setWindowTitle(PRODUCT_NAME)
         self.resize(960, 700)
         self.setMinimumSize(780, 580)
@@ -323,6 +369,8 @@ class LauncherWindow(QMainWindow):
         self.setCentralWidget(central)
         self.statusBar().showMessage("正在读取游戏 Profile……")
         self.refresh_profiles()
+        if probe_ocr_devices:
+            self._start_ocr_device_probe()
         if self._preferences_warning:
             self.statusBar().showMessage(
                 f"GUI 设置无效，已恢复为跟随系统：{self._preferences_warning}",
@@ -367,6 +415,13 @@ class LauncherWindow(QMainWindow):
         if self._theme_preference == "system":
             self._apply_theme()
 
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt callback name
+        process = self._ocr_device_probe_process
+        if process is not None and process.poll() is None:
+            process.terminate()
+        self._ocr_device_probe_monitor.stop()
+        super().closeEvent(event)
+
     def _build_launch_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -409,20 +464,18 @@ class LauncherWindow(QMainWindow):
 
         self.ocr_device_combo = QComboBox()
         self.ocr_device_combo.addItem("CPU", "cpu")
-        for index in range(8):
-            self.ocr_device_combo.addItem(f"GPU {index}", f"gpu:{index}")
         configured_device = self._config.ocr.device
         device_index = self.ocr_device_combo.findData(configured_device)
         if device_index < 0:
             self.ocr_device_combo.addItem(
-                f"{configured_device}（当前未检测到）",
+                f"{configured_device}（正在检测实际硬件……）",
                 configured_device,
             )
             device_index = self.ocr_device_combo.count() - 1
         self.ocr_device_combo.setCurrentIndex(device_index)
         self.ocr_device_combo.setToolTip(
-            "GPU 编号会在启动实时翻译时通过 Paddle 隔离校验；"
-            "GPU OCR 需要通过 bootstrap.ps1 -WithGpuOcr 安装项目内运行库"
+            "正在后台检测当前隔离环境中 Paddle 实际可用的 OCR 硬件；"
+            "启动实时翻译时仍会再次隔离校验。"
         )
         service_form.addRow("OCR 设备", self.ocr_device_combo)
 
@@ -443,7 +496,8 @@ class LauncherWindow(QMainWindow):
         self.settle_rescan_spin.setSpecialValueText("关闭")
         self.settle_rescan_spin.setToolTip(
             "最后一次检测到画面变化后，等待这段时间自动补扫一次；"
-            "用于补全字幕绘制中途的首轮 OCR，0 表示关闭。"
+            "用于补全字幕绘制中途的首轮 OCR。若首轮仍在执行，只保留"
+            "最新帧并在其结束及冷却后补扫；0 表示关闭。"
         )
         service_form.addRow("画面稳定补扫", self.settle_rescan_spin)
 
@@ -455,7 +509,8 @@ class LauncherWindow(QMainWindow):
         self.idle_rescan_spin.setSuffix(" ms")
         self.idle_rescan_spin.setSpecialValueText("关闭")
         self.idle_rescan_spin.setToolTip(
-            "画面没有再次触发变化检测时，按此间隔兜底执行 OCR；"
+            "从最近一次 OCR 完成开始计时；期间没有新扫描时，按此间隔"
+            "兜底复查静止画面。任何 OCR 完成都会重新计时；"
             "增大可降低静止画面负载，0 表示关闭。"
         )
         service_form.addRow("静止画面兜底", self.idle_rescan_spin)
@@ -469,7 +524,9 @@ class LauncherWindow(QMainWindow):
         self.ocr_cooldown_spin.setSpecialValueText("无冷却")
         self.ocr_cooldown_spin.setToolTip(
             "每次 OCR 完成后至少等待这段时间才启动下一轮；"
-            "增大可降低连续变化时的负载，但可能增加延迟或漏掉短字幕。"
+            "它同时约束画面变化、稳定补扫和静止兜底，但等待期间只保留"
+            "最新待识别帧。增大可降低连续变化时的负载，但可能增加延迟"
+            "或漏掉短字幕。"
         )
         service_form.addRow("OCR 冷却", self.ocr_cooldown_spin)
         layout.addLayout(service_form)
@@ -553,6 +610,123 @@ class LauncherWindow(QMainWindow):
         self.start_button.clicked.connect(self._start_live)
         layout.addWidget(self.start_button)
         return widget
+
+    def _start_ocr_device_probe(self) -> None:
+        process = self._ocr_device_probe_process
+        if process is not None and process.poll() is None:
+            return
+        probe = (
+            "import json; "
+            "from game_screen_translator.ocr.paddle import available_ocr_devices; "
+            f"print({_OCR_DEVICE_PROBE_MARKER!r} + "
+            "json.dumps(available_ocr_devices(), ensure_ascii=False))"
+        )
+        environment = os.environ.copy()
+        environment["PYTHONIOENCODING"] = "utf-8"
+        environment["PYTHONUTF8"] = "1"
+        try:
+            self._ocr_device_probe_process = subprocess.Popen(
+                (sys.executable, "-P", "-c", probe),
+                cwd=self._config_path.parent,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=environment,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except OSError as exc:
+            self._set_ocr_device_choices(
+                (("cpu", "CPU"),),
+                error=f"无法启动硬件检测：{exc}",
+            )
+            return
+        self._ocr_device_probe_started_at = time.monotonic()
+        self._ocr_device_probe_monitor.start()
+
+    def _check_ocr_device_probe(self) -> None:
+        process = self._ocr_device_probe_process
+        if process is None:
+            self._ocr_device_probe_monitor.stop()
+            return
+        started_at = self._ocr_device_probe_started_at
+        if process.poll() is None:
+            if (
+                started_at is None
+                or time.monotonic() - started_at < _OCR_DEVICE_PROBE_TIMEOUT_SECONDS
+            ):
+                return
+            process.terminate()
+            self._ocr_device_probe_process = None
+            self._ocr_device_probe_started_at = None
+            self._ocr_device_probe_monitor.stop()
+            self._set_ocr_device_choices(
+                (("cpu", "CPU"),),
+                error="硬件检测超过 20 秒，已停止",
+            )
+            return
+
+        output, _stderr = process.communicate()
+        return_code = process.returncode
+        self._ocr_device_probe_process = None
+        self._ocr_device_probe_started_at = None
+        self._ocr_device_probe_monitor.stop()
+        try:
+            if return_code:
+                detail = output.strip()
+                raise RuntimeError(detail[-1200:] or f"硬件检测退出码 {return_code}")
+            devices = _parse_ocr_device_probe_output(output)
+        except (json.JSONDecodeError, RuntimeError, ValueError) as exc:
+            self._set_ocr_device_choices(
+                (("cpu", "CPU"),),
+                error=str(exc),
+            )
+            return
+        self._set_ocr_device_choices(devices)
+
+    def _set_ocr_device_choices(
+        self,
+        devices: tuple[tuple[str, str], ...],
+        *,
+        error: str | None = None,
+    ) -> None:
+        current = self.ocr_device_combo.currentData()
+        if not isinstance(current, str):
+            current = self._config.ocr.device
+        self.ocr_device_combo.blockSignals(True)
+        self.ocr_device_combo.clear()
+        for device, label in devices:
+            self.ocr_device_combo.addItem(label, device)
+
+        selected_index = self.ocr_device_combo.findData(current)
+        unavailable = selected_index < 0
+        if unavailable:
+            self.ocr_device_combo.addItem(f"{current}（当前不可用）", current)
+            selected_index = self.ocr_device_combo.count() - 1
+            item_getter = getattr(self.ocr_device_combo.model(), "item", None)
+            if callable(item_getter):
+                item = item_getter(selected_index)
+                if item is not None:
+                    item.setEnabled(False)
+        self.ocr_device_combo.setCurrentIndex(selected_index)
+        self.ocr_device_combo.blockSignals(False)
+
+        if error:
+            self.ocr_device_combo.setToolTip(
+                f"OCR 硬件检测失败：{error}\n"
+                "当前保留 CPU 与原配置；启动实时翻译时会再次隔离校验。"
+            )
+        else:
+            self.ocr_device_combo.setToolTip(
+                "仅列出当前隔离环境中 Paddle 实际可用的 CPU 与 NVIDIA GPU；"
+                "启动实时翻译时仍会再次隔离校验。"
+            )
+        if unavailable:
+            self.statusBar().showMessage(
+                f"当前配置的 OCR 设备 {current} 未被 Paddle 检测到，请选择可用硬件",
+                10000,
+            )
 
     def _translation_candidate(self, *, require_model: bool = True):
         base_url = self.server_url_combo.currentText().strip()

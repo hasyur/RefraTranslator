@@ -48,6 +48,9 @@ refra-translator = "game_screen_translator.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"game_screen_translator.gui" = ["assets/*.svg"]
+
 [tool.pytest.ini_options]
 addopts = "-ra"
 asyncio_mode = "auto"
