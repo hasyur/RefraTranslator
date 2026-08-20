@@ -37,6 +37,7 @@ from game_screen_translator.ocr.contextual_roi import (
     build_contextual_ocr_update,
 )
 from game_screen_translator.ocr.dynamic_roi import FullScreenRoiDetector
+from game_screen_translator.ocr.layout import merge_ocr_text_blocks
 from game_screen_translator.ocr.paddle import PaddleOcrEngine
 from game_screen_translator.ocr.roi import OcrRoi, recognize_ocr_rois
 from game_screen_translator.ocr.roi_scheduler import (
@@ -106,6 +107,7 @@ class _OcrTaskResult:
     observations: tuple[OcrText, ...]
     rejected: tuple[RejectedOcrText, ...]
     raw_count: int
+    layout_count: int
     triggered_at: float
     started_at: float
     completed_at: float
@@ -611,12 +613,14 @@ class LiveController:
                 edge_margin=_ROI_INTERNAL_EDGE_MARGIN,
             )
         )
-        filtered = self._text_filter.apply(raw_observations)
+        layout_observations = merge_ocr_text_blocks(raw_observations)
+        filtered = self._text_filter.apply(layout_observations)
         completed_at = time.monotonic()
         return _OcrTaskResult(
             filtered.accepted,
             filtered.rejected,
             len(raw_observations),
+            len(layout_observations),
             triggered_at,
             started_at,
             completed_at,
@@ -692,10 +696,16 @@ class LiveController:
                 f"{reason} {count}" for reason, count in reason_counts.items()
             )
             reason_suffix = f"（{reason_detail}）" if reason_detail else ""
+            if task_result.layout_count == task_result.raw_count:
+                scan_summary = f"本轮识别 {task_result.raw_count} 条"
+            else:
+                scan_summary = (
+                    f"本轮检测 {task_result.raw_count} 框，"
+                    f"版面整理为 {task_result.layout_count} 块"
+                )
             set_filter_status(
-                f"文字过滤：本轮识别 {task_result.raw_count} 条，"
-                f"保留 {len(observations)} 条，过滤 {len(task_result.rejected)} 条"
-                f"{reason_suffix} · "
+                f"文字过滤：{scan_summary}，保留 {len(observations)} 条，"
+                f"过滤 {len(task_result.rejected)} 条{reason_suffix} · "
                 f"累计过滤 {self._filtered_text_count} 条"
             )
         ocr_seconds = max(0.0, task_result.completed_at - task_result.started_at)
@@ -704,8 +714,13 @@ class LiveController:
         self._ocr_scan_count += 1
         if self._debug:
             print(f"耗时：OCR {ocr_seconds:.3f}s")
+            layout_detail = (
+                ""
+                if task_result.layout_count == task_result.raw_count
+                else f"，版面整理 {task_result.layout_count} 块"
+            )
             print(
-                f"OCR 过滤：识别 {task_result.raw_count} 条，"
+                f"OCR 过滤：识别 {task_result.raw_count} 条{layout_detail}，"
                 f"保留 {len(observations)} 条，过滤 {len(task_result.rejected)} 条"
             )
             if task_result.rejected:

@@ -11,11 +11,16 @@ from game_screen_translator.ocr.types import OcrText
 
 
 Bounds = tuple[int, int, int, int]
-_SPACE_RE = re.compile(r"\s+")
+_INLINE_SPACE_RE = re.compile(r"[^\S\r\n]+")
+_LINE_BREAK_RE = re.compile(r"\r\n?|\n")
 
 
 def normalize_text(text: str) -> str:
-    return _SPACE_RE.sub(" ", text).strip()
+    lines = (
+        _INLINE_SPACE_RE.sub(" ", line).strip()
+        for line in _LINE_BREAK_RE.split(text)
+    )
+    return "\n".join(line for line in lines if line)
 
 
 def _intersection_over_union(first: Bounds, second: Bounds) -> float:

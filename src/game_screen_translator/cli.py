@@ -10,6 +10,7 @@ from typing import Sequence
 from game_screen_translator.branding import PRODUCT_NAME, PROJECT_SLUG
 from game_screen_translator.config import ConfigError, load_config
 from game_screen_translator.domain import SourceText, TranslationBatch
+from game_screen_translator.ocr.layout import merge_ocr_text_blocks
 from game_screen_translator.ocr.paddle import OcrDependencyError, OcrResultError, PaddleOcrEngine
 from game_screen_translator.ocr.text_filter import OcrTextFilter
 from game_screen_translator.preview.renderer import render_preview
@@ -206,15 +207,23 @@ async def _preview(
     raw_observations = engine.recognize(image_path)
     if not raw_observations:
         raise RuntimeError("截图中没有识别出满足置信度阈值的文字")
+    layout_observations = merge_ocr_text_blocks(raw_observations)
     filtered = OcrTextFilter(
         config.ocr.language,
         enabled=config.ocr.text_filter_enabled,
         translate_latin=config.ocr.translate_latin,
         translate_han_only=config.ocr.translate_han_only,
-    ).apply(raw_observations)
+    ).apply(layout_observations)
     observations = filtered.accepted
+    if len(layout_observations) == len(raw_observations):
+        scan_summary = f"识别 {len(raw_observations)} 条"
+    else:
+        scan_summary = (
+            f"检测 {len(raw_observations)} 框，"
+            f"版面整理为 {len(layout_observations)} 块"
+        )
     print(
-        f"OCR 过滤：识别 {len(raw_observations)} 条，保留 {len(observations)} 条，"
+        f"OCR 过滤：{scan_summary}，保留 {len(observations)} 条，"
         f"过滤 {len(filtered.rejected)} 条"
     )
     if not observations:

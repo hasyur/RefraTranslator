@@ -32,6 +32,19 @@ def test_text_is_emitted_only_after_count_and_time_stability() -> None:
     assert repeated.stable_sources == ()
 
 
+def test_layout_line_breaks_reach_the_translation_source() -> None:
+    tracker = StableTextTracker(
+        "zone",
+        stable_observations=1,
+        stable_seconds=0,
+        clear_after_seconds=1,
+    )
+
+    update = tracker.observe((_ocr("この世界に\n希望はある"),), now=1.0)
+
+    assert update.stable_sources[0].text == "この世界に\n希望はある"
+
+
 def test_changed_text_reuses_track_but_increments_revision() -> None:
     tracker = StableTextTracker(
         "zone",

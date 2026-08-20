@@ -79,6 +79,14 @@ class FakeNoisyOcr:
         )
 
 
+class FakeSplitVerticalOcr:
+    def recognize_frame(self, frame):
+        return (
+            OcrText("希望", 0.99, ((800, 100), (840, 100), (840, 200), (800, 200))),
+            OcrText("はある", 0.99, ((800, 195), (840, 195), (840, 330), (800, 330))),
+        )
+
+
 class ColorBlockOcr:
     _TEXT_BY_VALUE = {
         100: "待って。",
@@ -219,6 +227,35 @@ def test_ocr_filter_rejects_noise_before_tracking_and_translation() -> None:
     assert controller._ocr_text_count == 3
     assert controller._filtered_text_count == 2
     assert "识别 3 条，保留 1 条，过滤 2 条" in control.filter_status
+    controller.close()
+
+
+def test_layout_fragments_merge_before_language_filtering() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(stable_observations=99),
+    )
+    control = FakeControl()
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeSplitVerticalOcr(),
+        overlay=FakeOverlay(),
+        control=control,
+        app=app,
+    )
+
+    result = controller._run_ocr(np.zeros((400, 900, 3), dtype=np.uint8), 1.0)
+
+    assert [item.text for item in result.observations] == ["希望はある"]
+    assert result.raw_count == 2
+    assert result.layout_count == 1
+    assert result.rejected == ()
     controller.close()
 
 
