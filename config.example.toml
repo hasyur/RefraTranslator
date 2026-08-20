@@ -33,6 +33,8 @@ translate_han_only = false
 
 [preview]
 blur_radius = 8.0
+# 0.55 为启动器中的“黑化模糊”；0.0 为“仅模糊”。
+overlay_opacity = 0.55
 font_path = ""
 
 [profiles]

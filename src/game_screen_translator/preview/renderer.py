@@ -105,6 +105,15 @@ def render_preview(
         region = image.crop((left, top, right, bottom))
         if config.blur_radius > 0:
             region = region.filter(ImageFilter.GaussianBlur(config.blur_radius))
+        if config.overlay_opacity > 0:
+            region = Image.alpha_composite(
+                region,
+                Image.new(
+                    "RGBA",
+                    region.size,
+                    (0, 0, 0, round(255 * config.overlay_opacity)),
+                ),
+            )
         image.paste(region, (left, top))
 
         draw = ImageDraw.Draw(image)

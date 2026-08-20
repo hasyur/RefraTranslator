@@ -24,8 +24,7 @@ def test_render_preview_blurs_and_draws_region(tmp_path: Path) -> None:
         output,
         (observation,),
         ("你好，欢迎回来。",),
-        # A legacy non-zero opacity must not tint the blurred game frame.
-        PreviewConfig(blur_radius=3, overlay_opacity=1.0),
+        PreviewConfig(blur_radius=3, overlay_opacity=0.0),
     )
 
     assert resolved == output.resolve()
@@ -39,3 +38,28 @@ def test_render_preview_blurs_and_draws_region(tmp_path: Path) -> None:
         }
         extrema = rendered.crop((30, 25, 210, 75)).getextrema()
         assert all(channel_max >= 245 for _, channel_max in extrema[:3])
+
+
+def test_render_preview_can_darken_the_blurred_region(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    output = tmp_path / "preview.png"
+    Image.new("RGB", (240, 100), (200, 120, 80)).save(source)
+    observation = OcrText(
+        "こんにちは",
+        0.99,
+        ((30, 25), (210, 25), (210, 75), (30, 75)),
+    )
+
+    render_preview(
+        source,
+        output,
+        (observation,),
+        ("你好",),
+        PreviewConfig(blur_radius=0, overlay_opacity=0.55),
+    )
+
+    with Image.open(output) as rendered:
+        red, green, blue = rendered.getpixel((28, 23))
+        assert red < 200
+        assert green < 120
+        assert blue < 80

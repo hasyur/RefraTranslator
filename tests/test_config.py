@@ -4,6 +4,8 @@ import pytest
 
 from game_screen_translator.config import (
     ConfigError,
+    DEFAULT_DARK_OVERLAY_OPACITY,
+    PreviewConfig,
     TranslationConfig,
     load_config,
     save_runtime_selection,
@@ -44,6 +46,7 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.ocr.text_filter_enabled is True
     assert config.ocr.translate_latin is True
     assert config.ocr.translate_han_only is False
+    assert config.preview.overlay_opacity == DEFAULT_DARK_OVERLAY_OPACITY
     assert config.live.capture_backend == "dxgi"
     assert config.live.stable_observations == 1
     assert config.live.stable_ms == 0
@@ -247,6 +250,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         ocr_device="gpu:1",
         max_concurrency=7,
         ocr_text_filter_enabled=False,
+        preview_overlay_opacity=0.0,
         ocr_cooldown_ms=125,
         settle_rescan_ms=750,
         idle_rescan_ms=3500,
@@ -262,6 +266,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.translation.max_concurrency == 7
     assert saved.ocr.device == "gpu:1"
     assert saved.ocr.text_filter_enabled is False
+    assert saved.preview.overlay_opacity == 0.0
     assert saved.live.capture_fps == 12
     assert saved.live.ocr_cooldown_ms == 125
     assert saved.live.settle_rescan_ms == 750
@@ -275,6 +280,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert "[ocr]" in text
     assert 'device = "gpu:1"' in text
     assert "text_filter_enabled = false" in text
+    assert "overlay_opacity = 0.0" in text
     assert "max_concurrency = 7" in text
     assert "ocr_cooldown_ms = 125" in text
     assert "settle_rescan_ms = 750" in text
@@ -293,6 +299,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     )
     assert saved.ocr.device == "cpu"
     assert saved.ocr.text_filter_enabled is False
+    assert saved.preview.overlay_opacity == 0.0
     assert saved.live.ocr_cooldown_ms == 125
     assert saved.live.settle_rescan_ms == 750
     assert saved.live.idle_rescan_ms == 3500
@@ -430,3 +437,27 @@ def test_save_runtime_selection_rejects_non_boolean_filter_without_writing(
         )
 
     assert path.read_bytes() == before
+
+
+def test_save_runtime_selection_rejects_invalid_overlay_opacity_without_writing(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path)
+    before = path.read_bytes()
+
+    with pytest.raises(ConfigError, match="preview.overlay_opacity"):
+        save_runtime_selection(
+            path,
+            base_url="http://gpu.test/v1",
+            model="model",
+            ocr_device="cpu",
+            preview_overlay_opacity=1.1,
+        )
+
+    assert path.read_bytes() == before
+
+
+def test_preview_config_accepts_the_two_gui_background_opacities() -> None:
+    assert PreviewConfig(overlay_opacity=DEFAULT_DARK_OVERLAY_OPACITY).overlay_opacity > 0
+    assert PreviewConfig(overlay_opacity=0.0).overlay_opacity == 0.0

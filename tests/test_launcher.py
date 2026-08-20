@@ -79,6 +79,7 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.max_concurrency_spin.value() == 2
     assert window.ocr_device_combo.currentData() == "cpu"
     assert window.ocr_filter_checkbox.isChecked()
+    assert window.blur_mode_combo.currentData() == "dark_blur"
     assert not window.dynamic_roi_checkbox.isChecked()
     assert window.settle_rescan_spin.value() == 500
     assert window.idle_rescan_spin.value() == 2000
@@ -355,6 +356,34 @@ def test_launcher_saves_and_restores_live_ocr_timings(tmp_path: Path) -> None:
     assert restored.settle_rescan_spin.value() == 750
     assert restored.idle_rescan_spin.value() == 3500
     assert restored.ocr_cooldown_spin.value() == 125
+    restored.close()
+    app.processEvents()
+
+
+def test_launcher_saves_and_restores_blur_only_background_mode(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+    window.blur_mode_combo.setCurrentIndex(
+        window.blur_mode_combo.findData("blur_only")
+    )
+
+    assert window._save_translation_settings(announce=False)
+    saved = load_config(config_path)
+    assert saved.preview.overlay_opacity == 0.0
+    assert "背景 仅模糊" in window.service_status_label.text()
+    window.close()
+    app.processEvents()
+
+    restored = LauncherWindow(config_path, probe_ocr_devices=False)
+    assert restored.blur_mode_combo.currentData() == "blur_only"
+    restored.blur_mode_combo.setCurrentIndex(
+        restored.blur_mode_combo.findData("dark_blur")
+    )
+    assert restored._save_translation_settings(announce=False)
+    assert load_config(config_path).preview.overlay_opacity == 0.55
+    assert "背景 黑化模糊" in restored.service_status_label.text()
     restored.close()
     app.processEvents()
 

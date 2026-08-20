@@ -12,6 +12,7 @@ from game_screen_translator.branding import GUI_PROCESS_NAME, PRODUCT_NAME
 from game_screen_translator.config import (
     AppConfig,
     ConfigError,
+    DEFAULT_DARK_OVERLAY_OPACITY,
     LiveConfig,
     load_config,
     save_runtime_selection,
@@ -47,6 +48,10 @@ from .theme import (
 
 def _startup_message(message: str) -> None:
     print(f"[{PRODUCT_NAME} GUI] {message}", flush=True)
+
+
+_BLUR_MODE_DARK = "dark_blur"
+_BLUR_MODE_ONLY = "blur_only"
 
 
 def _log_tail(path: Path, *, max_characters: int = 4000) -> str:
@@ -489,6 +494,23 @@ class LauncherWindow(QMainWindow):
         )
         service_form.addRow("OCR 过滤", self.ocr_filter_checkbox)
 
+        self.blur_mode_combo = QComboBox()
+        self.blur_mode_combo.addItem("黑化模糊", _BLUR_MODE_DARK)
+        self.blur_mode_combo.addItem("仅模糊（保留画面亮度）", _BLUR_MODE_ONLY)
+        configured_blur_mode = (
+            _BLUR_MODE_DARK
+            if self._config.preview.overlay_opacity > 0
+            else _BLUR_MODE_ONLY
+        )
+        self.blur_mode_combo.setCurrentIndex(
+            max(self.blur_mode_combo.findData(configured_blur_mode), 0)
+        )
+        self.blur_mode_combo.setToolTip(
+            "黑化模糊会在模糊后的原文字区域叠加暗层，提高白色译文对比度；"
+            "仅模糊不会改变区域整体亮度。保存后从下一次实时翻译开始生效。"
+        )
+        service_form.addRow("译文背景", self.blur_mode_combo)
+
         self.dynamic_roi_checkbox = QCheckBox("启用实验性动态 ROI")
         self.dynamic_roi_checkbox.setChecked(
             self._config.live.dynamic_roi_enabled
@@ -611,6 +633,7 @@ class LauncherWindow(QMainWindow):
             f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device} · "
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
+            f"背景 {self._background_summary(self._config.preview.overlay_opacity)} · "
             f"{self._scheduling_summary(self._config.live)}；"
             "可手动填写，读取列表不会自动保存。"
         )
@@ -834,6 +857,14 @@ class LauncherWindow(QMainWindow):
             dynamic_roi_max_coalesce_ms=self.roi_max_coalesce_spin.value(),
         )
 
+    def _preview_overlay_opacity_candidate(self) -> float:
+        mode = self.blur_mode_combo.currentData()
+        if mode == _BLUR_MODE_DARK:
+            return DEFAULT_DARK_OVERLAY_OPACITY
+        if mode == _BLUR_MODE_ONLY:
+            return 0.0
+        raise ConfigError("当前译文背景模式无效")
+
     def _sync_ocr_scheduling_controls(self, dynamic_roi_enabled: bool) -> None:
         for control in (
             self.settle_rescan_spin,
@@ -863,6 +894,10 @@ class LauncherWindow(QMainWindow):
             f"兜底 {live.idle_rescan_ms} ms · "
             f"冷却 {live.ocr_cooldown_ms} ms"
         )
+
+    @staticmethod
+    def _background_summary(overlay_opacity: float) -> str:
+        return "黑化模糊" if overlay_opacity > 0 else "仅模糊"
 
     def _refresh_models(self) -> None:
         if self._model_reply is not None:
@@ -959,6 +994,7 @@ class LauncherWindow(QMainWindow):
             translation = self._translation_candidate()
             ocr = self._ocr_candidate()
             live = self._live_candidate()
+            preview_overlay_opacity = self._preview_overlay_opacity_candidate()
             self._config = save_runtime_selection(
                 self._config_path,
                 base_url=translation.base_url,
@@ -966,6 +1002,7 @@ class LauncherWindow(QMainWindow):
                 ocr_device=ocr.device,
                 max_concurrency=translation.max_concurrency,
                 ocr_text_filter_enabled=ocr.text_filter_enabled,
+                preview_overlay_opacity=preview_overlay_opacity,
                 settle_rescan_ms=live.settle_rescan_ms,
                 idle_rescan_ms=live.idle_rescan_ms,
                 ocr_cooldown_ms=live.ocr_cooldown_ms,
@@ -989,6 +1026,14 @@ class LauncherWindow(QMainWindow):
         if device_index >= 0:
             self.ocr_device_combo.setCurrentIndex(device_index)
         self.ocr_filter_checkbox.setChecked(self._config.ocr.text_filter_enabled)
+        blur_mode = (
+            _BLUR_MODE_DARK
+            if self._config.preview.overlay_opacity > 0
+            else _BLUR_MODE_ONLY
+        )
+        blur_mode_index = self.blur_mode_combo.findData(blur_mode)
+        if blur_mode_index >= 0:
+            self.blur_mode_combo.setCurrentIndex(blur_mode_index)
         self.dynamic_roi_checkbox.setChecked(
             self._config.live.dynamic_roi_enabled
         )
@@ -1011,6 +1056,7 @@ class LauncherWindow(QMainWindow):
             f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device} · "
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
+            f"背景 {self._background_summary(self._config.preview.overlay_opacity)} · "
             f"{self._scheduling_summary(self._config.live)}"
         )
         if announce:

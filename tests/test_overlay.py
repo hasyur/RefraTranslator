@@ -57,6 +57,131 @@ def test_overlay_renders_only_translated_track_region() -> None:
     app.processEvents()
 
 
+def test_overlay_can_darken_the_blurred_game_frame() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 320, 120),
+        style=OverlayStyle(blur_radius=0, overlay_opacity=0.55),
+    )
+    frame = np.full((120, 320, 3), (100, 120, 140), dtype=np.uint8)
+    track = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (40, 30, 280, 90),
+        0,
+        1,
+        2,
+        True,
+        "覆盖译文",
+    )
+    overlay.set_scene(frame, (track,))
+    target = QImage(320, 120, QImage.Format.Format_ARGB32)
+    target.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(target)
+    overlay.render(painter, QPoint())
+    painter.end()
+
+    color = target.pixelColor(38, 28)
+    assert color.alpha() == 255
+    assert color.red() < 100
+    assert color.green() < 120
+    assert color.blue() < 140
+    app.processEvents()
+
+
+def test_overlay_keeps_clean_background_when_capture_returns_dimmed() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 320, 120),
+        style=OverlayStyle(blur_radius=8, overlay_opacity=0.0),
+    )
+    track = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (40, 30, 280, 90),
+        0,
+        1,
+        2,
+        True,
+        "覆盖译文",
+    )
+    clean_frame = np.full((120, 320, 3), (100, 120, 140), dtype=np.uint8)
+    overlay.set_scene(clean_frame, (track,))
+
+    # Model the next Desktop Duplication frame after Windows has excluded the
+    # overlay window from capture: the painted area can be dimmed without being
+    # pure black, so a black-pixel threshold is insufficient.
+    excluded_frame = np.full_like(clean_frame, (45, 54, 63))
+    overlay.set_scene(excluded_frame, (track,))
+    target = QImage(320, 120, QImage.Format.Format_ARGB32)
+    target.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(target)
+    overlay.render(painter, QPoint())
+    painter.end()
+
+    color = target.pixelColor(38, 28)
+    assert color.getRgb() == (100, 120, 140, 255)
+    overlay.close()
+    app.processEvents()
+
+
+def test_overlay_caches_latest_background_before_translation_appears() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 320, 120),
+        style=OverlayStyle(blur_radius=0, overlay_opacity=0.0),
+    )
+    untranslated_track = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (40, 30, 280, 90),
+        0,
+        1,
+        2,
+        True,
+        None,
+    )
+    overlay.set_scene(
+        np.full((120, 320, 3), (100, 120, 140), dtype=np.uint8),
+        (untranslated_track,),
+    )
+    overlay.set_scene(
+        np.full((120, 320, 3), (180, 160, 140), dtype=np.uint8),
+        (untranslated_track,),
+    )
+    translated_track = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (40, 30, 280, 90),
+        0,
+        1,
+        2,
+        True,
+        "覆盖译文",
+    )
+    overlay.set_scene(
+        np.full((120, 320, 3), (45, 54, 63), dtype=np.uint8),
+        (translated_track,),
+    )
+    target = QImage(320, 120, QImage.Format.Format_ARGB32)
+    target.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(target)
+    overlay.render(painter, QPoint())
+    painter.end()
+
+    assert target.pixelColor(38, 28).getRgb() == (180, 160, 140, 255)
+    overlay.close()
+    app.processEvents()
+
+
 def test_overlay_uses_restored_translation_font_scale() -> None:
     app = QApplication.instance() or QApplication([])
     overlay = TranslationOverlay(

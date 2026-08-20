@@ -15,6 +15,9 @@ class ConfigError(ValueError):
     """Raised when a local configuration file is invalid."""
 
 
+DEFAULT_DARK_OVERLAY_OPACITY = 0.55
+
+
 @dataclass(frozen=True, slots=True)
 class TranslationConfig:
     provider: str
@@ -102,9 +105,9 @@ class OcrConfig:
 @dataclass(frozen=True, slots=True)
 class PreviewConfig:
     blur_radius: float = 8.0
-    # Kept only so older local config.toml files continue to load. Rendering
-    # intentionally applies no color layer over the blurred game frame.
-    overlay_opacity: float = 0.0
+    # 0 means blur only. The launcher exposes 0 and the historical 0.55 dark
+    # layer as two named modes instead of asking users to tune this number.
+    overlay_opacity: float = DEFAULT_DARK_OVERLAY_OPACITY
     font_path: str = ""
 
     def __post_init__(self) -> None:
@@ -255,6 +258,9 @@ _TRANSLATION_VALUE_RE = re.compile(
 _OCR_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>device|text_filter_enabled)[ \t]*="
 )
+_PREVIEW_VALUE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<key>overlay_opacity)[ \t]*="
+)
 _LIVE_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
     r"change_poll_fps|ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms|"
@@ -278,6 +284,7 @@ def save_translation_selection(
         max_concurrency=None,
         ocr_device=None,
         ocr_text_filter_enabled=None,
+        preview_overlay_opacity=None,
         ocr_cooldown_ms=None,
         settle_rescan_ms=None,
         idle_rescan_ms=None,
@@ -297,6 +304,7 @@ def save_runtime_selection(
     ocr_device: str,
     max_concurrency: int | None = None,
     ocr_text_filter_enabled: bool | None = None,
+    preview_overlay_opacity: float | None = None,
     ocr_cooldown_ms: int | None = None,
     settle_rescan_ms: int | None = None,
     idle_rescan_ms: int | None = None,
@@ -314,6 +322,7 @@ def save_runtime_selection(
         max_concurrency=max_concurrency,
         ocr_device=ocr_device,
         ocr_text_filter_enabled=ocr_text_filter_enabled,
+        preview_overlay_opacity=preview_overlay_opacity,
         ocr_cooldown_ms=ocr_cooldown_ms,
         settle_rescan_ms=settle_rescan_ms,
         idle_rescan_ms=idle_rescan_ms,
@@ -333,6 +342,7 @@ def _save_selected_values(
     max_concurrency: int | None,
     ocr_device: str | None,
     ocr_text_filter_enabled: bool | None,
+    preview_overlay_opacity: float | None,
     ocr_cooldown_ms: int | None,
     settle_rescan_ms: int | None,
     idle_rescan_ms: int | None,
@@ -361,6 +371,14 @@ def _save_selected_values(
             current.ocr.text_filter_enabled
             if ocr_text_filter_enabled is None
             else ocr_text_filter_enabled
+        ),
+    )
+    candidate_preview = replace(
+        current.preview,
+        overlay_opacity=(
+            current.preview.overlay_opacity
+            if preview_overlay_opacity is None
+            else preview_overlay_opacity
         ),
     )
     candidate_live = replace(
@@ -409,6 +427,7 @@ def _save_selected_values(
     if (
         candidate_translation == current.translation
         and candidate_ocr == current.ocr
+        and candidate_preview == current.preview
         and candidate_live == current.live
     ):
         return current
@@ -464,6 +483,12 @@ def _save_selected_values(
                 if ocr_text_filter_enabled is not None
                 else None
             ),
+        )
+
+    if preview_overlay_opacity is not None:
+        _upsert_preview_values(
+            lines,
+            overlay_opacity=candidate_preview.overlay_opacity,
         )
 
     if any(
@@ -619,6 +644,56 @@ def _upsert_ocr_values(
             f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}",
         )
         ocr_end_index += 1
+
+
+def _upsert_preview_values(
+    lines: list[str],
+    *,
+    overlay_opacity: float,
+) -> None:
+    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+    current_section: str | None = None
+    preview_header_index: int | None = None
+    preview_end_index = len(lines)
+    replaced = False
+    for index, line in enumerate(lines):
+        body = line.rstrip("\r\n")
+        section_match = _TOML_SECTION_RE.fullmatch(body)
+        if section_match is not None:
+            if current_section == "preview" and preview_end_index == len(lines):
+                preview_end_index = index
+            current_section = section_match.group(1).strip()
+            if current_section == "preview":
+                preview_header_index = index
+            continue
+        if current_section != "preview":
+            continue
+        value_match = _PREVIEW_VALUE_RE.match(body)
+        if value_match is None:
+            continue
+        ending = line[len(body) :]
+        lines[index] = (
+            f'{value_match.group("indent")}overlay_opacity = '
+            f"{json.dumps(overlay_opacity)}{ending}"
+        )
+        replaced = True
+
+    if replaced:
+        return
+    value_line = f"overlay_opacity = {json.dumps(overlay_opacity)}{newline}"
+    if preview_header_index is None:
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            lines[-1] += newline
+        if lines and lines[-1].strip():
+            lines.append(newline)
+        lines.extend((f"[preview]{newline}", value_line))
+        return
+
+    if preview_end_index > 0 and not lines[preview_end_index - 1].endswith(
+        ("\n", "\r")
+    ):
+        lines[preview_end_index - 1] += newline
+    lines.insert(preview_end_index, value_line)
 
 
 def _upsert_live_values(

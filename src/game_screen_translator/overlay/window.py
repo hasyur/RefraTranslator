@@ -24,7 +24,14 @@ WS_EX_NOACTIVATE = 0x08000000
 @dataclass(frozen=True, slots=True)
 class OverlayStyle:
     blur_radius: float = 8.0
+    overlay_opacity: float = 0.0
     font_path: str = ""
+
+    def __post_init__(self) -> None:
+        if self.blur_radius < 0:
+            raise ValueError("blur_radius 不能为负数")
+        if not 0 <= self.overlay_opacity <= 1:
+            raise ValueError("overlay_opacity 必须在 0 到 1 之间")
 
 
 def _load_qt():
@@ -116,6 +123,7 @@ class TranslationOverlay(QWidget):
         self._debug_border = debug_border
         self._tracks: tuple[TrackedText, ...] = ()
         self._frame: np.ndarray | None = None
+        self._background_pixmaps: dict[tuple[str, int], object] = {}
         self._font_family = self._install_font(style.font_path)
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt callback name
@@ -124,10 +132,55 @@ class TranslationOverlay(QWidget):
             self._apply_windows_capture_exclusion()
 
     def set_scene(self, frame: np.ndarray | None, tracks: Sequence[TrackedText]) -> None:
-        self._tracks = tuple(track for track in tracks if track.translated_text)
+        previous_tracks = self._tracks
+        previous_backgrounds = self._background_pixmaps
+        visible_tracks = tuple(tracks)
+        self._tracks = tuple(
+            track for track in visible_tracks if track.translated_text
+        )
+        active_backgrounds = {
+            self._background_key(track) for track in visible_tracks
+        }
+        self._background_pixmaps = {
+            key: pixmap
+            for key, pixmap in previous_backgrounds.items()
+            if key in active_backgrounds
+        }
         # DXcam already returns an owned copy. Keep a reference instead of
         # copying a full 4K frame on every overlay refresh.
-        self._frame = None if frame is None or not self._tracks else np.asarray(frame)
+        self._frame = None if frame is None else np.asarray(frame)
+        # Untranslated tracks continuously collect a clean background. Once a
+        # translation is visible, freeze its last clean crop: capture APIs can
+        # return the excluded overlay as pure black, dimmed pixels, or an empty
+        # surface, none of which can be distinguished safely by color alone.
+        for track in visible_tracks:
+            key = self._background_key(track)
+            if track.translated_text and key in self._background_pixmaps:
+                continue
+            source_bounds = self._source_bounds(track.bounds)
+            if any(
+                self._bounds_overlap(
+                    source_bounds,
+                    self._source_bounds(previous.bounds),
+                )
+                for previous in previous_tracks
+            ):
+                if key not in self._background_pixmaps:
+                    prior = next(
+                        (
+                            pixmap
+                            for (track_id, _), pixmap in previous_backgrounds.items()
+                            if track_id == track.track_id
+                        ),
+                        None,
+                    )
+                    if prior is not None:
+                        self._background_pixmaps[key] = prior
+                continue
+            crop = self._frame_crop(source_bounds)
+            if crop is None:
+                continue
+            self._background_pixmaps[key] = self._crop_pixmap(crop)
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt callback name
@@ -139,19 +192,18 @@ class TranslationOverlay(QWidget):
         painter.setRenderHint(QT["QPainter"].RenderHint.SmoothPixmapTransform, True)
         layouts = []
         for track in self._tracks:
-            layout = self._track_layout(track)
-            if layout is not None:
-                rect, source_bounds = layout
-                layouts.append((track, rect, source_bounds))
+            rect = self._track_layout(track)
+            if rect is not None:
+                layouts.append((track, rect))
         # Paint every source-text blur before drawing any translation. Otherwise
         # a later line's padded blur can erase glyphs already drawn for a nearby
         # line.
-        for _, rect, source_bounds in layouts:
-            self._paint_track_background(painter, rect, source_bounds)
+        for track, rect in layouts:
+            self._paint_track_background(painter, track, rect)
         if self._debug_border:
-            for _, rect, _ in layouts:
+            for _, rect in layouts:
                 self._paint_track_border(painter, rect)
-        for track, rect, _ in layouts:
+        for track, rect in layouts:
             self._paint_track_text(painter, track, rect)
         painter.end()
 
@@ -171,22 +223,40 @@ class TranslationOverlay(QWidget):
         ).intersected(self.rect())
         if rect.isEmpty():
             return None
-        source_bounds = (
-            source_left - padding,
-            source_top - padding,
-            source_right + padding,
-            source_bottom + padding,
-        )
-        return rect, source_bounds
+        return rect
 
-    def _paint_track_background(self, painter, rect, source_bounds) -> None:
-        if self._frame is not None:
-            pixmap = self._frame_pixmap(source_bounds)
-            if pixmap is not None:
-                painter.save()
-                painter.setClipRect(rect)
-                painter.drawPixmap(rect, pixmap)
-                painter.restore()
+    def _paint_track_background(self, painter, track, rect) -> None:
+        key = self._background_key(track)
+        pixmap = self._background_pixmaps.get(key)
+        if pixmap is not None:
+            painter.save()
+            painter.setClipRect(rect)
+            painter.drawPixmap(rect, pixmap)
+            painter.restore()
+
+    @staticmethod
+    def _background_key(track: TrackedText) -> tuple[str, int]:
+        return track.track_id, track.revision
+
+    @staticmethod
+    def _source_bounds(bounds):
+        left, top, right, bottom = bounds
+        padding = 4
+        return (
+            left - padding,
+            top - padding,
+            right + padding,
+            bottom + padding,
+        )
+
+    @staticmethod
+    def _bounds_overlap(first, second) -> bool:
+        return not (
+            first[2] <= second[0]
+            or second[2] <= first[0]
+            or first[3] <= second[1]
+            or second[3] <= first[1]
+        )
 
     @staticmethod
     def _paint_track_border(painter, rect) -> None:
@@ -239,7 +309,7 @@ class TranslationOverlay(QWidget):
         painter.setPen(QT["QColor"](255, 255, 255, 255))
         painter.drawText(QT["QPoint"](x, baseline), text)
 
-    def _frame_pixmap(self, source_bounds):
+    def _frame_crop(self, source_bounds):
         frame = self._frame
         if frame is None or frame.ndim != 3 or frame.shape[2] < 3:
             return None
@@ -248,11 +318,22 @@ class TranslationOverlay(QWidget):
         bottom = max(top + 1, min(bottom, frame.shape[0]))
         left = max(0, min(left, frame.shape[1] - 1))
         right = max(left + 1, min(right, frame.shape[1]))
-        crop = np.ascontiguousarray(frame[top:bottom, left:right, :3])
-        if self._style.blur_radius > 0:
-            crop = np.asarray(
-                Image.fromarray(crop).filter(ImageFilter.GaussianBlur(self._style.blur_radius))
-            )
+        return np.ascontiguousarray(frame[top:bottom, left:right, :3])
+
+    def _crop_pixmap(self, crop: np.ndarray):
+        if self._style.blur_radius > 0 or self._style.overlay_opacity > 0:
+            processed = Image.fromarray(crop)
+            if self._style.blur_radius > 0:
+                processed = processed.filter(
+                    ImageFilter.GaussianBlur(self._style.blur_radius)
+                )
+            if self._style.overlay_opacity > 0:
+                processed = Image.blend(
+                    processed,
+                    Image.new("RGB", processed.size, (0, 0, 0)),
+                    self._style.overlay_opacity,
+                )
+            crop = np.asarray(processed)
             crop = np.ascontiguousarray(crop)
         height, width, channels = crop.shape
         image = QT["QImage"](
