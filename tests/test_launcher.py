@@ -373,6 +373,21 @@ def test_launcher_dynamic_roi_switches_visible_scheduling_controls(
     assert not window._service_form.isRowVisible(window.roi_settle_spin)
     assert not window._service_form.isRowVisible(window.roi_ocr_interval_spin)
     assert not window._service_form.isRowVisible(window.roi_max_coalesce_spin)
+    change_poll_row, _ = window._service_form.getWidgetPosition(
+        window.change_poll_spin
+    )
+    for mode_specific_control in (
+        window.settle_rescan_spin,
+        window.idle_rescan_spin,
+        window.ocr_cooldown_spin,
+        window.roi_settle_spin,
+        window.roi_ocr_interval_spin,
+        window.roi_max_coalesce_spin,
+    ):
+        control_row, _ = window._service_form.getWidgetPosition(
+            mode_specific_control
+        )
+        assert change_poll_row < control_row
 
     window.dynamic_roi_checkbox.setChecked(True)
 

@@ -501,6 +501,17 @@ class LauncherWindow(QMainWindow):
         )
         service_form.addRow("OCR 调度", self.dynamic_roi_checkbox)
 
+        self.change_poll_spin = QSpinBox()
+        self.change_poll_spin.setRange(1, self._config.live.capture_fps)
+        self.change_poll_spin.setValue(self._config.live.change_poll_fps)
+        self.change_poll_spin.setSuffix(" Hz")
+        self.change_poll_spin.setToolTip(
+            "每秒取最新帧执行轻量变化检测的次数。旧全帧路径用它检查"
+            "是否需要 OCR，动态 ROI 路径用它运行低分辨率热图；提高后"
+            "能更早发现短暂变化，但不会直接让 Paddle 以相同频率运行。"
+        )
+        service_form.addRow("变化检测频率", self.change_poll_spin)
+
         self.settle_rescan_spin = QSpinBox()
         self.settle_rescan_spin.setRange(0, 60_000)
         self.settle_rescan_spin.setValue(self._config.live.settle_rescan_ms)
@@ -543,17 +554,6 @@ class LauncherWindow(QMainWindow):
             "或漏掉短字幕。"
         )
         service_form.addRow("OCR 冷却", self.ocr_cooldown_spin)
-
-        self.change_poll_spin = QSpinBox()
-        self.change_poll_spin.setRange(1, self._config.live.capture_fps)
-        self.change_poll_spin.setValue(self._config.live.change_poll_fps)
-        self.change_poll_spin.setSuffix(" Hz")
-        self.change_poll_spin.setToolTip(
-            "每秒取最新帧执行轻量变化检测的次数。旧全帧路径用它检查"
-            "是否需要 OCR，动态 ROI 路径用它运行低分辨率热图；提高后"
-            "能更早发现短暂变化，但不会直接让 Paddle 以相同频率运行。"
-        )
-        service_form.addRow("变化检测频率", self.change_poll_spin)
 
         self.roi_settle_spin = QSpinBox()
         self.roi_settle_spin.setRange(0, 10_000)
