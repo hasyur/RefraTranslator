@@ -536,6 +536,8 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     assert controller._ocr_future is not None
     assert controller._active_roi_plan is not None
     assert not controller._active_roi_plan.fallback_full_frame
+    assert controller._active_roi_plan.candidate_coverage_fraction > 0.0
+    assert controller._active_roi_plan.candidate_region_count == 1
     controller._ocr_future.result(timeout=2)
 
     clock[0] = 10.5

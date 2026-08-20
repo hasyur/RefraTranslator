@@ -50,6 +50,32 @@ def test_local_text_like_change_proposes_clipped_context_roi() -> None:
     assert seed_top <= 78 < seed_top + seed_height
     assert seed_width <= width
     assert seed_height <= height
+    assert proposal.candidate_coverage_fraction == proposal.coverage_fraction
+    assert proposal.candidate_region_count == 1
+
+
+def test_default_limits_keep_moderate_structural_change_local() -> None:
+    before = np.zeros((180, 320, 3), dtype=np.uint8)
+    after = before.copy()
+    after[:, :128] = 255
+
+    proposal = _detector(max_coverage_fraction=1.0).propose(before, after)
+
+    assert proposal.changed_fraction == pytest.approx(0.4)
+    assert proposal.reason == "local-change"
+    assert not proposal.fallback_full_frame
+
+
+def test_default_coverage_limit_allows_large_single_candidate() -> None:
+    before = np.zeros((180, 320, 3), dtype=np.uint8)
+    after = before.copy()
+    after[80:88, 150:158] = 255
+
+    proposal = FullScreenRoiDetector().propose(before, after)
+
+    assert 0.45 < proposal.coverage_fraction < 0.80
+    assert proposal.reason == "local-change"
+    assert not proposal.fallback_full_frame
 
 
 def test_uniform_brightness_shift_is_removed_before_region_detection() -> None:
@@ -90,6 +116,8 @@ def test_widespread_structural_change_falls_back_to_full_frame() -> None:
     assert proposal.rois == ((0, 0, 320, 180),)
     assert proposal.fallback_full_frame
     assert proposal.reason == "widespread-change"
+    assert proposal.candidate_coverage_fraction == 1.0
+    assert proposal.candidate_region_count == 1
 
 
 def test_too_many_isolated_regions_fall_back_instead_of_dropping_changes() -> None:
@@ -108,6 +136,7 @@ def test_too_many_isolated_regions_fall_back_instead_of_dropping_changes() -> No
     assert proposal.rois == ((0, 0, 320, 180),)
     assert proposal.fallback_full_frame
     assert proposal.reason == "too-many-regions"
+    assert proposal.candidate_region_count > 2
 
 
 def test_mismatched_frames_are_rejected() -> None:

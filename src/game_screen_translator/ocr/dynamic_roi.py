@@ -17,6 +17,8 @@ class DynamicRoiProposal:
     fallback_full_frame: bool
     reason: str
     change_rois: tuple[OcrRoi, ...] = ()
+    candidate_coverage_fraction: float = 0.0
+    candidate_region_count: int = 0
 
 
 class FullScreenRoiDetector:
@@ -41,8 +43,8 @@ class FullScreenRoiDetector:
         min_roi_size: tuple[int, int] = (768, 112),
         merge_gap: tuple[int, int] = (64, 32),
         max_rois: int = 6,
-        max_coverage_fraction: float = 0.45,
-        full_frame_change_fraction: float = 0.22,
+        max_coverage_fraction: float = 0.80,
+        full_frame_change_fraction: float = 0.50,
     ) -> None:
         if sample_size[0] < 1 or sample_size[1] < 1:
             raise ValueError("sample_size 必须为正数")
@@ -88,15 +90,6 @@ class FullScreenRoiDetector:
         changed_fraction = float(np.mean(changed))
         if not np.any(changed):
             return DynamicRoiProposal((), 0.0, 0.0, False, "unchanged", ())
-        if changed_fraction >= self.full_frame_change_fraction:
-            return DynamicRoiProposal(
-                (full_frame,),
-                changed_fraction,
-                1.0,
-                True,
-                "widespread-change",
-                (full_frame,),
-            )
 
         active_tiles = self._active_tiles(changed)
         active_tiles = self._dilate(active_tiles, self.tile_dilation)
@@ -118,8 +111,21 @@ class FullScreenRoiDetector:
         coverage = sum(width * height for _, _, width, height in rois) / (
             frame_width * frame_height
         )
+        candidate_region_count = len(rois)
 
-        if len(rois) > self.max_rois:
+        if changed_fraction >= self.full_frame_change_fraction:
+            return DynamicRoiProposal(
+                (full_frame,),
+                changed_fraction,
+                1.0,
+                True,
+                "widespread-change",
+                (full_frame,),
+                coverage,
+                candidate_region_count,
+            )
+
+        if candidate_region_count > self.max_rois:
             return DynamicRoiProposal(
                 (full_frame,),
                 changed_fraction,
@@ -127,6 +133,8 @@ class FullScreenRoiDetector:
                 True,
                 "too-many-regions",
                 change_rois,
+                coverage,
+                candidate_region_count,
             )
         if coverage >= self.max_coverage_fraction:
             return DynamicRoiProposal(
@@ -136,9 +144,18 @@ class FullScreenRoiDetector:
                 True,
                 "roi-coverage-too-large",
                 change_rois,
+                coverage,
+                candidate_region_count,
             )
         return DynamicRoiProposal(
-            rois, changed_fraction, coverage, False, "local-change", change_rois
+            rois,
+            changed_fraction,
+            coverage,
+            False,
+            "local-change",
+            change_rois,
+            coverage,
+            candidate_region_count,
         )
 
     @staticmethod

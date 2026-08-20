@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import pytest
+
 from game_screen_translator.ocr.contextual_roi import (
     ContextualRoiPlanner,
     build_contextual_ocr_update,
@@ -198,6 +200,20 @@ def test_contextual_expansion_falls_back_when_coverage_is_too_large() -> None:
     assert plan.fallback_full_frame
     assert plan.reason == "contextual-coverage-too-large"
     assert plan.regions[0].roi == (0, 0, 800, 600)
+    assert plan.candidate_coverage_fraction == pytest.approx(0.5)
+    assert plan.candidate_region_count == 1
+
+
+def test_default_contextual_coverage_allows_half_frame_candidate() -> None:
+    planner = ContextualRoiPlanner(min_roi_size=(600, 400))
+
+    plan = planner.plan(((300, 250, 20, 20),), (), frame_size=(800, 600))
+
+    assert not plan.fallback_full_frame
+    assert plan.reason == "contextual-local-change"
+    assert plan.coverage_fraction == pytest.approx(0.5)
+    assert plan.candidate_coverage_fraction == pytest.approx(0.5)
+    assert plan.candidate_region_count == 1
 
 
 def test_neighboring_contextual_regions_merge_without_duplicate_track_ids() -> None:

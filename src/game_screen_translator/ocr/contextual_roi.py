@@ -36,6 +36,9 @@ class ContextualRoiPlan:
     coverage_fraction: float
     fallback_full_frame: bool
     reason: str
+    candidate_coverage_fraction: float = 0.0
+    candidate_region_count: int = 0
+    affected_track_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +81,7 @@ class ContextualRoiPlanner:
         merge_gap: tuple[int, int] = (24, 16),
         max_regions: int = 6,
         max_affected_tracks: int = 16,
-        max_coverage_fraction: float = 0.45,
+        max_coverage_fraction: float = 0.80,
     ) -> None:
         if direct_margin < 0:
             raise ValueError("direct_margin 不能为负数")
@@ -123,6 +126,8 @@ class ContextualRoiPlanner:
                 frame_size=frame_size,
                 force_full_frame=True,
                 fallback_reason=proposal.reason,
+                fallback_candidate_coverage=proposal.candidate_coverage_fraction,
+                fallback_candidate_region_count=proposal.candidate_region_count,
             )
         return self.plan(
             proposal.change_rois or proposal.rois,
@@ -138,6 +143,9 @@ class ContextualRoiPlanner:
         frame_size: tuple[int, int],
         force_full_frame: bool = False,
         fallback_reason: str = "upstream-full-frame",
+        fallback_candidate_coverage: float = 1.0,
+        fallback_candidate_region_count: int = 1,
+        fallback_affected_track_count: int | None = None,
     ) -> ContextualRoiPlan:
         frame_width, frame_height = frame_size
         if frame_width < 1 or frame_height < 1:
@@ -154,7 +162,19 @@ class ContextualRoiPlanner:
                 (),
                 (),
             )
-            return ContextualRoiPlan((region,), 1.0, True, fallback_reason)
+            return ContextualRoiPlan(
+                (region,),
+                1.0,
+                True,
+                fallback_reason,
+                fallback_candidate_coverage,
+                fallback_candidate_region_count,
+                (
+                    len(anchors)
+                    if fallback_affected_track_count is None
+                    else fallback_affected_track_count
+                ),
+            )
         if not change_rois:
             return ContextualRoiPlan((), 0.0, False, "unchanged")
 
@@ -181,6 +201,9 @@ class ContextualRoiPlanner:
                 frame_size=frame_size,
                 force_full_frame=True,
                 fallback_reason="too-many-contextual-regions",
+                fallback_candidate_coverage=coverage,
+                fallback_candidate_region_count=len(regions),
+                fallback_affected_track_count=affected_count,
             )
         if affected_count > self.max_affected_tracks:
             return self.plan(
@@ -189,6 +212,9 @@ class ContextualRoiPlanner:
                 frame_size=frame_size,
                 force_full_frame=True,
                 fallback_reason="too-many-affected-tracks",
+                fallback_candidate_coverage=coverage,
+                fallback_candidate_region_count=len(regions),
+                fallback_affected_track_count=affected_count,
             )
         if coverage >= self.max_coverage_fraction:
             return self.plan(
@@ -197,8 +223,19 @@ class ContextualRoiPlanner:
                 frame_size=frame_size,
                 force_full_frame=True,
                 fallback_reason="contextual-coverage-too-large",
+                fallback_candidate_coverage=coverage,
+                fallback_candidate_region_count=len(regions),
+                fallback_affected_track_count=affected_count,
             )
-        return ContextualRoiPlan(regions, coverage, False, "contextual-local-change")
+        return ContextualRoiPlan(
+            regions,
+            coverage,
+            False,
+            "contextual-local-change",
+            coverage,
+            len(regions),
+            affected_count,
+        )
 
     def _region_for_seed(
         self,

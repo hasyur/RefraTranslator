@@ -78,6 +78,8 @@ class LatestFrameRoiScheduler:
         self._pending_change_rois: tuple[OcrRoi, ...] = ()
         self._pending_changed_fraction = 0.0
         self._pending_fallback_reason: str | None = None
+        self._pending_fallback_candidate_coverage = 0.0
+        self._pending_fallback_candidate_region_count = 0
 
     @property
     def primed(self) -> bool:
@@ -214,6 +216,10 @@ class LatestFrameRoiScheduler:
         post_job_rois = self._pending_change_rois
         post_job_changed_fraction = self._pending_changed_fraction
         post_job_fallback = self._pending_fallback_reason
+        post_job_fallback_coverage = self._pending_fallback_candidate_coverage
+        post_job_fallback_region_count = (
+            self._pending_fallback_candidate_region_count
+        )
         self._in_flight = None
 
         if accepted:
@@ -233,6 +239,12 @@ class LatestFrameRoiScheduler:
                 self._record_pending(rebuilt, job.observed_at_s)
             if job.proposal.fallback_full_frame:
                 self._pending_fallback_reason = job.proposal.reason
+                self._pending_fallback_candidate_coverage = (
+                    job.proposal.candidate_coverage_fraction
+                )
+                self._pending_fallback_candidate_region_count = (
+                    job.proposal.candidate_region_count
+                )
 
             self._pending_change_rois = self._merge_rois(
                 (*self._pending_change_rois, *post_job_rois)
@@ -242,9 +254,17 @@ class LatestFrameRoiScheduler:
                 post_job_changed_fraction,
                 job.proposal.changed_fraction,
             )
-            self._pending_fallback_reason = (
-                self._pending_fallback_reason or post_job_fallback
-            )
+            if (
+                self._pending_fallback_reason is None
+                and post_job_fallback is not None
+            ):
+                self._pending_fallback_reason = post_job_fallback
+                self._pending_fallback_candidate_coverage = (
+                    post_job_fallback_coverage
+                )
+                self._pending_fallback_candidate_region_count = (
+                    post_job_fallback_region_count
+                )
             pending_times = tuple(
                 value
                 for value in (self._pending_since_s, post_job_pending_since)
@@ -272,6 +292,12 @@ class LatestFrameRoiScheduler:
         )
         if proposal.fallback_full_frame and self._pending_fallback_reason is None:
             self._pending_fallback_reason = proposal.reason
+            self._pending_fallback_candidate_coverage = (
+                proposal.candidate_coverage_fraction
+            )
+            self._pending_fallback_candidate_region_count = (
+                proposal.candidate_region_count
+            )
 
     def _pending_proposal(self) -> DynamicRoiProposal:
         assert self._latest_frame is not None
@@ -285,6 +311,8 @@ class LatestFrameRoiScheduler:
                 True,
                 self._pending_fallback_reason,
                 self._pending_change_rois or (full_frame,),
+                self._pending_fallback_candidate_coverage,
+                self._pending_fallback_candidate_region_count,
             )
 
         coverage = self._coverage_fraction(
@@ -299,6 +327,8 @@ class LatestFrameRoiScheduler:
             False,
             "coalesced-local-change",
             self._pending_change_rois,
+            coverage,
+            len(self._pending_change_rois),
         )
 
     def _clear_pending(self) -> None:
@@ -306,6 +336,8 @@ class LatestFrameRoiScheduler:
         self._pending_change_rois = ()
         self._pending_changed_fraction = 0.0
         self._pending_fallback_reason = None
+        self._pending_fallback_candidate_coverage = 0.0
+        self._pending_fallback_candidate_region_count = 0
 
     @staticmethod
     def _merge_rois(rois: tuple[OcrRoi, ...]) -> tuple[OcrRoi, ...]:

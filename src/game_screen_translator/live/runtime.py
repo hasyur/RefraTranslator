@@ -375,6 +375,10 @@ class LiveController:
         self._ocr_scan_count = 0
         self._roi_scan_count = 0
         self._roi_full_fallback_count = 0
+        self._roi_fallback_reasons: Counter[str] = Counter()
+        self._roi_fallback_peak_changed_fraction = 0.0
+        self._roi_fallback_peak_candidate_coverage = 0.0
+        self._roi_fallback_peak_candidate_regions = 0
         self._ocr_text_count = 0
         self._filtered_text_count = 0
         self._stale_result_count = 0
@@ -459,6 +463,17 @@ class LiveController:
                 f"动态 ROI：局部/回退扫描 {self._roi_scan_count} 次/"
                 f"整帧回退 {self._roi_full_fallback_count} 次"
             )
+            if self._roi_fallback_reasons:
+                reasons = "、".join(
+                    f"{reason} {count} 次"
+                    for reason, count in self._roi_fallback_reasons.most_common()
+                )
+                print(
+                    f"动态 ROI 回退诊断：{reasons}；峰值变化 "
+                    f"{self._roi_fallback_peak_changed_fraction:.1%} / "
+                    f"候选覆盖 {self._roi_fallback_peak_candidate_coverage:.1%} / "
+                    f"候选区域 {self._roi_fallback_peak_candidate_regions} 个"
+                )
         if self._ocr_scan_count:
             print("延迟统计：" + self._latency_stats.render().replace("\n", "；"))
 
@@ -685,6 +700,20 @@ class LiveController:
             self._roi_scan_count += 1
             if roi_plan.fallback_full_frame:
                 self._roi_full_fallback_count += 1
+                self._roi_fallback_reasons[roi_plan.reason] += 1
+                if roi_job is not None:
+                    self._roi_fallback_peak_changed_fraction = max(
+                        self._roi_fallback_peak_changed_fraction,
+                        roi_job.proposal.changed_fraction,
+                    )
+                self._roi_fallback_peak_candidate_coverage = max(
+                    self._roi_fallback_peak_candidate_coverage,
+                    roi_plan.candidate_coverage_fraction,
+                )
+                self._roi_fallback_peak_candidate_regions = max(
+                    self._roi_fallback_peak_candidate_regions,
+                    roi_plan.candidate_region_count,
+                )
         else:
             tracker_observations = observations
         self._ocr_text_count += task_result.raw_count
@@ -734,13 +763,18 @@ class LiveController:
             if observations:
                 print("OCR 保留：" + " | ".join(item.text for item in observations))
             if contextual_update is not None:
+                assert roi_job is not None
                 target_count = sum(
                     len(group.targets)
                     for group in contextual_update.context_groups
                 )
                 print(
-                    f"动态 ROI：{roi_plan.reason} / 覆盖 "
+                    f"动态 ROI：{roi_plan.reason} / 扫描覆盖 "
                     f"{roi_plan.coverage_fraction:.1%} / "
+                    f"变化 {roi_job.proposal.changed_fraction:.1%} / "
+                    f"候选覆盖 {roi_plan.candidate_coverage_fraction:.1%} / "
+                    f"候选区域 {roi_plan.candidate_region_count} / "
+                    f"影响 {roi_plan.affected_track_count} 条 / "
                     f"更新 {len(tracker_observations)} 条 / "
                     f"target {target_count} 条"
                 )

@@ -117,6 +117,8 @@ def test_full_frame_fallback_stays_sticky_until_successful_ocr() -> None:
     assert job.proposal.fallback_full_frame
     assert job.proposal.rois == ((0, 0, 320, 180),)
     assert job.proposal.reason == "widespread-change"
+    assert job.proposal.candidate_coverage_fraction == 1.0
+    assert job.proposal.candidate_region_count == 1
 
 
 def test_rejected_ocr_does_not_consume_the_pending_change() -> None:
