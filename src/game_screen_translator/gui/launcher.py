@@ -494,6 +494,15 @@ class LauncherWindow(QMainWindow):
         )
         service_form.addRow("OCR 过滤", self.ocr_filter_checkbox)
 
+        self.ocr_merge_checkbox = QCheckBox("合并文字")
+        self.ocr_merge_checkbox.setChecked(self._config.ocr.text_merge_enabled)
+        self.ocr_merge_checkbox.setToolTip(
+            "开启后会在文字过滤和翻译前，将连续换行句子及日文竖排碎片"
+            "整理成较完整的翻译块；关闭后保留 PaddleOCR 返回的原始文字框。"
+            "保存后从下一次实时翻译开始生效。"
+        )
+        service_form.addRow("OCR 排版", self.ocr_merge_checkbox)
+
         self.blur_mode_combo = QComboBox()
         self.blur_mode_combo.addItem("黑化模糊", _BLUR_MODE_DARK)
         self.blur_mode_combo.addItem("仅模糊（保留画面亮度）", _BLUR_MODE_ONLY)
@@ -634,6 +643,7 @@ class LauncherWindow(QMainWindow):
             f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device} · "
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
+            f"合并{'开' if self._config.ocr.text_merge_enabled else '关'} · "
             f"背景 {self._background_summary(self._config.preview.overlay_opacity)} · "
             f"{self._scheduling_summary(self._config.live)}；"
             "可手动填写，读取列表不会自动保存。"
@@ -843,6 +853,7 @@ class LauncherWindow(QMainWindow):
             self._config.ocr,
             device=device,
             text_filter_enabled=self.ocr_filter_checkbox.isChecked(),
+            text_merge_enabled=self.ocr_merge_checkbox.isChecked(),
         )
 
     def _live_candidate(self):
@@ -1003,6 +1014,7 @@ class LauncherWindow(QMainWindow):
                 ocr_device=ocr.device,
                 max_concurrency=translation.max_concurrency,
                 ocr_text_filter_enabled=ocr.text_filter_enabled,
+                ocr_text_merge_enabled=ocr.text_merge_enabled,
                 preview_overlay_opacity=preview_overlay_opacity,
                 settle_rescan_ms=live.settle_rescan_ms,
                 idle_rescan_ms=live.idle_rescan_ms,
@@ -1027,6 +1039,7 @@ class LauncherWindow(QMainWindow):
         if device_index >= 0:
             self.ocr_device_combo.setCurrentIndex(device_index)
         self.ocr_filter_checkbox.setChecked(self._config.ocr.text_filter_enabled)
+        self.ocr_merge_checkbox.setChecked(self._config.ocr.text_merge_enabled)
         blur_mode = (
             _BLUR_MODE_DARK
             if self._config.preview.overlay_opacity > 0
@@ -1057,6 +1070,7 @@ class LauncherWindow(QMainWindow):
             f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device} · "
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
+            f"合并{'开' if self._config.ocr.text_merge_enabled else '关'} · "
             f"背景 {self._background_summary(self._config.preview.overlay_opacity)} · "
             f"{self._scheduling_summary(self._config.live)}"
         )

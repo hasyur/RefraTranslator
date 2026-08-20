@@ -43,8 +43,8 @@ class FullScreenRoiDetector:
         min_roi_size: tuple[int, int] = (768, 112),
         merge_gap: tuple[int, int] = (64, 32),
         max_rois: int = 6,
-        max_coverage_fraction: float = 0.80,
-        full_frame_change_fraction: float = 0.50,
+        max_coverage_fraction: float = 0.45,
+        full_frame_change_fraction: float = 0.22,
     ) -> None:
         if sample_size[0] < 1 or sample_size[1] < 1:
             raise ValueError("sample_size 必须为正数")

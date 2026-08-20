@@ -26,6 +26,8 @@ cpu_threads = 2
 detection_max_side = 1280
 # OCR 后、稳定跟踪和 LLM 前过滤图标、数字及非源语言文字；也可在启动器中切换。
 text_filter_enabled = true
+# 将换行句子和日文竖排碎片整理成翻译块；关闭后保留 PaddleOCR 原始文字框。
+text_merge_enabled = true
 # 保留英文文本；关闭后可以进一步排除英文桌面图标和游戏 UI。
 translate_latin = true
 # 日文与中文的纯汉字文本无法可靠区分，默认跳过；需要翻译「開始」等内容时开启。

@@ -54,7 +54,7 @@ def test_local_text_like_change_proposes_clipped_context_roi() -> None:
     assert proposal.candidate_region_count == 1
 
 
-def test_default_limits_keep_moderate_structural_change_local() -> None:
+def test_default_change_limit_falls_back_for_moderate_structural_change() -> None:
     before = np.zeros((180, 320, 3), dtype=np.uint8)
     after = before.copy()
     after[:, :128] = 255
@@ -62,20 +62,20 @@ def test_default_limits_keep_moderate_structural_change_local() -> None:
     proposal = _detector(max_coverage_fraction=1.0).propose(before, after)
 
     assert proposal.changed_fraction == pytest.approx(0.4)
-    assert proposal.reason == "local-change"
-    assert not proposal.fallback_full_frame
+    assert proposal.reason == "widespread-change"
+    assert proposal.fallback_full_frame
 
 
-def test_default_coverage_limit_allows_large_single_candidate() -> None:
+def test_default_coverage_limit_falls_back_for_large_single_candidate() -> None:
     before = np.zeros((180, 320, 3), dtype=np.uint8)
     after = before.copy()
     after[80:88, 150:158] = 255
 
     proposal = FullScreenRoiDetector().propose(before, after)
 
-    assert 0.45 < proposal.coverage_fraction < 0.80
-    assert proposal.reason == "local-change"
-    assert not proposal.fallback_full_frame
+    assert 0.45 < proposal.candidate_coverage_fraction < 0.80
+    assert proposal.reason == "roi-coverage-too-large"
+    assert proposal.fallback_full_frame
 
 
 def test_uniform_brightness_shift_is_removed_before_region_detection() -> None:

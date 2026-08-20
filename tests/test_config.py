@@ -44,6 +44,7 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.ocr.cpu_threads == 2
     assert config.ocr.detection_max_side == 1280
     assert config.ocr.text_filter_enabled is True
+    assert config.ocr.text_merge_enabled is True
     assert config.ocr.translate_latin is True
     assert config.ocr.translate_han_only is False
     assert config.preview.overlay_opacity == DEFAULT_DARK_OVERLAY_OPACITY
@@ -151,6 +152,14 @@ def test_load_config_rejects_non_boolean_text_filter_option(tmp_path: Path) -> N
         load_config(path)
 
 
+def test_load_config_rejects_non_boolean_text_merge_option(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, "\n[ocr]\ntext_merge_enabled='yes'\n")
+
+    with pytest.raises(ConfigError, match="text_merge_enabled"):
+        load_config(path)
+
+
 def test_load_config_rejects_non_boolean_dynamic_roi_option(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     _write(path, "\n[live]\ndynamic_roi_enabled='yes'\n")
@@ -250,6 +259,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         ocr_device="gpu:1",
         max_concurrency=7,
         ocr_text_filter_enabled=False,
+        ocr_text_merge_enabled=False,
         preview_overlay_opacity=0.0,
         ocr_cooldown_ms=125,
         settle_rescan_ms=750,
@@ -266,6 +276,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.translation.max_concurrency == 7
     assert saved.ocr.device == "gpu:1"
     assert saved.ocr.text_filter_enabled is False
+    assert saved.ocr.text_merge_enabled is False
     assert saved.preview.overlay_opacity == 0.0
     assert saved.live.capture_fps == 12
     assert saved.live.ocr_cooldown_ms == 125
@@ -280,6 +291,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert "[ocr]" in text
     assert 'device = "gpu:1"' in text
     assert "text_filter_enabled = false" in text
+    assert "text_merge_enabled = false" in text
     assert "overlay_opacity = 0.0" in text
     assert "max_concurrency = 7" in text
     assert "ocr_cooldown_ms = 125" in text
@@ -299,6 +311,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     )
     assert saved.ocr.device == "cpu"
     assert saved.ocr.text_filter_enabled is False
+    assert saved.ocr.text_merge_enabled is False
     assert saved.preview.overlay_opacity == 0.0
     assert saved.live.ocr_cooldown_ms == 125
     assert saved.live.settle_rescan_ms == 750
@@ -310,6 +323,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.live.dynamic_roi_max_coalesce_ms == 450
     assert path.read_text(encoding="utf-8").count("device =") == 1
     assert path.read_text(encoding="utf-8").count("text_filter_enabled =") == 1
+    assert path.read_text(encoding="utf-8").count("text_merge_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("dynamic_roi_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("change_poll_fps =") == 1
     assert path.read_text(encoding="utf-8").count("dynamic_roi_settle_ms =") == 1
@@ -328,11 +342,15 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         model="small-model",
         ocr_device="cpu",
         ocr_text_filter_enabled=True,
+        ocr_text_merge_enabled=True,
     )
     assert saved.ocr.text_filter_enabled is True
+    assert saved.ocr.text_merge_enabled is True
     text = path.read_text(encoding="utf-8")
     assert "text_filter_enabled = true" in text
     assert text.count("text_filter_enabled =") == 1
+    assert "text_merge_enabled = true" in text
+    assert text.count("text_merge_enabled =") == 1
 
 
 def test_save_runtime_selection_updates_existing_live_timing_values(
@@ -434,6 +452,25 @@ def test_save_runtime_selection_rejects_non_boolean_filter_without_writing(
             model="model",
             ocr_device="cpu",
             ocr_text_filter_enabled="no",  # type: ignore[arg-type]
+        )
+
+    assert path.read_bytes() == before
+
+
+def test_save_runtime_selection_rejects_non_boolean_merge_without_writing(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path)
+    before = path.read_bytes()
+
+    with pytest.raises(ConfigError, match="text_merge_enabled"):
+        save_runtime_selection(
+            path,
+            base_url="http://gpu.test/v1",
+            model="model",
+            ocr_device="cpu",
+            ocr_text_merge_enabled="no",  # type: ignore[arg-type]
         )
 
     assert path.read_bytes() == before

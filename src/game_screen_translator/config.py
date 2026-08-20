@@ -73,6 +73,7 @@ class OcrConfig:
     cpu_threads: int = 2
     detection_max_side: int = 1280
     text_filter_enabled: bool = True
+    text_merge_enabled: bool = True
     translate_latin: bool = True
     translate_han_only: bool = False
 
@@ -95,6 +96,7 @@ class OcrConfig:
             raise ConfigError("ocr.detection_max_side 必须在 320 到 4096 之间")
         for key, value in (
             ("text_filter_enabled", self.text_filter_enabled),
+            ("text_merge_enabled", self.text_merge_enabled),
             ("translate_latin", self.translate_latin),
             ("translate_han_only", self.translate_han_only),
         ):
@@ -256,7 +258,8 @@ _TRANSLATION_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>base_url|model|max_concurrency)[ \t]*="
 )
 _OCR_VALUE_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<key>device|text_filter_enabled)[ \t]*="
+    r"^(?P<indent>[ \t]*)(?P<key>"
+    r"device|text_filter_enabled|text_merge_enabled)[ \t]*="
 )
 _PREVIEW_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>overlay_opacity)[ \t]*="
@@ -284,6 +287,7 @@ def save_translation_selection(
         max_concurrency=None,
         ocr_device=None,
         ocr_text_filter_enabled=None,
+        ocr_text_merge_enabled=None,
         preview_overlay_opacity=None,
         ocr_cooldown_ms=None,
         settle_rescan_ms=None,
@@ -304,6 +308,7 @@ def save_runtime_selection(
     ocr_device: str,
     max_concurrency: int | None = None,
     ocr_text_filter_enabled: bool | None = None,
+    ocr_text_merge_enabled: bool | None = None,
     preview_overlay_opacity: float | None = None,
     ocr_cooldown_ms: int | None = None,
     settle_rescan_ms: int | None = None,
@@ -322,6 +327,7 @@ def save_runtime_selection(
         max_concurrency=max_concurrency,
         ocr_device=ocr_device,
         ocr_text_filter_enabled=ocr_text_filter_enabled,
+        ocr_text_merge_enabled=ocr_text_merge_enabled,
         preview_overlay_opacity=preview_overlay_opacity,
         ocr_cooldown_ms=ocr_cooldown_ms,
         settle_rescan_ms=settle_rescan_ms,
@@ -342,6 +348,7 @@ def _save_selected_values(
     max_concurrency: int | None,
     ocr_device: str | None,
     ocr_text_filter_enabled: bool | None,
+    ocr_text_merge_enabled: bool | None,
     preview_overlay_opacity: float | None,
     ocr_cooldown_ms: int | None,
     settle_rescan_ms: int | None,
@@ -371,6 +378,11 @@ def _save_selected_values(
             current.ocr.text_filter_enabled
             if ocr_text_filter_enabled is None
             else ocr_text_filter_enabled
+        ),
+        text_merge_enabled=(
+            current.ocr.text_merge_enabled
+            if ocr_text_merge_enabled is None
+            else ocr_text_merge_enabled
         ),
     )
     candidate_preview = replace(
@@ -474,13 +486,22 @@ def _save_selected_values(
     if max_concurrency is not None and "max_concurrency" not in replaced_keys:
         _upsert_translation_concurrency(lines, candidate_translation.max_concurrency)
 
-    if ocr_device is not None or ocr_text_filter_enabled is not None:
+    if (
+        ocr_device is not None
+        or ocr_text_filter_enabled is not None
+        or ocr_text_merge_enabled is not None
+    ):
         _upsert_ocr_values(
             lines,
             device=candidate_ocr.device if ocr_device is not None else None,
             text_filter_enabled=(
                 candidate_ocr.text_filter_enabled
                 if ocr_text_filter_enabled is not None
+                else None
+            ),
+            text_merge_enabled=(
+                candidate_ocr.text_merge_enabled
+                if ocr_text_merge_enabled is not None
                 else None
             ),
         )
@@ -584,6 +605,7 @@ def _upsert_ocr_values(
     *,
     device: str | None,
     text_filter_enabled: bool | None,
+    text_merge_enabled: bool | None,
 ) -> None:
     newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
     values = {
@@ -591,6 +613,7 @@ def _upsert_ocr_values(
         for key, value in (
             ("device", device),
             ("text_filter_enabled", text_filter_enabled),
+            ("text_merge_enabled", text_merge_enabled),
         )
         if value is not None
     }

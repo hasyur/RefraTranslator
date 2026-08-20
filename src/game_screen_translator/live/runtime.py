@@ -434,7 +434,9 @@ class LiveController:
             f"LLM 并发 {self._config.translation.max_concurrency} · "
             f"OCR {ocr_runtime} / 过滤"
             f"{'开' if self._config.ocr.text_filter_enabled else '关'} / 最长边 "
-            f"{self._config.ocr.detection_max_side} · {profile_label}{region_hint}",
+            f"{self._config.ocr.detection_max_side} / 合并"
+            f"{'开' if self._config.ocr.text_merge_enabled else '关'} · "
+            f"{profile_label}{region_hint}",
         )
         self._timer.start()
 
@@ -628,7 +630,11 @@ class LiveController:
                 edge_margin=_ROI_INTERNAL_EDGE_MARGIN,
             )
         )
-        layout_observations = merge_ocr_text_blocks(raw_observations)
+        layout_observations = (
+            merge_ocr_text_blocks(raw_observations)
+            if self._config.ocr.text_merge_enabled
+            else raw_observations
+        )
         filtered = self._text_filter.apply(layout_observations)
         completed_at = time.monotonic()
         return _OcrTaskResult(

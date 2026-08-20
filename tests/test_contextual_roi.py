@@ -204,14 +204,14 @@ def test_contextual_expansion_falls_back_when_coverage_is_too_large() -> None:
     assert plan.candidate_region_count == 1
 
 
-def test_default_contextual_coverage_allows_half_frame_candidate() -> None:
+def test_default_contextual_coverage_falls_back_for_half_frame_candidate() -> None:
     planner = ContextualRoiPlanner(min_roi_size=(600, 400))
 
     plan = planner.plan(((300, 250, 20, 20),), (), frame_size=(800, 600))
 
-    assert not plan.fallback_full_frame
-    assert plan.reason == "contextual-local-change"
-    assert plan.coverage_fraction == pytest.approx(0.5)
+    assert plan.fallback_full_frame
+    assert plan.reason == "contextual-coverage-too-large"
+    assert plan.coverage_fraction == pytest.approx(1.0)
     assert plan.candidate_coverage_fraction == pytest.approx(0.5)
     assert plan.candidate_region_count == 1
 

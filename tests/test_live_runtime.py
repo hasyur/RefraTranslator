@@ -7,7 +7,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 from PySide6.QtWidgets import QApplication
 
-from game_screen_translator.config import AppConfig, LiveConfig, TranslationConfig
+from game_screen_translator.config import (
+    AppConfig,
+    LiveConfig,
+    OcrConfig,
+    TranslationConfig,
+)
 from game_screen_translator.live import runtime as live_runtime
 from game_screen_translator.live.runtime import LiveController
 from game_screen_translator.ocr.types import OcrText
@@ -255,6 +260,35 @@ def test_layout_fragments_merge_before_language_filtering() -> None:
     assert [item.text for item in result.observations] == ["希望はある"]
     assert result.raw_count == 2
     assert result.layout_count == 1
+    assert result.rejected == ()
+    controller.close()
+
+
+def test_layout_fragments_remain_separate_when_text_merge_is_disabled() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        ocr=OcrConfig(text_filter_enabled=False, text_merge_enabled=False),
+        live=LiveConfig(stable_observations=99),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeSplitVerticalOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+
+    result = controller._run_ocr(np.zeros((400, 900, 3), dtype=np.uint8), 1.0)
+
+    assert [item.text for item in result.observations] == ["希望", "はある"]
+    assert result.raw_count == 2
+    assert result.layout_count == 2
     assert result.rejected == ()
     controller.close()
 

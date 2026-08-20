@@ -81,7 +81,7 @@ class ContextualRoiPlanner:
         merge_gap: tuple[int, int] = (24, 16),
         max_regions: int = 6,
         max_affected_tracks: int = 16,
-        max_coverage_fraction: float = 0.80,
+        max_coverage_fraction: float = 0.45,
     ) -> None:
         if direct_margin < 0:
             raise ValueError("direct_margin 不能为负数")

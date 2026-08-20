@@ -79,6 +79,7 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.max_concurrency_spin.value() == 2
     assert window.ocr_device_combo.currentData() == "cpu"
     assert window.ocr_filter_checkbox.isChecked()
+    assert window.ocr_merge_checkbox.isChecked()
     assert window.blur_mode_combo.currentData() == "dark_blur"
     assert not window.dynamic_roi_checkbox.isChecked()
     assert window.settle_rescan_spin.value() == 500
@@ -328,6 +329,26 @@ def test_launcher_saves_and_restores_ocr_filter_switch(tmp_path: Path) -> None:
 
     restored = LauncherWindow(config_path, probe_ocr_devices=False)
     assert not restored.ocr_filter_checkbox.isChecked()
+    restored.close()
+    app.processEvents()
+
+
+def test_launcher_saves_and_restores_ocr_text_merge_switch(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+    assert window.ocr_merge_checkbox.isChecked()
+    window.ocr_merge_checkbox.setChecked(False)
+
+    assert window._save_translation_settings(announce=False)
+    assert load_config(config_path).ocr.text_merge_enabled is False
+    assert "合并关" in window.service_status_label.text()
+    window.close()
+    app.processEvents()
+
+    restored = LauncherWindow(config_path, probe_ocr_devices=False)
+    assert not restored.ocr_merge_checkbox.isChecked()
     restored.close()
     app.processEvents()
 
