@@ -137,11 +137,25 @@ class TranslationOverlay(QWidget):
         painter.setRenderHint(QT["QPainter"].RenderHint.Antialiasing, True)
         painter.setRenderHint(QT["QPainter"].RenderHint.TextAntialiasing, True)
         painter.setRenderHint(QT["QPainter"].RenderHint.SmoothPixmapTransform, True)
+        layouts = []
         for track in self._tracks:
-            self._paint_track(painter, track)
+            layout = self._track_layout(track)
+            if layout is not None:
+                rect, source_bounds = layout
+                layouts.append((track, rect, source_bounds))
+        # Paint every source-text blur before drawing any translation. Otherwise
+        # a later line's padded blur can erase glyphs already drawn for a nearby
+        # line.
+        for _, rect, source_bounds in layouts:
+            self._paint_track_background(painter, rect, source_bounds)
+        if self._debug_border:
+            for _, rect, _ in layouts:
+                self._paint_track_border(painter, rect)
+        for track, rect, _ in layouts:
+            self._paint_track_text(painter, track, rect)
         painter.end()
 
-    def _paint_track(self, painter, track: TrackedText) -> None:
+    def _track_layout(self, track: TrackedText):
         frame_height, frame_width = (
             self._frame.shape[:2] if self._frame is not None else (self.height(), self.width())
         )
@@ -156,15 +170,17 @@ class TranslationOverlay(QWidget):
             max(1, round((source_bottom - source_top + padding * 2) * scale_y)),
         ).intersected(self.rect())
         if rect.isEmpty():
-            return
+            return None
+        source_bounds = (
+            source_left - padding,
+            source_top - padding,
+            source_right + padding,
+            source_bottom + padding,
+        )
+        return rect, source_bounds
 
+    def _paint_track_background(self, painter, rect, source_bounds) -> None:
         if self._frame is not None:
-            source_bounds = (
-                source_left - padding,
-                source_top - padding,
-                source_right + padding,
-                source_bottom + padding,
-            )
             pixmap = self._frame_pixmap(source_bounds)
             if pixmap is not None:
                 painter.save()
@@ -172,10 +188,12 @@ class TranslationOverlay(QWidget):
                 painter.drawPixmap(rect, pixmap)
                 painter.restore()
 
-        if self._debug_border:
-            painter.setPen(QT["QPen"](QT["QColor"](0, 220, 255, 220), 1))
-            painter.drawRect(rect.adjusted(0, 0, -1, -1))
+    @staticmethod
+    def _paint_track_border(painter, rect) -> None:
+        painter.setPen(QT["QPen"](QT["QColor"](0, 220, 255, 220), 1))
+        painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
+    def _paint_track_text(self, painter, track: TrackedText, rect) -> None:
         # Keep glyphs inside the original OCR bounds. The surrounding four
         # pixels belong to the blur only; letting text use them makes adjacent
         # subtitle lines paint over one another.
@@ -243,14 +261,14 @@ class TranslationOverlay(QWidget):
         return QT["QPixmap"].fromImage(image)
 
     def _fit_font(self, text: str, rect):
-        upper = max(10, min(40, int(rect.height() * 0.52)))
-        for size in range(upper, 7, -1):
+        upper = max(12, min(48, int(rect.height() * 0.64)))
+        for size in range(upper, 9, -1):
             font = self._make_font(size)
             metrics = QT["QFontMetrics"](font)
             lines = self._wrap(text, metrics, rect.width())
             if metrics.lineSpacing() * len(lines) <= rect.height():
                 return font
-        return self._make_font(8)
+        return self._make_font(10)
 
     def _make_font(self, pixel_size: int):
         font = QT["QFont"](self._font_family)
