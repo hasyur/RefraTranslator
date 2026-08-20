@@ -26,6 +26,42 @@ def test_merges_wrapped_horizontal_rows_into_one_translation_block() -> None:
     assert result[0].confidence == 0.96
 
 
+def test_complete_horizontal_sentences_do_not_collapse_into_one_translation_id() -> None:
+    observations = (
+        _ocr("これは一つ目の完結した文章です。", (40, 40, 700, 80)),
+        _ocr("これは二つ目の完結した文章です。", (40, 86, 700, 126)),
+        _ocr("これは三つ目の完結した文章です。", (40, 132, 700, 172)),
+    )
+
+    assert merge_ocr_text_blocks(observations) == observations
+
+
+def test_wrapped_sentence_merges_without_absorbing_the_next_complete_line() -> None:
+    result = merge_ocr_text_blocks(
+        (
+            _ocr("この世界にはインター", (40, 40, 700, 80)),
+            _ocr("ネットが存在する。", (40, 86, 620, 126)),
+            _ocr("次の文章はここで完結する。", (40, 132, 700, 172)),
+        )
+    )
+
+    assert [item.text for item in result] == [
+        "この世界にはインター\nネットが存在する。",
+        "次の文章はここで完結する。",
+    ]
+
+
+def test_ellipsis_can_continue_into_the_next_horizontal_row() -> None:
+    result = merge_ocr_text_blocks(
+        (
+            _ocr("それは……", (40, 40, 700, 80)),
+            _ocr("いや、何でもない。", (40, 86, 620, 126)),
+        )
+    )
+
+    assert [item.text for item in result] == ["それは……\nいや、何でもない。"]
+
+
 def test_orders_split_vertical_columns_right_to_left_before_merging() -> None:
     # This is the geometry emitted by PP-OCRv6 for a synthetic two-column
     # Japanese sample. Paddle's normal y/x order interleaves both columns.

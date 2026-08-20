@@ -8,6 +8,19 @@ from game_screen_translator.ocr.types import OcrText
 
 
 Bounds = tuple[int, int, int, int]
+_SENTENCE_ENDINGS = (
+    "。",
+    "！",
+    "？",
+    "!",
+    "?",
+    "…",
+    "」",
+    "』",
+    ")",
+    "]",
+)
+_HARD_SENTENCE_ENDINGS = ("。", "！", "？", "!", "?", "」", "』")
 
 
 def merge_ocr_text_blocks(observations: Iterable[OcrText]) -> tuple[OcrText, ...]:
@@ -176,6 +189,16 @@ def _same_horizontal_block(first_item: OcrText, second_item: OcrText) -> bool:
     if row_overlap_ratio >= 0.65:
         return _horizontal_gap(first, second) <= line_height * 0.75
 
+    upper_item = min(
+        (first_item, second_item),
+        key=lambda item: (item.bounds[1], item.bounds[0]),
+    )
+    # A completed upper row is already a safe translation unit. Stopping the
+    # graph edge here prevents three neighboring sentences from collapsing into
+    # one ID, while a word or sentence wrapped mid-line still joins the next row.
+    if upper_item.text.rstrip().endswith(_HARD_SENTENCE_ENDINGS):
+        return False
+
     if _vertical_gap(first, second) > line_height * 0.70:
         return False
     first_width = _width(first)
@@ -204,8 +227,7 @@ def _has_horizontal_continuation(
         return len(component) >= 2
     text_length = sum(len(items[index].text.strip()) for index in component)
     final_text = _join_inline(items[index].text for index in rows[-1]).rstrip()
-    sentence_endings = ("。", "！", "？", "!", "?", "…", "」", "』", ")", "]")
-    return text_length >= 14 or final_text.endswith(sentence_endings)
+    return text_length >= 14 or final_text.endswith(_SENTENCE_ENDINGS)
 
 
 def _merge_vertical_block(

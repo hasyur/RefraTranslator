@@ -70,6 +70,23 @@ def test_overlay_uses_restored_translation_font_scale() -> None:
     app.processEvents()
 
 
+def test_multiline_source_uses_source_line_height_as_font_cap() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 900, 300),
+        style=OverlayStyle(),
+    )
+
+    font = overlay._fit_font(
+        "这是前两句的短译文。",
+        QRect(0, 0, 800, 150),
+        source_text="一行目の文章\n二行目の文章\n三行目の文章",
+    )
+
+    assert 26 <= font.pixelSize() <= 34
+    app.processEvents()
+
+
 def test_long_translation_is_clipped_to_its_own_text_region() -> None:
     app = QApplication.instance() or QApplication([])
     overlay = TranslationOverlay(

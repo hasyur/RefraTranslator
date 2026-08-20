@@ -200,7 +200,11 @@ class TranslationOverlay(QWidget):
         text_rect = rect.adjusted(4, 4, -4, -4)
         if text_rect.isEmpty():
             return
-        font = self._fit_font(track.translated_text or "", text_rect)
+        font = self._fit_font(
+            track.translated_text or "",
+            text_rect,
+            source_text=track.text,
+        )
         painter.setFont(font)
         metrics = QT["QFontMetrics"](font)
         lines = self._wrap(track.translated_text or "", metrics, text_rect.width())
@@ -260,8 +264,12 @@ class TranslationOverlay(QWidget):
         ).copy()
         return QT["QPixmap"].fromImage(image)
 
-    def _fit_font(self, text: str, rect):
+    def _fit_font(self, text: str, rect, *, source_text: str = ""):
         upper = max(12, min(48, int(rect.height() * 0.64)))
+        source_lines = tuple(line for line in source_text.splitlines() if line.strip())
+        if len(source_lines) > 1 and rect.width() >= rect.height():
+            source_line_upper = int(rect.height() / len(source_lines) * 0.64)
+            upper = max(12, min(upper, source_line_upper))
         for size in range(upper, 9, -1):
             font = self._make_font(size)
             metrics = QT["QFontMetrics"](font)
