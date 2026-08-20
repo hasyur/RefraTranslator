@@ -17,6 +17,7 @@ from game_screen_translator.domain import ContextPair
 
 
 _SCHEMA_VERSION = 1
+_AUTOMATIC_KEY_POLICY = "stable-source-v1"
 _SPACE_RE = re.compile(r"\s+")
 CacheOrigin = Literal["manual", "automatic"]
 
@@ -71,9 +72,12 @@ class CacheEnvironment:
         normalized = normalize_source_text(source_text)
         if not normalized:
             raise ValueError("缓存原文不能为空")
+        # Context still records how the first translation was produced, but it
+        # is deliberately not part of this per-profile translation identity.
         context_revision = context_fingerprint(context)
         payload = {
             "schema": _SCHEMA_VERSION,
+            "key_policy": _AUTOMATIC_KEY_POLICY,
             "profile": self.profile_id,
             "source": normalized,
             "source_language": self.source_language,
@@ -81,7 +85,6 @@ class CacheEnvironment:
             "model": self.model,
             "prompt_version": self.prompt_version,
             "glossary_revision": self.glossary_revision,
-            "context_fingerprint": context_revision,
         }
         encoded = json.dumps(
             payload,

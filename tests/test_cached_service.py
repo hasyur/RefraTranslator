@@ -146,7 +146,7 @@ async def test_manual_correction_bypasses_model_and_context_version(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_changed_context_causes_automatic_cache_miss(tmp_path: Path) -> None:
+async def test_changed_context_reuses_stable_source_cache(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     profile = create_game_profile(config_path, _config(), "game")
     transport = RecordingTransport()
@@ -161,8 +161,8 @@ async def test_changed_context_causes_automatic_cache_miss(tmp_path: Path) -> No
         context=(ContextPair("B", "乙"),),
     )
 
-    assert outcome.origins == ("model",)
-    assert len(transport.prompts) == 2
+    assert outcome.origins == ("automatic",)
+    assert len(transport.prompts) == 1
 
 
 @pytest.mark.asyncio
@@ -178,11 +178,17 @@ async def test_concurrent_identical_cache_keys_share_one_model_call(
     second_source = SourceText("z", "second", 1, "待って。")
 
     first_task = asyncio.create_task(
-        first_service.translate(TranslationBatch((first_source,)))
+        first_service.translate(
+            TranslationBatch((first_source,)),
+            context=(ContextPair("A", "甲"),),
+        )
     )
     await _wait_for_calls(transport, 1)
     second_task = asyncio.create_task(
-        second_service.translate(TranslationBatch((second_source,)))
+        second_service.translate(
+            TranslationBatch((second_source,)),
+            context=(ContextPair("B", "乙"),),
+        )
     )
     await asyncio.sleep(0)
 

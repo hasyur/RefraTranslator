@@ -21,18 +21,34 @@ def _environment(**changes: str) -> CacheEnvironment:
     return CacheEnvironment(**values)
 
 
-def test_automatic_cache_key_tracks_context_and_translation_contract(tmp_path: Path) -> None:
+def test_automatic_cache_key_ignores_context_and_tracks_translation_contract(
+    tmp_path: Path,
+) -> None:
     cache = TranslationCache(tmp_path / "translations.sqlite3")
     first_context = (ContextPair("前文", "前文译文"),)
     second_context = (ContextPair("另一段", "另一段译文"),)
     environment = _environment()
+    first_key, _, first_context_revision = environment.automatic_key(
+        "仕事 だ。",
+        first_context,
+    )
+    second_key, _, second_context_revision = environment.automatic_key(
+        "仕事 だ。",
+        second_context,
+    )
+
+    assert first_key == second_key
+    assert first_context_revision != second_context_revision
 
     cache.store_automatic(" 仕事\nだ。 ", "是工作。", environment, first_context)
 
     hit = cache.lookup("仕事 だ。", environment, first_context)
     assert hit is not None
     assert (hit.translated_text, hit.origin) == ("是工作。", "automatic")
-    assert cache.lookup("仕事 だ。", environment, second_context) is None
+    context_hit = cache.lookup("仕事 だ。", environment, second_context)
+    assert context_hit is not None
+    assert context_hit.translated_text == "是工作。"
+    assert cache.lookup("仕事だった。", environment, first_context) is None
     assert cache.lookup(
         "仕事 だ。",
         _environment(glossary_revision="glossary-v2"),
@@ -41,6 +57,16 @@ def test_automatic_cache_key_tracks_context_and_translation_contract(tmp_path: P
     assert cache.lookup(
         "仕事 だ。",
         _environment(model="another-model"),
+        first_context,
+    ) is None
+    assert cache.lookup(
+        "仕事 だ。",
+        _environment(prompt_version="prompt-v2"),
+        first_context,
+    ) is None
+    assert cache.lookup(
+        "仕事 だ。",
+        _environment(target_language="English"),
         first_context,
     ) is None
 
