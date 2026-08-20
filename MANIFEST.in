@@ -6,5 +6,6 @@ include config.example.toml
 include start_gui.bat
 include start_test_scenes.bat
 recursive-include scripts *.py
+recursive-include docs *.md
 recursive-include tests *.py
 recursive-include tests/manual *.md
