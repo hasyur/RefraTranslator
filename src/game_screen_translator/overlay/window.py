@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Sequence
 
 import numpy as np
-from PIL import Image, ImageFilter
 
+from game_screen_translator.background import render_background_patch
 from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.live.tracker import TrackedText
 
@@ -177,10 +177,10 @@ class TranslationOverlay(QWidget):
                     if prior is not None:
                         self._background_pixmaps[key] = prior
                 continue
-            crop = self._frame_crop(source_bounds)
-            if crop is None:
+            patch = self._background_patch(source_bounds)
+            if patch is None:
                 continue
-            self._background_pixmaps[key] = self._crop_pixmap(crop)
+            self._background_pixmaps[key] = self._pixmap_from_patch(patch)
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt callback name
@@ -309,35 +309,23 @@ class TranslationOverlay(QWidget):
         painter.setPen(QT["QColor"](255, 255, 255, 255))
         painter.drawText(QT["QPoint"](x, baseline), text)
 
-    def _frame_crop(self, source_bounds):
+    def _background_patch(self, source_bounds):
         frame = self._frame
-        if frame is None or frame.ndim != 3 or frame.shape[2] < 3:
+        if frame is None:
             return None
-        left, top, right, bottom = source_bounds
-        top = max(0, min(top, frame.shape[0] - 1))
-        bottom = max(top + 1, min(bottom, frame.shape[0]))
-        left = max(0, min(left, frame.shape[1] - 1))
-        right = max(left + 1, min(right, frame.shape[1]))
-        return np.ascontiguousarray(frame[top:bottom, left:right, :3])
+        rendered = render_background_patch(
+            frame,
+            source_bounds,
+            blur_radius=self._style.blur_radius,
+            overlay_opacity=self._style.overlay_opacity,
+        )
+        return None if rendered is None else rendered[1]
 
-    def _crop_pixmap(self, crop: np.ndarray):
-        if self._style.blur_radius > 0 or self._style.overlay_opacity > 0:
-            processed = Image.fromarray(crop)
-            if self._style.blur_radius > 0:
-                processed = processed.filter(
-                    ImageFilter.GaussianBlur(self._style.blur_radius)
-                )
-            if self._style.overlay_opacity > 0:
-                processed = Image.blend(
-                    processed,
-                    Image.new("RGB", processed.size, (0, 0, 0)),
-                    self._style.overlay_opacity,
-                )
-            crop = np.asarray(processed)
-            crop = np.ascontiguousarray(crop)
-        height, width, channels = crop.shape
+    @staticmethod
+    def _pixmap_from_patch(patch: np.ndarray):
+        height, width, channels = patch.shape
         image = QT["QImage"](
-            crop.data,
+            patch.data,
             width,
             height,
             channels * width,

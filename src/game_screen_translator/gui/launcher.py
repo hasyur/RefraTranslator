@@ -507,7 +507,8 @@ class LauncherWindow(QMainWindow):
         )
         self.blur_mode_combo.setToolTip(
             "黑化模糊会在模糊后的原文字区域叠加暗层，提高白色译文对比度；"
-            "仅模糊不会改变区域整体亮度。保存后从下一次实时翻译开始生效。"
+            "仅模糊会根据文字框周边估算背景后再模糊，避免原文字颜色扩散成色块。"
+            "保存后从下一次实时翻译开始生效。"
         )
         service_form.addRow("译文背景", self.blur_mode_combo)
 

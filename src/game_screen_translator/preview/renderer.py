@@ -4,8 +4,10 @@ import os
 from pathlib import Path
 from typing import Sequence
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
+from game_screen_translator.background import render_background_patch
 from game_screen_translator.config import PreviewConfig
 from game_screen_translator.ocr.types import OcrText
 
@@ -89,8 +91,11 @@ def render_preview(
 
     source_path = Path(image_path)
     destination = Path(output_path)
-    image = Image.open(source_path).convert("RGBA")
+    with Image.open(source_path) as source_image:
+        source_rgb = np.asarray(source_image.convert("RGB")).copy()
+    image = Image.fromarray(source_rgb).convert("RGBA")
     width, height = image.size
+    layouts: list[tuple[int, int, int, int, str]] = []
 
     for observation, translated in zip(observations, translations, strict=True):
         left, top, right, bottom = observation.bounds
@@ -102,21 +107,20 @@ def render_preview(
         if right <= left or bottom <= top:
             continue
 
-        region = image.crop((left, top, right, bottom))
-        if config.blur_radius > 0:
-            region = region.filter(ImageFilter.GaussianBlur(config.blur_radius))
-        if config.overlay_opacity > 0:
-            region = Image.alpha_composite(
-                region,
-                Image.new(
-                    "RGBA",
-                    region.size,
-                    (0, 0, 0, round(255 * config.overlay_opacity)),
-                ),
-            )
-        image.paste(region, (left, top))
+        rendered = render_background_patch(
+            source_rgb,
+            (left, top, right, bottom),
+            blur_radius=config.blur_radius,
+            overlay_opacity=config.overlay_opacity,
+        )
+        if rendered is None:
+            continue
+        (left, top, right, bottom), patch = rendered
+        image.paste(Image.fromarray(patch).convert("RGBA"), (left, top))
+        layouts.append((left, top, right, bottom, translated))
 
-        draw = ImageDraw.Draw(image)
+    draw = ImageDraw.Draw(image)
+    for left, top, right, bottom, translated in layouts:
         box_width = max(1, right - left - 6)
         box_height = max(1, bottom - top - 4)
         font, lines, line_height = _fit_text(
