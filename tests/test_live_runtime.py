@@ -455,6 +455,10 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
         live=LiveConfig(
             stable_observations=99,
             dynamic_roi_enabled=True,
+            change_poll_fps=5,
+            dynamic_roi_settle_ms=100,
+            dynamic_roi_ocr_interval_ms=250,
+            dynamic_roi_max_coalesce_ms=450,
         ),
     )
     capture = MutableCapture(_dynamic_roi_frame())
@@ -476,6 +480,10 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     controller._tick()
     assert controller._roi_scheduler is not None
     assert controller._roi_scheduler.primed
+    assert controller._roi_scheduler.settle_interval_s == 0.1
+    assert controller._roi_scheduler.min_ocr_interval_s == 0.25
+    assert controller._roi_scheduler.max_coalesce_s == 0.45
+    assert controller._timer.interval() == 200
     assert [track.text for track in controller._tracker.visible_tracks] == [
         "待って。",
         "先へ進め。",

@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -84,6 +83,12 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.settle_rescan_spin.value() == 500
     assert window.idle_rescan_spin.value() == 2000
     assert window.ocr_cooldown_spin.value() == 0
+    assert window.change_poll_spin.value() == 6
+    assert window.roi_settle_spin.value() == 180
+    assert window.roi_ocr_interval_spin.value() == 333
+    assert window.roi_max_coalesce_spin.value() == 333
+    assert window._service_form.isRowVisible(window.settle_rescan_spin)
+    assert not window._service_form.isRowVisible(window.roi_settle_spin)
     assert window._current_region() == (100, 200, 800, 300)
     assert window._glossary_editor.pairs() == (("仕事", "委托"),)
     assert window._correction_editor.pairs() == (("待て。", "等等。"),)
@@ -149,6 +154,10 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     window.settle_rescan_spin.setValue(800)
     window.idle_rescan_spin.setValue(4000)
     window.ocr_cooldown_spin.setValue(100)
+    window.change_poll_spin.setValue(8)
+    window.roi_settle_spin.setValue(240)
+    window.roi_ocr_interval_spin.setValue(250)
+    window.roi_max_coalesce_spin.setValue(450)
     window.dynamic_roi_checkbox.setChecked(True)
 
     window._start_live()
@@ -178,6 +187,10 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.live.idle_rescan_ms == 4000
     assert saved.live.ocr_cooldown_ms == 100
     assert saved.live.dynamic_roi_enabled is True
+    assert saved.live.change_poll_fps == 8
+    assert saved.live.dynamic_roi_settle_ms == 240
+    assert saved.live.dynamic_roi_ocr_interval_ms == 250
+    assert saved.live.dynamic_roi_max_coalesce_ms == 450
     window._live_monitor.stop()
     window.close()
     app.processEvents()
@@ -346,31 +359,64 @@ def test_launcher_saves_and_restores_live_ocr_timings(tmp_path: Path) -> None:
     app.processEvents()
 
 
-def test_launcher_dynamic_roi_switch_disables_only_legacy_timing_controls(
+def test_launcher_dynamic_roi_switches_visible_scheduling_controls(
     tmp_path: Path,
 ) -> None:
     app = QApplication.instance() or QApplication([])
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
     window = LauncherWindow(config_path, probe_ocr_devices=False)
-    filter_enabled_before = window.ocr_filter_checkbox.isEnabled()
+    assert window._service_form.isRowVisible(window.settle_rescan_spin)
+    assert window._service_form.isRowVisible(window.idle_rescan_spin)
+    assert window._service_form.isRowVisible(window.ocr_cooldown_spin)
+    assert window._service_form.isRowVisible(window.change_poll_spin)
+    assert not window._service_form.isRowVisible(window.roi_settle_spin)
+    assert not window._service_form.isRowVisible(window.roi_ocr_interval_spin)
+    assert not window._service_form.isRowVisible(window.roi_max_coalesce_spin)
 
     window.dynamic_roi_checkbox.setChecked(True)
 
-    force_disabled = Qt.WidgetAttribute.WA_ForceDisabled
-    assert window.settle_rescan_spin.testAttribute(force_disabled)
-    assert window.idle_rescan_spin.testAttribute(force_disabled)
-    assert window.ocr_cooldown_spin.testAttribute(force_disabled)
-    assert window.ocr_filter_checkbox.isEnabled() == filter_enabled_before
+    assert not window._service_form.isRowVisible(window.settle_rescan_spin)
+    assert not window._service_form.isRowVisible(window.idle_rescan_spin)
+    assert not window._service_form.isRowVisible(window.ocr_cooldown_spin)
+    assert window._service_form.isRowVisible(window.change_poll_spin)
+    assert window._service_form.isRowVisible(window.roi_settle_spin)
+    assert window._service_form.isRowVisible(window.roi_ocr_interval_spin)
+    assert window._service_form.isRowVisible(window.roi_max_coalesce_spin)
+    window.change_poll_spin.setValue(10)
+    window.roi_settle_spin.setValue(220)
+    window.roi_ocr_interval_spin.setValue(200)
+    window.roi_max_coalesce_spin.setValue(500)
     assert window._save_translation_settings(announce=False)
-    assert load_config(config_path).live.dynamic_roi_enabled is True
+    saved = load_config(config_path)
+    assert saved.live.dynamic_roi_enabled is True
+    assert saved.live.change_poll_fps == 10
+    assert saved.live.dynamic_roi_settle_ms == 220
+    assert saved.live.dynamic_roi_ocr_interval_ms == 200
+    assert saved.live.dynamic_roi_max_coalesce_ms == 500
     assert "动态 ROI 开" in window.service_status_label.text()
+    assert "热图 10 Hz" in window.service_status_label.text()
 
     window.dynamic_roi_checkbox.setChecked(False)
-    assert not window.settle_rescan_spin.testAttribute(force_disabled)
-    assert not window.idle_rescan_spin.testAttribute(force_disabled)
-    assert not window.ocr_cooldown_spin.testAttribute(force_disabled)
+    assert window._service_form.isRowVisible(window.settle_rescan_spin)
+    assert window._service_form.isRowVisible(window.idle_rescan_spin)
+    assert window._service_form.isRowVisible(window.ocr_cooldown_spin)
+    assert window._service_form.isRowVisible(window.change_poll_spin)
+    assert not window._service_form.isRowVisible(window.roi_settle_spin)
+    assert not window._service_form.isRowVisible(window.roi_ocr_interval_spin)
+    assert not window._service_form.isRowVisible(window.roi_max_coalesce_spin)
     window.close()
+    app.processEvents()
+
+    restored = LauncherWindow(config_path, probe_ocr_devices=False)
+    assert restored.dynamic_roi_checkbox.isChecked()
+    assert not restored._service_form.isRowVisible(restored.settle_rescan_spin)
+    assert restored._service_form.isRowVisible(restored.roi_settle_spin)
+    assert restored.change_poll_spin.value() == 10
+    assert restored.roi_settle_spin.value() == 220
+    assert restored.roi_ocr_interval_spin.value() == 200
+    assert restored.roi_max_coalesce_spin.value() == 500
+    restored.close()
     app.processEvents()
 
 

@@ -47,6 +47,7 @@ width = 0
 height = 0
 monitor_index = 0
 capture_fps = 15
+# 两条调度路径共用的轻量变化检测频率；动态 ROI 开启时即热图频率。
 change_poll_fps = 6
 change_threshold = 3.0
 stable_observations = 1
@@ -55,9 +56,13 @@ clear_after_ms = 900
 context_pairs = 8
 max_batch_size = 8
 capture_backend = "dxgi"
-# 实验性路径：首次整帧 OCR 后，以 6 Hz 热图定位变化，并将 Paddle ROI OCR
-# 限制在约 3 Hz。动态背景目前可能频繁触发整帧安全回退，默认保持关闭。
+# 实验性路径：首次整帧 OCR 后，以 change_poll_fps 热图定位变化。
+# 动态背景目前可能频繁触发整帧安全回退，默认保持关闭。
 dynamic_roi_enabled = false
+# 下列三项只用于动态 ROI；333 ms OCR 间隔约等于 3 Hz。
+dynamic_roi_settle_ms = 180
+dynamic_roi_ocr_interval_ms = 333
+dynamic_roi_max_coalesce_ms = 333
 # 以下三项只用于关闭动态 ROI 时的旧全帧调度路径。
 # 每次 OCR 完成后的额外休息时间；0 优先避免短字幕被跳过。
 ocr_cooldown_ms = 0

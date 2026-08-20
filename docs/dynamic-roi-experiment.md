@@ -194,7 +194,7 @@ ROI 与全帧 OCR 的文本输出相似度不适合直接当作召回率：同�
 | 三行打字机 | 6 次、3.5 秒完整、约 22.3 ms OCR/s | 6 次、3.5 秒完整、约 22.4 ms OCR/s | 6 次、3.5 秒完整、约 22.7 ms OCR/s |
 | 动态背景 | 12 次、0 错误 target、约 67.8 ms OCR/s | 12 次、0 错误 target、约 69.8 ms OCR/s | 12 次、0 错误 target、约 69.2 ms OCR/s |
 
-上限提高后没有自动增加 OCR 次数，因为 333 ms 合并窗口和 Latest Wins 仍在控制实际触发；这正是两层频率分离的目的。当前证据支持“热图 6 Hz + OCR 上限 3 Hz + 180 ms 稳定判断 + 333 ms 最大合并窗口”，因此实时实验开关采用了这组固定参数，而没有直接让 Paddle ROI OCR 运行到 10 Hz。
+上限提高后没有自动增加 OCR 次数，因为 333 ms 合并窗口和 Latest Wins 仍在控制实际触发；这正是两层频率分离的目的。当前证据支持“热图 6 Hz + OCR 上限约 3 Hz + 180 ms 稳定判断 + 333 ms 最大合并窗口”，因此实时实验开关把它们作为默认值并开放 GUI 调整，而没有直接让 Paddle ROI OCR 运行到 10 Hz。
 
 为了回答“真的让 ROI OCR 跑到 10 Hz 会怎样”，还执行了一个关闭稳定等待和合并窗口的压力对照。三行打字机在 3/6/10 Hz 上限下分别产生 9/17/27 次 OCR target 更新，完整文本时间分别为 3.6/3.6/3.5 秒，OCR 工作量约为 33.0/71.0/101.6 ms/s。10 Hz 只提前约 100 ms，却把扫描和潜在 LLM 修订次数提高到 3 Hz 的三倍；因此不适合作为通用策略。10 Hz 更有价值的是轻量变化观察，而不是无条件调用 PaddleOCR。
 
@@ -203,13 +203,13 @@ ROI 与全帧 OCR 的文本输出相似度不适合直接当作召回率：同�
 实时模式新增 `live.dynamic_roi_enabled`，启动器中显示为“启用实验性动态 ROI”，默认 `false`。接入保持旧调度路径完整可回退，并采用以下边界：
 
 1. 首帧仍执行整帧 PaddleOCR；成功后，该帧同时成为已接受画面基线和完整文字地图。首次 OCR 异常按独立的 1 秒保护间隔重试，避免在旧冷却为 0 时形成失败忙循环。
-2. 后续每个 GUI tick 只运行热图观察。调度器满足 180 ms 稳定或 333 ms 最长合并窗口、且 3 Hz OCR 槽可用时，才提交最新帧。
+2. 后续每个 GUI tick 只运行热图观察。默认在满足 180 ms 稳定或 333 ms 最长合并窗口、且距上次 OCR 已有 333 ms 时提交最新帧；三项均可在启动器中调整。
 3. `ContextualRoiPlanner` 用紧变化种子和提交时的旧 track 快照生成 OCR crop；ROI 过多、覆盖过大或上游判定为广泛变化时，改为一次整帧 OCR。
 4. `build_contextual_ocr_update` 将 crop 中“真正的新 target”和“本轮确认仍未变化的 affected track”交给 tracker；只被安全 padding 裁入的上下文行不会重复创建 track。
 5. `StableTextTracker.observe_partial` 只替换 `affected_track_ids`。ROI 外 track 的 `last_seen`、missing 状态、revision 与已有译文均保持不变；局部空结果也只会把本轮覆盖的旧 track 标记为可能消失。
 6. OCR 执行异常时，scheduler 不推进已接受基线，并按最新帧重建待扫描变化；OCR 忙碌期间仍只有一个 Latest Wins 槽。
 
-启用动态 ROI 后，旧路径的 `settle_rescan_ms`、`idle_rescan_ms` 和 `ocr_cooldown_ms` 不参与调度，GUI 会将三项控件暂时停用但保留数值。关闭实验开关即可原样恢复旧全帧路径。
+启用动态 ROI 后，旧路径的 `settle_rescan_ms`、`idle_rescan_ms` 和 `ocr_cooldown_ms` 不参与调度，GUI 会隐藏这三项，改为显示 `dynamic_roi_settle_ms`、`dynamic_roi_ocr_interval_ms` 和 `dynamic_roi_max_coalesce_ms`。两条路径共用的 `change_poll_fps` 始终显示；关闭实验开关后，两组专用控件反向切换，隐藏项的数值仍会保留。
 
 合成实时测试先在 1600×900 首帧建立上下两条文字，随后仅改变上方色块字幕。第二轮 OCR 输入确认小于整帧，上方 track 在原 ID 上递增 revision，下方 ROI 外 track 完整保留；另有测试覆盖首次 OCR 失败重试、局部空结果、padding 上下文去重与整帧回退地图重建。
 

@@ -53,6 +53,9 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.live.settle_rescan_ms == 500
     assert config.live.idle_rescan_ms == 2000
     assert config.live.dynamic_roi_enabled is False
+    assert config.live.dynamic_roi_settle_ms == 180
+    assert config.live.dynamic_roi_ocr_interval_ms == 333
+    assert config.live.dynamic_roi_max_coalesce_ms == 333
     assert config.profiles.root_dir == "profiles"
 
 
@@ -153,6 +156,26 @@ def test_load_config_rejects_non_boolean_dynamic_roi_option(tmp_path: Path) -> N
         load_config(path)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("dynamic_roi_settle_ms", -1),
+        ("dynamic_roi_ocr_interval_ms", 49),
+        ("dynamic_roi_max_coalesce_ms", 10_001),
+    ),
+)
+def test_load_config_rejects_invalid_dynamic_roi_timing(
+    tmp_path: Path,
+    field: str,
+    value: int,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, f"\n[live]\n{field}={value}\n")
+
+    with pytest.raises(ConfigError, match=field):
+        load_config(path)
+
+
 @pytest.mark.parametrize("field", ("settle_rescan_ms", "idle_rescan_ms"))
 def test_load_config_rejects_excessive_rescan_interval(
     tmp_path: Path,
@@ -228,6 +251,10 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         settle_rescan_ms=750,
         idle_rescan_ms=3500,
         dynamic_roi_enabled=True,
+        change_poll_fps=8,
+        dynamic_roi_settle_ms=240,
+        dynamic_roi_ocr_interval_ms=250,
+        dynamic_roi_max_coalesce_ms=450,
     )
 
     assert saved.translation.base_url == "http://gpu.test/v1"
@@ -240,6 +267,10 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.live.settle_rescan_ms == 750
     assert saved.live.idle_rescan_ms == 3500
     assert saved.live.dynamic_roi_enabled is True
+    assert saved.live.change_poll_fps == 8
+    assert saved.live.dynamic_roi_settle_ms == 240
+    assert saved.live.dynamic_roi_ocr_interval_ms == 250
+    assert saved.live.dynamic_roi_max_coalesce_ms == 450
     text = path.read_text(encoding="utf-8")
     assert "[ocr]" in text
     assert 'device = "gpu:1"' in text
@@ -249,6 +280,10 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert "settle_rescan_ms = 750" in text
     assert "idle_rescan_ms = 3500" in text
     assert "dynamic_roi_enabled = true" in text
+    assert "change_poll_fps = 8" in text
+    assert "dynamic_roi_settle_ms = 240" in text
+    assert "dynamic_roi_ocr_interval_ms = 250" in text
+    assert "dynamic_roi_max_coalesce_ms = 450" in text
 
     saved = save_runtime_selection(
         path,
@@ -262,9 +297,23 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.live.settle_rescan_ms == 750
     assert saved.live.idle_rescan_ms == 3500
     assert saved.live.dynamic_roi_enabled is True
+    assert saved.live.change_poll_fps == 8
+    assert saved.live.dynamic_roi_settle_ms == 240
+    assert saved.live.dynamic_roi_ocr_interval_ms == 250
+    assert saved.live.dynamic_roi_max_coalesce_ms == 450
     assert path.read_text(encoding="utf-8").count("device =") == 1
     assert path.read_text(encoding="utf-8").count("text_filter_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("dynamic_roi_enabled =") == 1
+    assert path.read_text(encoding="utf-8").count("change_poll_fps =") == 1
+    assert path.read_text(encoding="utf-8").count("dynamic_roi_settle_ms =") == 1
+    assert (
+        path.read_text(encoding="utf-8").count("dynamic_roi_ocr_interval_ms =")
+        == 1
+    )
+    assert (
+        path.read_text(encoding="utf-8").count("dynamic_roi_max_coalesce_ms =")
+        == 1
+    )
 
     saved = save_runtime_selection(
         path,
@@ -290,6 +339,9 @@ def test_save_runtime_selection_updates_existing_live_timing_values(
 ocr_cooldown_ms = 350
 settle_rescan_ms = 500
 idle_rescan_ms = 2000
+dynamic_roi_settle_ms = 180
+dynamic_roi_ocr_interval_ms = 333
+dynamic_roi_max_coalesce_ms = 333
 """,
     )
 
@@ -301,18 +353,30 @@ idle_rescan_ms = 2000
         ocr_cooldown_ms=0,
         settle_rescan_ms=900,
         idle_rescan_ms=5000,
+        dynamic_roi_settle_ms=260,
+        dynamic_roi_ocr_interval_ms=400,
+        dynamic_roi_max_coalesce_ms=600,
     )
 
     assert saved.live.ocr_cooldown_ms == 0
     assert saved.live.settle_rescan_ms == 900
     assert saved.live.idle_rescan_ms == 5000
+    assert saved.live.dynamic_roi_settle_ms == 260
+    assert saved.live.dynamic_roi_ocr_interval_ms == 400
+    assert saved.live.dynamic_roi_max_coalesce_ms == 600
     text = path.read_text(encoding="utf-8")
     assert "ocr_cooldown_ms = 0" in text
     assert "settle_rescan_ms = 900" in text
     assert "idle_rescan_ms = 5000" in text
+    assert "dynamic_roi_settle_ms = 260" in text
+    assert "dynamic_roi_ocr_interval_ms = 400" in text
+    assert "dynamic_roi_max_coalesce_ms = 600" in text
     assert text.count("ocr_cooldown_ms =") == 1
     assert text.count("settle_rescan_ms =") == 1
     assert text.count("idle_rescan_ms =") == 1
+    assert text.count("dynamic_roi_settle_ms =") == 1
+    assert text.count("dynamic_roi_ocr_interval_ms =") == 1
+    assert text.count("dynamic_roi_max_coalesce_ms =") == 1
 
 
 def test_save_runtime_selection_adds_device_to_existing_ocr_section(

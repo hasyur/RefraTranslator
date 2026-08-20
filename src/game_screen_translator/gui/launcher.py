@@ -12,6 +12,7 @@ from game_screen_translator.branding import GUI_PROCESS_NAME, PRODUCT_NAME
 from game_screen_translator.config import (
     AppConfig,
     ConfigError,
+    LiveConfig,
     load_config,
     save_runtime_selection,
 )
@@ -427,6 +428,7 @@ class LauncherWindow(QMainWindow):
         layout = QVBoxLayout(widget)
 
         service_form = QFormLayout()
+        self._service_form = service_form
         self.server_url_combo = QComboBox()
         self.server_url_combo.setEditable(True)
         self.server_url_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -493,9 +495,9 @@ class LauncherWindow(QMainWindow):
         )
         self.dynamic_roi_checkbox.setToolTip(
             "先用整帧 OCR 建立文字地图，再以低分辨率热图定位变化区域；"
-            "Paddle 只识别合并后的最新 ROI。热图默认 6 Hz、OCR 固定最多"
-            "约 3 Hz、稳定等待 180 ms、最长合并 333 ms。关闭后恢复下方"
-            "三项旧调度参数。动态背景可能频繁触发整帧安全回退。"
+            "Paddle 只识别合并后的最新 ROI。开启后显示 ROI 调度参数并隐藏"
+            "不生效的旧全帧参数；关闭后反向切换。动态背景可能频繁触发"
+            "整帧安全回退。"
         )
         service_form.addRow("OCR 调度", self.dynamic_roi_checkbox)
 
@@ -541,6 +543,59 @@ class LauncherWindow(QMainWindow):
             "或漏掉短字幕。"
         )
         service_form.addRow("OCR 冷却", self.ocr_cooldown_spin)
+
+        self.change_poll_spin = QSpinBox()
+        self.change_poll_spin.setRange(1, self._config.live.capture_fps)
+        self.change_poll_spin.setValue(self._config.live.change_poll_fps)
+        self.change_poll_spin.setSuffix(" Hz")
+        self.change_poll_spin.setToolTip(
+            "每秒取最新帧执行轻量变化检测的次数。旧全帧路径用它检查"
+            "是否需要 OCR，动态 ROI 路径用它运行低分辨率热图；提高后"
+            "能更早发现短暂变化，但不会直接让 Paddle 以相同频率运行。"
+        )
+        service_form.addRow("变化检测频率", self.change_poll_spin)
+
+        self.roi_settle_spin = QSpinBox()
+        self.roi_settle_spin.setRange(0, 10_000)
+        self.roi_settle_spin.setValue(self._config.live.dynamic_roi_settle_ms)
+        self.roi_settle_spin.setSingleStep(20)
+        self.roi_settle_spin.setAccelerated(True)
+        self.roi_settle_spin.setSuffix(" ms")
+        self.roi_settle_spin.setSpecialValueText("立即")
+        self.roi_settle_spin.setToolTip(
+            "最后一次检测到局部变化后，画面持续稳定多久才允许提交最新 ROI；"
+            "较大值更适合打字机效果，较小值响应更快。"
+        )
+        service_form.addRow("ROI 稳定等待", self.roi_settle_spin)
+
+        self.roi_ocr_interval_spin = QSpinBox()
+        self.roi_ocr_interval_spin.setRange(50, 10_000)
+        self.roi_ocr_interval_spin.setValue(
+            self._config.live.dynamic_roi_ocr_interval_ms
+        )
+        self.roi_ocr_interval_spin.setSingleStep(25)
+        self.roi_ocr_interval_spin.setAccelerated(True)
+        self.roi_ocr_interval_spin.setSuffix(" ms")
+        self.roi_ocr_interval_spin.setToolTip(
+            "两次 ROI OCR 提交之间的最短间隔。333 ms 约等于 3 Hz；"
+            "减小会提高响应和 OCR 负载。"
+        )
+        service_form.addRow("ROI OCR 间隔", self.roi_ocr_interval_spin)
+
+        self.roi_max_coalesce_spin = QSpinBox()
+        self.roi_max_coalesce_spin.setRange(50, 10_000)
+        self.roi_max_coalesce_spin.setValue(
+            self._config.live.dynamic_roi_max_coalesce_ms
+        )
+        self.roi_max_coalesce_spin.setSingleStep(25)
+        self.roi_max_coalesce_spin.setAccelerated(True)
+        self.roi_max_coalesce_spin.setSuffix(" ms")
+        self.roi_max_coalesce_spin.setToolTip(
+            "连续变化最多合并多久。即使画面一直没有稳定，到达此时间也会"
+            "尝试处理最新状态，避免打字机或持续运动无限等待。"
+        )
+        service_form.addRow("ROI 最大合并", self.roi_max_coalesce_spin)
+
         self.dynamic_roi_checkbox.toggled.connect(
             self._sync_ocr_scheduling_controls
         )
@@ -556,10 +611,7 @@ class LauncherWindow(QMainWindow):
             f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device} · "
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
-            f"动态 ROI {'开' if self._config.live.dynamic_roi_enabled else '关'} · "
-            f"补扫 {self._config.live.settle_rescan_ms} ms · "
-            f"兜底 {self._config.live.idle_rescan_ms} ms · "
-            f"冷却 {self._config.live.ocr_cooldown_ms} ms；"
+            f"{self._scheduling_summary(self._config.live)}；"
             "可手动填写，读取列表不会自动保存。"
         )
         self.service_status_label.setObjectName("secondaryText")
@@ -776,16 +828,41 @@ class LauncherWindow(QMainWindow):
             idle_rescan_ms=self.idle_rescan_spin.value(),
             ocr_cooldown_ms=self.ocr_cooldown_spin.value(),
             dynamic_roi_enabled=self.dynamic_roi_checkbox.isChecked(),
+            change_poll_fps=self.change_poll_spin.value(),
+            dynamic_roi_settle_ms=self.roi_settle_spin.value(),
+            dynamic_roi_ocr_interval_ms=self.roi_ocr_interval_spin.value(),
+            dynamic_roi_max_coalesce_ms=self.roi_max_coalesce_spin.value(),
         )
 
     def _sync_ocr_scheduling_controls(self, dynamic_roi_enabled: bool) -> None:
-        legacy_enabled = not dynamic_roi_enabled
         for control in (
             self.settle_rescan_spin,
             self.idle_rescan_spin,
             self.ocr_cooldown_spin,
         ):
-            control.setEnabled(legacy_enabled)
+            self._service_form.setRowVisible(control, not dynamic_roi_enabled)
+        for control in (
+            self.roi_settle_spin,
+            self.roi_ocr_interval_spin,
+            self.roi_max_coalesce_spin,
+        ):
+            self._service_form.setRowVisible(control, dynamic_roi_enabled)
+
+    @staticmethod
+    def _scheduling_summary(live: LiveConfig) -> str:
+        if live.dynamic_roi_enabled:
+            return (
+                f"动态 ROI 开 · 热图 {live.change_poll_fps} Hz · "
+                f"稳定 {live.dynamic_roi_settle_ms} ms · "
+                f"OCR 间隔 {live.dynamic_roi_ocr_interval_ms} ms · "
+                f"合并 {live.dynamic_roi_max_coalesce_ms} ms"
+            )
+        return (
+            f"动态 ROI 关 · 检测 {live.change_poll_fps} Hz · "
+            f"补扫 {live.settle_rescan_ms} ms · "
+            f"兜底 {live.idle_rescan_ms} ms · "
+            f"冷却 {live.ocr_cooldown_ms} ms"
+        )
 
     def _refresh_models(self) -> None:
         if self._model_reply is not None:
@@ -893,6 +970,12 @@ class LauncherWindow(QMainWindow):
                 idle_rescan_ms=live.idle_rescan_ms,
                 ocr_cooldown_ms=live.ocr_cooldown_ms,
                 dynamic_roi_enabled=live.dynamic_roi_enabled,
+                change_poll_fps=live.change_poll_fps,
+                dynamic_roi_settle_ms=live.dynamic_roi_settle_ms,
+                dynamic_roi_ocr_interval_ms=live.dynamic_roi_ocr_interval_ms,
+                dynamic_roi_max_coalesce_ms=(
+                    live.dynamic_roi_max_coalesce_ms
+                ),
             )
         except (ConfigError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("保存运行设置失败", exc)
@@ -912,16 +995,23 @@ class LauncherWindow(QMainWindow):
         self.settle_rescan_spin.setValue(self._config.live.settle_rescan_ms)
         self.idle_rescan_spin.setValue(self._config.live.idle_rescan_ms)
         self.ocr_cooldown_spin.setValue(self._config.live.ocr_cooldown_ms)
+        self.change_poll_spin.setValue(self._config.live.change_poll_fps)
+        self.roi_settle_spin.setValue(
+            self._config.live.dynamic_roi_settle_ms
+        )
+        self.roi_ocr_interval_spin.setValue(
+            self._config.live.dynamic_roi_ocr_interval_ms
+        )
+        self.roi_max_coalesce_spin.setValue(
+            self._config.live.dynamic_roi_max_coalesce_ms
+        )
         self.service_status_label.setText(
             f"当前：{self._config.translation.model} · "
             f"{self._config.translation.normalized_base_url} · "
             f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device} · "
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
-            f"动态 ROI {'开' if self._config.live.dynamic_roi_enabled else '关'} · "
-            f"补扫 {self._config.live.settle_rescan_ms} ms · "
-            f"兜底 {self._config.live.idle_rescan_ms} ms · "
-            f"冷却 {self._config.live.ocr_cooldown_ms} ms"
+            f"{self._scheduling_summary(self._config.live)}"
         )
         if announce:
             self.statusBar().showMessage(

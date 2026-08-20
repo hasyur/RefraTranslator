@@ -134,6 +134,9 @@ class LiveConfig:
     settle_rescan_ms: int = 500
     idle_rescan_ms: int = 2000
     dynamic_roi_enabled: bool = False
+    dynamic_roi_settle_ms: int = 180
+    dynamic_roi_ocr_interval_ms: int = 333
+    dynamic_roi_max_coalesce_ms: int = 333
 
     def __post_init__(self) -> None:
         if self.left < 0 or self.top < 0:
@@ -166,6 +169,16 @@ class LiveConfig:
             raise ConfigError("live.idle_rescan_ms 必须在 0 到 60000 之间")
         if type(self.dynamic_roi_enabled) is not bool:
             raise ConfigError("live.dynamic_roi_enabled 必须是 true 或 false")
+        if not 0 <= self.dynamic_roi_settle_ms <= 10_000:
+            raise ConfigError("live.dynamic_roi_settle_ms 必须在 0 到 10000 之间")
+        if not 50 <= self.dynamic_roi_ocr_interval_ms <= 10_000:
+            raise ConfigError(
+                "live.dynamic_roi_ocr_interval_ms 必须在 50 到 10000 之间"
+            )
+        if not 50 <= self.dynamic_roi_max_coalesce_ms <= 10_000:
+            raise ConfigError(
+                "live.dynamic_roi_max_coalesce_ms 必须在 50 到 10000 之间"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,7 +257,9 @@ _OCR_VALUE_RE = re.compile(
 )
 _LIVE_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
-    r"ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms|dynamic_roi_enabled)"
+    r"change_poll_fps|ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms|"
+    r"dynamic_roi_enabled|dynamic_roi_settle_ms|dynamic_roi_ocr_interval_ms|"
+    r"dynamic_roi_max_coalesce_ms)"
     r"[ \t]*="
 )
 
@@ -267,6 +282,10 @@ def save_translation_selection(
         settle_rescan_ms=None,
         idle_rescan_ms=None,
         dynamic_roi_enabled=None,
+        change_poll_fps=None,
+        dynamic_roi_settle_ms=None,
+        dynamic_roi_ocr_interval_ms=None,
+        dynamic_roi_max_coalesce_ms=None,
     )
 
 
@@ -282,6 +301,10 @@ def save_runtime_selection(
     settle_rescan_ms: int | None = None,
     idle_rescan_ms: int | None = None,
     dynamic_roi_enabled: bool | None = None,
+    change_poll_fps: int | None = None,
+    dynamic_roi_settle_ms: int | None = None,
+    dynamic_roi_ocr_interval_ms: int | None = None,
+    dynamic_roi_max_coalesce_ms: int | None = None,
 ) -> AppConfig:
     """Atomically update launcher-owned translation, OCR and scheduling settings."""
     return _save_selected_values(
@@ -295,6 +318,10 @@ def save_runtime_selection(
         settle_rescan_ms=settle_rescan_ms,
         idle_rescan_ms=idle_rescan_ms,
         dynamic_roi_enabled=dynamic_roi_enabled,
+        change_poll_fps=change_poll_fps,
+        dynamic_roi_settle_ms=dynamic_roi_settle_ms,
+        dynamic_roi_ocr_interval_ms=dynamic_roi_ocr_interval_ms,
+        dynamic_roi_max_coalesce_ms=dynamic_roi_max_coalesce_ms,
     )
 
 
@@ -310,6 +337,10 @@ def _save_selected_values(
     settle_rescan_ms: int | None,
     idle_rescan_ms: int | None,
     dynamic_roi_enabled: bool | None,
+    change_poll_fps: int | None,
+    dynamic_roi_settle_ms: int | None,
+    dynamic_roi_ocr_interval_ms: int | None,
+    dynamic_roi_max_coalesce_ms: int | None,
 ) -> AppConfig:
     config_path = Path(path).resolve()
     current = load_config(config_path)
@@ -353,6 +384,26 @@ def _save_selected_values(
             current.live.dynamic_roi_enabled
             if dynamic_roi_enabled is None
             else dynamic_roi_enabled
+        ),
+        change_poll_fps=(
+            current.live.change_poll_fps
+            if change_poll_fps is None
+            else change_poll_fps
+        ),
+        dynamic_roi_settle_ms=(
+            current.live.dynamic_roi_settle_ms
+            if dynamic_roi_settle_ms is None
+            else dynamic_roi_settle_ms
+        ),
+        dynamic_roi_ocr_interval_ms=(
+            current.live.dynamic_roi_ocr_interval_ms
+            if dynamic_roi_ocr_interval_ms is None
+            else dynamic_roi_ocr_interval_ms
+        ),
+        dynamic_roi_max_coalesce_ms=(
+            current.live.dynamic_roi_max_coalesce_ms
+            if dynamic_roi_max_coalesce_ms is None
+            else dynamic_roi_max_coalesce_ms
         ),
     )
     if (
@@ -422,6 +473,10 @@ def _save_selected_values(
             settle_rescan_ms,
             idle_rescan_ms,
             dynamic_roi_enabled,
+            change_poll_fps,
+            dynamic_roi_settle_ms,
+            dynamic_roi_ocr_interval_ms,
+            dynamic_roi_max_coalesce_ms,
         )
     ):
         _upsert_live_values(
@@ -444,6 +499,26 @@ def _save_selected_values(
             dynamic_roi_enabled=(
                 candidate_live.dynamic_roi_enabled
                 if dynamic_roi_enabled is not None
+                else None
+            ),
+            change_poll_fps=(
+                candidate_live.change_poll_fps
+                if change_poll_fps is not None
+                else None
+            ),
+            dynamic_roi_settle_ms=(
+                candidate_live.dynamic_roi_settle_ms
+                if dynamic_roi_settle_ms is not None
+                else None
+            ),
+            dynamic_roi_ocr_interval_ms=(
+                candidate_live.dynamic_roi_ocr_interval_ms
+                if dynamic_roi_ocr_interval_ms is not None
+                else None
+            ),
+            dynamic_roi_max_coalesce_ms=(
+                candidate_live.dynamic_roi_max_coalesce_ms
+                if dynamic_roi_max_coalesce_ms is not None
                 else None
             ),
         )
@@ -553,6 +628,10 @@ def _upsert_live_values(
     settle_rescan_ms: int | None,
     idle_rescan_ms: int | None,
     dynamic_roi_enabled: bool | None,
+    change_poll_fps: int | None,
+    dynamic_roi_settle_ms: int | None,
+    dynamic_roi_ocr_interval_ms: int | None,
+    dynamic_roi_max_coalesce_ms: int | None,
 ) -> None:
     newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
     values = {
@@ -562,6 +641,10 @@ def _upsert_live_values(
             ("settle_rescan_ms", settle_rescan_ms),
             ("idle_rescan_ms", idle_rescan_ms),
             ("dynamic_roi_enabled", dynamic_roi_enabled),
+            ("change_poll_fps", change_poll_fps),
+            ("dynamic_roi_settle_ms", dynamic_roi_settle_ms),
+            ("dynamic_roi_ocr_interval_ms", dynamic_roi_ocr_interval_ms),
+            ("dynamic_roi_max_coalesce_ms", dynamic_roi_max_coalesce_ms),
         )
         if value is not None
     }

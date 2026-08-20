@@ -83,9 +83,6 @@ BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 _MAX_TRANSLATION_ATTEMPTS = 3
 _TRANSLATION_RETRY_BASE_SECONDS = 0.35
 _PENDING_TRANSLATION_BATCHES_PER_WORKER = 2
-_ROI_OCR_INTERVAL_SECONDS = 1.0 / 3.0
-_ROI_SETTLE_SECONDS = 0.18
-_ROI_MAX_COALESCE_SECONDS = 1.0 / 3.0
 _ROI_INITIAL_RETRY_SECONDS = 1.0
 _ROI_INTERNAL_EDGE_MARGIN = 12
 
@@ -301,9 +298,13 @@ class LiveController:
         self._roi_scheduler = (
             LatestFrameRoiScheduler(
                 FullScreenRoiDetector(),
-                min_ocr_interval_s=_ROI_OCR_INTERVAL_SECONDS,
-                settle_interval_s=_ROI_SETTLE_SECONDS,
-                max_coalesce_s=_ROI_MAX_COALESCE_SECONDS,
+                min_ocr_interval_s=(
+                    config.live.dynamic_roi_ocr_interval_ms / 1000
+                ),
+                settle_interval_s=config.live.dynamic_roi_settle_ms / 1000,
+                max_coalesce_s=(
+                    config.live.dynamic_roi_max_coalesce_ms / 1000
+                ),
             )
             if config.live.dynamic_roi_enabled
             else None
@@ -412,7 +413,10 @@ class LiveController:
         )
         scheduling = (
             "实验性动态 ROI：热图 "
-            f"{self._config.live.change_poll_fps} Hz / OCR 上限 3 Hz"
+            f"{self._config.live.change_poll_fps} Hz / 稳定 "
+            f"{self._config.live.dynamic_roi_settle_ms} ms / OCR 间隔 "
+            f"{self._config.live.dynamic_roi_ocr_interval_ms} ms / 最长合并 "
+            f"{self._config.live.dynamic_roi_max_coalesce_ms} ms"
             if self._roi_scheduler is not None
             else f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
             f"静态复查 {self._config.live.idle_rescan_ms / 1000:g} 秒"
