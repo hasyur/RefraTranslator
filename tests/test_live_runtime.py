@@ -945,6 +945,7 @@ def test_concurrent_batches_publish_in_top_to_bottom_order(monkeypatch) -> None:
 
 def test_protocol_failure_splits_batch_and_recovers_every_visible_text(
     monkeypatch,
+    capsys,
 ) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
@@ -955,12 +956,13 @@ def test_protocol_failure_splits_batch_and_recovers_every_visible_text(
         ),
         live=LiveConfig(stable_observations=1, stable_ms=0, max_batch_size=8),
     )
+    control = FakeControl()
     controller = LiveController(
         config,
         capture=FakeCapture(),
         ocr=FakeOcr(),
         overlay=FakeOverlay(),
-        control=FakeControl(),
+        control=control,
         app=app,
     )
     clock = [100.0]
@@ -981,6 +983,10 @@ def test_protocol_failure_splits_batch_and_recovers_every_visible_text(
 
     assert len(controller._translation_retries) == 2
     assert [len(item.batch.items) for item in controller._translation_retries] == [1, 1]
+    assert control.status == "翻译格式异常，正在自动恢复"
+    captured = capsys.readouterr()
+    assert "翻译协议偏差，正在自动恢复：缺少 id" in captured.err
+    assert "翻译错误：" not in captured.err
     clock[0] = 100.36
     controller._submit_ready_translation_retries()
     for future in tuple(controller._translation_futures):

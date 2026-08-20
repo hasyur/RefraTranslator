@@ -1091,9 +1091,18 @@ class LiveController:
                 worker_result = future.result()
             except Exception as exc:
                 retry_scheduled = self._handle_translation_failure(submission, exc)
-                status = "翻译失败，正在自动重试" if retry_scheduled else "翻译服务异常，屏幕保留原文"
+                if retry_scheduled:
+                    if isinstance(exc, TranslationProtocolError):
+                        status = "翻译格式异常，正在自动恢复"
+                        error_label = "翻译协议偏差，正在自动恢复"
+                    else:
+                        status = "翻译请求失败，正在自动重试"
+                        error_label = "翻译请求异常，正在自动重试"
+                else:
+                    status = "翻译服务异常，屏幕保留原文"
+                    error_label = "翻译错误"
                 self._control.set_status(status, str(exc))
-                print(f"翻译错误：{exc}", file=sys.stderr)
+                print(f"{error_label}：{exc}", file=sys.stderr)
                 continue
 
             cached_outcome = worker_result.cached_outcome
