@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from game_screen_translator.ocr.dynamic_roi import FullScreenRoiDetector
 from game_screen_translator.ocr.roi_scheduler import LatestFrameRoiScheduler
@@ -134,6 +135,13 @@ def test_rejected_ocr_does_not_consume_the_pending_change() -> None:
 
     first_job = scheduler.observe(changed, 0.1)
     assert first_job is not None
+    with pytest.raises(ValueError, match="失败的 OCR"):
+        scheduler.complete(
+            first_job,
+            accepted=False,
+            completed_at_s=0.1,
+            target_count=0,
+        )
     assert scheduler.complete(
         first_job, accepted=False, completed_at_s=0.1
     ) is None
@@ -161,3 +169,50 @@ def test_latest_frame_returning_to_baseline_drops_a_local_transient() -> None:
 
     assert not scheduler.has_pending
     assert scheduler.poll(1.0, force=True) is None
+
+
+def test_repeated_empty_results_back_off_and_real_target_restores_rate() -> None:
+    scheduler = LatestFrameRoiScheduler(
+        _detector(),
+        min_ocr_interval_s=0.4,
+        settle_interval_s=0.0,
+        max_coalesce_s=0.4,
+    )
+    frame = _blank()
+    scheduler.prime(frame, 0.0)
+
+    expected_intervals = (0.4, 0.6, 0.8, 1.0)
+    dispatch_times = (0.4, 0.8, 1.4, 2.2)
+    for index, (now_s, expected_interval) in enumerate(
+        zip(dispatch_times, expected_intervals, strict=True)
+    ):
+        frame = _paint(frame, 40 + index * 48, 70)
+        job = scheduler.observe(frame, now_s)
+        assert job is not None
+        assert scheduler.complete(
+            job,
+            accepted=True,
+            completed_at_s=now_s,
+            target_count=0,
+        ) is None
+        assert scheduler.effective_min_ocr_interval_s == pytest.approx(
+            expected_interval
+        )
+
+    assert scheduler.empty_result_count == 4
+    assert scheduler.empty_result_streak == 4
+    assert scheduler.peak_adaptive_ocr_interval_s == pytest.approx(1.0)
+
+    frame = _paint(frame, 240, 70)
+    productive = scheduler.observe(frame, 3.2)
+    assert productive is not None
+    assert scheduler.complete(
+        productive,
+        accepted=True,
+        completed_at_s=3.2,
+        target_count=2,
+    ) is None
+
+    assert scheduler.productive_result_count == 1
+    assert scheduler.empty_result_streak == 0
+    assert scheduler.effective_min_ocr_interval_s == pytest.approx(0.4)

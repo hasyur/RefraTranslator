@@ -592,9 +592,96 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     assert controller._ocr_scan_count == 2
     assert controller._roi_scan_count == 1
     assert controller._roi_full_fallback_count == 0
+    assert controller._roi_scheduler.productive_result_count == 1
+    assert controller._roi_scheduler.empty_result_count == 0
+    assert controller._roi_scheduler.effective_min_ocr_interval_s == 0.25
     assert "执行ROI 1 次" in control.cost_status
     assert "候选 ROI 1 次" in control.cost_status
     assert "整屏的" in control.cost_status
+    controller.close()
+
+
+def test_dynamic_roi_empty_results_back_off_without_losing_next_text(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=99,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            dynamic_roi_settle_ms=0,
+            dynamic_roi_ocr_interval_ms=250,
+            dynamic_roi_max_coalesce_ms=250,
+        ),
+    )
+
+    def scene(*, background: int = 0, changed_text: bool = False) -> np.ndarray:
+        frame = _dynamic_roi_frame(changed=changed_text)
+        if background:
+            frame[400:500, 900:1100] = background
+        return frame
+
+    capture = MutableCapture(scene())
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ColorBlockOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.05
+    controller._tick()
+    scheduler = controller._roi_scheduler
+    assert scheduler is not None
+
+    capture.frame = scene(background=50)
+    clock[0] = 10.3
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.35
+    controller._tick()
+    assert scheduler.empty_result_count == 1
+    assert scheduler.effective_min_ocr_interval_s == 0.25
+
+    capture.frame = scene(background=80)
+    clock[0] = 10.6
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.65
+    controller._tick()
+    assert scheduler.empty_result_count == 2
+    assert scheduler.effective_min_ocr_interval_s == 0.375
+
+    capture.frame = scene(background=80, changed_text=True)
+    clock[0] = 10.9
+    controller._tick()
+    assert controller._ocr_future is None
+    clock[0] = 10.98
+    controller._tick()
+    assert controller._ocr_future is not None
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 11.03
+    controller._tick()
+
+    assert scheduler.productive_result_count == 1
+    assert scheduler.empty_result_streak == 0
+    assert scheduler.effective_min_ocr_interval_s == 0.25
+    assert [track.text for track in controller._tracker.visible_tracks] == [
+        "止まれ。",
+        "先へ進め。",
+    ]
     controller.close()
 
 

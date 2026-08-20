@@ -467,7 +467,10 @@ def run_typewriter_ocr(
             )
         )
         follow_up = scheduler.complete(
-            job, accepted=True, completed_at_s=job.dispatched_at_s
+            job,
+            accepted=True,
+            completed_at_s=job.dispatched_at_s,
+            target_count=len(targets),
         )
         if follow_up is not None:
             raise AssertionError("同步 OCR 回放不应产生立即 follow-up")
@@ -535,7 +538,10 @@ def run_background_ocr(
             )
         )
         follow_up = scheduler.complete(
-            job, accepted=True, completed_at_s=job.dispatched_at_s
+            job,
+            accepted=True,
+            completed_at_s=job.dispatched_at_s,
+            target_count=len(targets),
         )
         if follow_up is not None:
             raise AssertionError("同步 OCR 回放不应产生立即 follow-up")
@@ -676,13 +682,13 @@ def _run_frequency_comparison(
 ) -> bool:
     print()
     print(
-        "OCR rate-cap comparison "
+        "OCR base-rate comparison with empty-target backoff "
         f"(detector={1 / (sequences[next(iter(sequences))][1].elapsed_s - sequences[next(iter(sequences))][0].elapsed_s):.1f}Hz, "
         f"settle={settle_interval_s * 1000:.0f}ms, "
         f"max-coalesce={max_coalesce_s * 1000:.0f}ms)"
     )
     print(
-        "  cap    type scans/targets  exact complete  type OCR work  "
+        "  base   type scans/targets  exact complete  type OCR work  "
         "background scans/false  background OCR work"
     )
     all_ok = True
@@ -797,7 +803,7 @@ def main() -> int:
     print()
     print(
         f"Latest-frame scheduler dry replay (detector={args.detector_fps:g}Hz, "
-        f"OCR cap={1 / args.ocr_interval:.2f}Hz)"
+        f"OCR cap={1 / args.ocr_interval:.2f}Hz, no OCR-result feedback)"
     )
     for scene, samples in sequences.items():
         stats = replay_scheduler(

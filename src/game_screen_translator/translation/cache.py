@@ -4,7 +4,9 @@ import hashlib
 import json
 import re
 import sqlite3
+import threading
 import unicodedata
+from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -97,6 +99,13 @@ class CacheHit:
 
 
 @dataclass(frozen=True, slots=True)
+class InFlightCacheClaim:
+    cache_key: str
+    future: Future[None]
+    is_owner: bool
+
+
+@dataclass(frozen=True, slots=True)
 class CacheStats:
     automatic_entries: int
     manual_corrections: int
@@ -125,6 +134,8 @@ class TranslationCache:
             raise TranslationCacheError(
                 f"缓存目录不存在：{self.database_path.parent}"
             )
+        self._inflight_lock = threading.Lock()
+        self._inflight: dict[str, Future[None]] = {}
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -249,6 +260,57 @@ class TranslationCache:
                 return CacheHit(str(automatic["translated_text"]), "automatic")
         except sqlite3.Error as exc:
             raise TranslationCacheError(f"读取翻译缓存失败：{exc}") from exc
+
+    def claim_inflight(
+        self,
+        source_text: str,
+        environment: CacheEnvironment,
+        context: Sequence[ContextPair],
+    ) -> InFlightCacheClaim:
+        cache_key, _, _ = environment.automatic_key(source_text, context)
+        with self._inflight_lock:
+            future = self._inflight.get(cache_key)
+            if future is not None:
+                return InFlightCacheClaim(cache_key, future, False)
+            future = Future()
+            future.set_running_or_notify_cancel()
+            self._inflight[cache_key] = future
+            return InFlightCacheClaim(cache_key, future, True)
+
+    def complete_inflight(self, claim: InFlightCacheClaim) -> None:
+        self._settle_inflight(claim, error=None)
+
+    def fail_inflight(
+        self,
+        claim: InFlightCacheClaim,
+        error: BaseException,
+    ) -> None:
+        self._settle_inflight(claim, error=error)
+
+    @property
+    def inflight_count(self) -> int:
+        with self._inflight_lock:
+            return len(self._inflight)
+
+    def _settle_inflight(
+        self,
+        claim: InFlightCacheClaim,
+        *,
+        error: BaseException | None,
+    ) -> None:
+        if not claim.is_owner:
+            raise ValueError("只有在途翻译所有者可以结束请求")
+        with self._inflight_lock:
+            current = self._inflight.get(claim.cache_key)
+            if current is not claim.future:
+                return
+            del self._inflight[claim.cache_key]
+        if claim.future.done():
+            return
+        if error is None:
+            claim.future.set_result(None)
+        else:
+            claim.future.set_exception(error)
 
     def store_automatic(
         self,

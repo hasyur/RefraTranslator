@@ -44,6 +44,7 @@ class TranslationService:
         *,
         glossary: Sequence[GlossaryEntry] = (),
         context: Sequence[ContextPair] = (),
+        discard_stale: bool = True,
     ) -> TranslationOutcome:
         self.revisions.observe_batch(batch)
         prompt = self._prompt_builder.build(batch, glossary=glossary, context=context)
@@ -56,7 +57,7 @@ class TranslationService:
         results: list[TranslationResult] = []
         discarded: list[SourceText] = []
         for source in batch.items:
-            if not self.revisions.is_current(source):
+            if discard_stale and not self.revisions.is_current(source):
                 discarded.append(source)
                 continue
             results.append(

@@ -12,6 +12,12 @@ from game_screen_translator.ocr.dynamic_roi import (
 from game_screen_translator.ocr.roi import OcrRoi
 
 
+_EMPTY_RESULT_GRACE_SCANS = 1
+_EMPTY_RESULT_BACKOFF_STEPS = 3
+_EMPTY_RESULT_MAX_INTERVAL_S = 1.0
+_EMPTY_RESULT_MAX_INTERVAL_FACTOR = 2.5
+
+
 @dataclass(frozen=True, slots=True)
 class ScheduledRoiScan:
     """One immutable snapshot selected for OCR by a latest-frame scheduler."""
@@ -60,6 +66,18 @@ class LatestFrameRoiScheduler:
         self.min_ocr_interval_s = min_ocr_interval_s
         self.settle_interval_s = settle_interval_s
         self.max_coalesce_s = max_coalesce_s
+        self._max_adaptive_ocr_interval_s = max(
+            min_ocr_interval_s,
+            min(
+                _EMPTY_RESULT_MAX_INTERVAL_S,
+                min_ocr_interval_s * _EMPTY_RESULT_MAX_INTERVAL_FACTOR,
+            ),
+        )
+        self._effective_min_ocr_interval_s = min_ocr_interval_s
+        self._empty_result_streak = 0
+        self._empty_result_count = 0
+        self._productive_result_count = 0
+        self._peak_adaptive_ocr_interval_s = min_ocr_interval_s
 
         self._accepted_frame: np.ndarray | None = None
         self._accepted_at_s: float | None = None
@@ -100,6 +118,31 @@ class LatestFrameRoiScheduler:
     @property
     def latest_generation(self) -> int:
         return self._generation
+
+    @property
+    def effective_min_ocr_interval_s(self) -> float:
+        """Current OCR rate gate after conservative empty-result backoff."""
+        return self._effective_min_ocr_interval_s
+
+    @property
+    def max_adaptive_ocr_interval_s(self) -> float:
+        return self._max_adaptive_ocr_interval_s
+
+    @property
+    def peak_adaptive_ocr_interval_s(self) -> float:
+        return self._peak_adaptive_ocr_interval_s
+
+    @property
+    def empty_result_streak(self) -> int:
+        return self._empty_result_streak
+
+    @property
+    def empty_result_count(self) -> int:
+        return self._empty_result_count
+
+    @property
+    def productive_result_count(self) -> int:
+        return self._productive_result_count
 
     def prime(self, frame: np.ndarray, now_s: float) -> None:
         """Set the frame whose OCR map has already been accepted."""
@@ -161,7 +204,7 @@ class LatestFrameRoiScheduler:
         assert self._last_dispatch_at_s is not None
         rate_ready = (
             now_s - self._last_dispatch_at_s + 1e-12
-            >= self.min_ocr_interval_s
+            >= self._effective_min_ocr_interval_s
         )
         assert self._last_motion_at_s is not None
         settled = (
@@ -205,12 +248,27 @@ class LatestFrameRoiScheduler:
         *,
         accepted: bool,
         completed_at_s: float,
+        target_count: int | None = None,
     ) -> ScheduledRoiScan | None:
-        """Finish a job, advancing the baseline only for accepted OCR output."""
+        """Finish a job, advancing the baseline only for accepted OCR output.
+
+        Accepted OCR results may report how many changed translation targets
+        they produced. Repeated empty results gradually lower only the OCR
+        cadence (the cheap global change scan keeps running); the first empty
+        result receives a grace scan, and any real target restores the user
+        configured interval immediately.
+        """
         self._require_primed()
         self._validate_poll_time(completed_at_s)
         if self._in_flight is None or self._in_flight.job_id != job.job_id:
             raise ValueError("完成的不是当前 OCR job")
+        if target_count is not None:
+            if not isinstance(target_count, int) or isinstance(target_count, bool):
+                raise TypeError("target_count 必须是整数或 None")
+            if target_count < 0:
+                raise ValueError("target_count 不能为负数")
+            if not accepted:
+                raise ValueError("失败的 OCR 不能提交 target_count")
 
         post_job_pending_since = self._pending_since_s
         post_job_rois = self._pending_change_rois
@@ -225,6 +283,8 @@ class LatestFrameRoiScheduler:
         if accepted:
             self._accepted_frame = job.frame
             self._accepted_at_s = completed_at_s
+            if target_count is not None:
+                self._record_target_feedback(target_count)
         else:
             # The failed job did not consume its change. Rebuild from the last
             # accepted frame to the newest frame and retain any full-frame
@@ -273,6 +333,28 @@ class LatestFrameRoiScheduler:
             self._pending_since_s = min(pending_times, default=job.observed_at_s)
 
         return self.poll(completed_at_s)
+
+    def _record_target_feedback(self, target_count: int) -> None:
+        if target_count > 0:
+            self._productive_result_count += 1
+            self._empty_result_streak = 0
+            self._effective_min_ocr_interval_s = self.min_ocr_interval_s
+            return
+
+        self._empty_result_count += 1
+        self._empty_result_streak += 1
+        backoff_step = min(
+            _EMPTY_RESULT_BACKOFF_STEPS,
+            max(0, self._empty_result_streak - _EMPTY_RESULT_GRACE_SCANS),
+        )
+        progress = backoff_step / _EMPTY_RESULT_BACKOFF_STEPS
+        self._effective_min_ocr_interval_s = self.min_ocr_interval_s + (
+            self._max_adaptive_ocr_interval_s - self.min_ocr_interval_s
+        ) * progress
+        self._peak_adaptive_ocr_interval_s = max(
+            self._peak_adaptive_ocr_interval_s,
+            self._effective_min_ocr_interval_s,
+        )
 
     def is_latest(self, job: ScheduledRoiScan) -> bool:
         """Return whether no newer captured state appeared after dispatch."""

@@ -391,6 +391,7 @@ class LiveController:
         self._translated_count = 0
         self._manual_hit_count = 0
         self._cache_hit_count = 0
+        self._inflight_reuse_count = 0
         self._model_result_count = 0
         self._ocr_scan_count = 0
         self._roi_scan_count = 0
@@ -442,7 +443,9 @@ class LiveController:
             f"{self._config.live.change_poll_fps} Hz / 稳定 "
             f"{self._config.live.dynamic_roi_settle_ms} ms / OCR 间隔 "
             f"{self._config.live.dynamic_roi_ocr_interval_ms} ms / 最长合并 "
-            f"{self._config.live.dynamic_roi_max_coalesce_ms} ms"
+            f"{self._config.live.dynamic_roi_max_coalesce_ms} ms / "
+            f"连续空目标最高退避至 "
+            f"{round(self._roi_scheduler.max_adaptive_ocr_interval_s * 1000)} ms"
             if self._roi_scheduler is not None
             else f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
             f"静态复查 {self._config.live.idle_rescan_ms / 1000:g} 秒"
@@ -472,6 +475,7 @@ class LiveController:
             f"实时统计：OCR {self._ocr_scan_count} 次/识别 {self._ocr_text_count} 条，"
             f"过滤 {self._filtered_text_count} 条，覆盖 {self._translated_count} 条，"
             f"人工修订 {self._manual_hit_count} 条，缓存 {self._cache_hit_count} 条，"
+            f"在途复用 {self._inflight_reuse_count} 条，"
             f"模型 {self._model_result_count} 条，重试 {self._translation_retry_count} 次，"
             f"最终失败 {self._translation_failure_count} 条，"
             f"合并过期排队 {self._translation_coalesced_count} 条，"
@@ -485,6 +489,19 @@ class LiveController:
                 f"动态 ROI：局部/回退扫描 {self._roi_scan_count} 次/"
                 f"整帧回退 {self._roi_full_fallback_count} 次"
             )
+            feedback_count = (
+                self._roi_scheduler.empty_result_count
+                + self._roi_scheduler.productive_result_count
+            )
+            if feedback_count:
+                print(
+                    "动态 ROI 自适应：有目标 "
+                    f"{self._roi_scheduler.productive_result_count} 次/"
+                    f"无目标 {self._roi_scheduler.empty_result_count} 次，"
+                    "当前/峰值 OCR 间隔 "
+                    f"{round(self._roi_scheduler.effective_min_ocr_interval_s * 1000)} ms/"
+                    f"{round(self._roi_scheduler.peak_adaptive_ocr_interval_s * 1000)} ms"
+                )
             if self._roi_fallback_reasons:
                 reasons = "、".join(
                     f"{reason} {count} 次"
@@ -743,11 +760,15 @@ class LiveController:
 
         observations = task_result.observations
         contextual_update = None
+        roi_target_count: int | None = None
         if roi_plan is not None:
             contextual_update = build_contextual_ocr_update(
                 roi_plan,
                 observations,
                 roi_anchors,
+            )
+            roi_target_count = sum(
+                len(group.targets) for group in contextual_update.context_groups
             )
             tracker_observations = contextual_update.observations
             self._roi_scan_count += 1
@@ -817,10 +838,7 @@ class LiveController:
                 print("OCR 保留：" + " | ".join(item.text for item in observations))
             if contextual_update is not None:
                 assert roi_job is not None
-                target_count = sum(
-                    len(group.targets)
-                    for group in contextual_update.context_groups
-                )
+                assert roi_target_count is not None
                 print(
                     f"动态 ROI：{roi_plan.reason} / 扫描覆盖 "
                     f"{roi_plan.coverage_fraction:.1%} / "
@@ -829,7 +847,7 @@ class LiveController:
                     f"候选区域 {roi_plan.candidate_region_count} / "
                     f"影响 {roi_plan.affected_track_count} 条 / "
                     f"更新 {len(tracker_observations)} 条 / "
-                    f"target {target_count} 条"
+                    f"target {roi_target_count} 条"
                 )
         previous_keys = {
             (track.track_id, track.revision) for track in self._tracker.visible_tracks
@@ -869,7 +887,14 @@ class LiveController:
                     roi_job,
                     accepted=True,
                     completed_at_s=now,
+                    target_count=roi_target_count,
                 )
+                if self._debug:
+                    print(
+                        "动态 ROI 自适应：连续无目标 "
+                        f"{scheduler.empty_result_streak} 次 / 下轮最短间隔 "
+                        f"{round(scheduler.effective_min_ocr_interval_s * 1000)} ms"
+                    )
             elif not scheduler.primed:
                 if active_frame is None:
                     raise RuntimeError("首次动态 ROI OCR 缺少基准帧")
@@ -1273,12 +1298,15 @@ class LiveController:
                     self._manual_hit_count += 1
                 elif origin == "automatic":
                     self._cache_hit_count += 1
+                elif origin == "inflight":
+                    self._inflight_reuse_count += 1
                 else:
                     self._model_result_count += 1
             if self._debug and accepted_with_origins:
                 origin_labels = {
                     "manual": "人工修订",
                     "automatic": "缓存",
+                    "inflight": "在途复用",
                     "model": "模型",
                 }
                 print(
