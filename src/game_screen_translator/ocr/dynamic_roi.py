@@ -120,7 +120,7 @@ class FullScreenRoiDetector:
                 1.0,
                 True,
                 "widespread-change",
-                (full_frame,),
+                change_rois,
                 coverage,
                 candidate_region_count,
             )

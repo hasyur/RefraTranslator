@@ -202,6 +202,7 @@ def test_contextual_expansion_falls_back_when_coverage_is_too_large() -> None:
     assert plan.regions[0].roi == (0, 0, 800, 600)
     assert plan.candidate_coverage_fraction == pytest.approx(0.5)
     assert plan.candidate_region_count == 1
+    assert sum(width * height for _, _, width, height in plan.candidate_rois) == 240_000
 
 
 def test_default_contextual_coverage_falls_back_for_half_frame_candidate() -> None:
@@ -214,6 +215,7 @@ def test_default_contextual_coverage_falls_back_for_half_frame_candidate() -> No
     assert plan.coverage_fraction == pytest.approx(1.0)
     assert plan.candidate_coverage_fraction == pytest.approx(0.5)
     assert plan.candidate_region_count == 1
+    assert sum(width * height for _, _, width, height in plan.candidate_rois) == 240_000
 
 
 def test_neighboring_contextual_regions_merge_without_duplicate_track_ids() -> None:
@@ -231,6 +233,7 @@ def test_neighboring_contextual_regions_merge_without_duplicate_track_ids() -> N
 
     assert len(plan.regions) == 1
     assert set(plan.regions[0].affected_track_ids) == {"left", "right"}
+    assert plan.candidate_rois == tuple(region.roi for region in plan.regions)
 
 
 def test_contextual_update_keeps_padding_context_out_of_tracker_input() -> None:

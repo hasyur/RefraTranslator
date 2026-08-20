@@ -135,6 +135,7 @@ class FakeControl:
         self.detail = ""
         self.latency = ""
         self.filter_status = ""
+        self.cost_status = ""
 
     def set_status(self, status, detail="") -> None:
         self.status = status
@@ -145,6 +146,9 @@ class FakeControl:
 
     def set_filter_status(self, summary) -> None:
         self.filter_status = summary
+
+    def set_cost_status(self, summary) -> None:
+        self.cost_status = summary
 
 
 def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
@@ -534,12 +538,13 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     )
     capture = MutableCapture(_dynamic_roi_frame())
     ocr = ColorBlockOcr()
+    control = FakeControl()
     controller = LiveController(
         config,
         capture=capture,
         ocr=ocr,
         overlay=FakeOverlay(),
-        control=FakeControl(),
+        control=control,
         app=app,
     )
     clock = [10.0]
@@ -587,6 +592,9 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     assert controller._ocr_scan_count == 2
     assert controller._roi_scan_count == 1
     assert controller._roi_full_fallback_count == 0
+    assert "执行ROI 1 次" in control.cost_status
+    assert "候选 ROI 1 次" in control.cost_status
+    assert "整屏的" in control.cost_status
     controller.close()
 
 
@@ -677,6 +685,7 @@ def test_live_latency_display_covers_ocr_queue_and_cached_translation(
     assert "排队" in control.latency
     assert "LLM 缓存命中" in control.latency
     assert "总计" in control.latency
+    assert "执行整屏 1 次" in control.cost_status
     assert control.detail.startswith("已覆盖 1 条")
     controller.close()
 

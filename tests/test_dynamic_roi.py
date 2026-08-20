@@ -109,15 +109,16 @@ def test_last_accepted_baseline_accumulates_subthreshold_local_changes() -> None
 def test_widespread_structural_change_falls_back_to_full_frame() -> None:
     before = np.zeros((180, 320, 3), dtype=np.uint8)
     after = before.copy()
-    after[:, :160] = 255
+    after[:, :96] = 255
 
     proposal = _detector(full_frame_change_fraction=0.2).propose(before, after)
 
     assert proposal.rois == ((0, 0, 320, 180),)
     assert proposal.fallback_full_frame
     assert proposal.reason == "widespread-change"
-    assert proposal.candidate_coverage_fraction == 1.0
+    assert proposal.candidate_coverage_fraction < 1.0
     assert proposal.candidate_region_count == 1
+    assert proposal.change_rois != proposal.rois
 
 
 def test_too_many_isolated_regions_fall_back_instead_of_dropping_changes() -> None:

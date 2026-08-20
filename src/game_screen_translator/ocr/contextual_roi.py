@@ -39,6 +39,7 @@ class ContextualRoiPlan:
     candidate_coverage_fraction: float = 0.0
     candidate_region_count: int = 0
     affected_track_count: int = 0
+    candidate_rois: tuple[OcrRoi, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,14 +121,21 @@ class ContextualRoiPlanner:
         frame_size: tuple[int, int],
     ) -> ContextualRoiPlan:
         if proposal.fallback_full_frame:
+            change_rois = proposal.change_rois or proposal.rois
+            candidate_plan = self.plan(
+                change_rois,
+                anchors,
+                frame_size=frame_size,
+            )
             return self.plan(
-                proposal.change_rois or proposal.rois,
+                change_rois,
                 anchors,
                 frame_size=frame_size,
                 force_full_frame=True,
                 fallback_reason=proposal.reason,
                 fallback_candidate_coverage=proposal.candidate_coverage_fraction,
                 fallback_candidate_region_count=proposal.candidate_region_count,
+                fallback_candidate_rois=candidate_plan.candidate_rois,
             )
         return self.plan(
             proposal.change_rois or proposal.rois,
@@ -146,6 +154,7 @@ class ContextualRoiPlanner:
         fallback_candidate_coverage: float = 1.0,
         fallback_candidate_region_count: int = 1,
         fallback_affected_track_count: int | None = None,
+        fallback_candidate_rois: Sequence[OcrRoi] = (),
     ) -> ContextualRoiPlan:
         frame_width, frame_height = frame_size
         if frame_width < 1 or frame_height < 1:
@@ -174,6 +183,7 @@ class ContextualRoiPlanner:
                     if fallback_affected_track_count is None
                     else fallback_affected_track_count
                 ),
+                tuple(fallback_candidate_rois) or (full_frame,),
             )
         if not change_rois:
             return ContextualRoiPlan((), 0.0, False, "unchanged")
@@ -194,6 +204,7 @@ class ContextualRoiPlanner:
         coverage = sum(
             region.roi[2] * region.roi[3] for region in regions
         ) / (frame_width * frame_height)
+        candidate_rois = tuple(region.roi for region in regions)
         if len(regions) > self.max_regions:
             return self.plan(
                 (full_frame,),
@@ -204,6 +215,7 @@ class ContextualRoiPlanner:
                 fallback_candidate_coverage=coverage,
                 fallback_candidate_region_count=len(regions),
                 fallback_affected_track_count=affected_count,
+                fallback_candidate_rois=candidate_rois,
             )
         if affected_count > self.max_affected_tracks:
             return self.plan(
@@ -215,6 +227,7 @@ class ContextualRoiPlanner:
                 fallback_candidate_coverage=coverage,
                 fallback_candidate_region_count=len(regions),
                 fallback_affected_track_count=affected_count,
+                fallback_candidate_rois=candidate_rois,
             )
         if coverage >= self.max_coverage_fraction:
             return self.plan(
@@ -226,6 +239,7 @@ class ContextualRoiPlanner:
                 fallback_candidate_coverage=coverage,
                 fallback_candidate_region_count=len(regions),
                 fallback_affected_track_count=affected_count,
+                fallback_candidate_rois=candidate_rois,
             )
         return ContextualRoiPlan(
             regions,
@@ -235,6 +249,7 @@ class ContextualRoiPlanner:
             coverage,
             len(regions),
             affected_count,
+            candidate_rois,
         )
 
     def _region_for_seed(

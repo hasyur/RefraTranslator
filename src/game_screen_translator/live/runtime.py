@@ -36,6 +36,11 @@ from game_screen_translator.ocr.contextual_roi import (
     ContextualRoiPlanner,
     build_contextual_ocr_update,
 )
+from game_screen_translator.ocr.cost import (
+    OcrComputeEstimate,
+    OcrComputeStats,
+    estimate_ocr_compute_cost,
+)
 from game_screen_translator.ocr.dynamic_roi import FullScreenRoiDetector
 from game_screen_translator.ocr.layout import merge_ocr_text_blocks
 from game_screen_translator.ocr.paddle import PaddleOcrEngine
@@ -199,6 +204,15 @@ class LiveControlWindow(QWidget):
         self._filter = QLabel("文字过滤：等待首个 OCR 样本……")
         self._filter.setWordWrap(True)
         self._filter.setStyleSheet("color: #777;")
+        self._cost = QLabel("OCR 成本：等待首个样本……")
+        self._cost.setWordWrap(True)
+        self._cost.setStyleSheet("color: #777;")
+        self._cost.setToolTip(
+            "按 detection_max_side 缩放后的检测像素估算；"
+            "候选 ROI 指上下文扩展后、整屏回退前原本会扫描的区域。"
+            "模型调用次数单独显示。该数值不包含文字密度、识别批量和每次调用的固定开销，"
+            "目前只用于观测，不参与 ROI 决策。"
+        )
         self._shrink_button = QPushButton("缩小")
         self._shrink_button.setToolTip("隐藏运行信息，只保留恢复和关闭按钮")
         self._shrink_button.clicked.connect(self.collapse)
@@ -212,6 +226,7 @@ class LiveControlWindow(QWidget):
             self._status,
             self._detail,
             self._filter,
+            self._cost,
             self._latency,
         )
         self._layout = QVBoxLayout(self)
@@ -238,6 +253,9 @@ class LiveControlWindow(QWidget):
 
     def set_filter_status(self, summary: str) -> None:
         self._filter.setText(summary)
+
+    def set_cost_status(self, summary: str) -> None:
+        self._cost.setText(summary)
 
     def collapse(self) -> None:
         """Compact the control window while keeping restore and stop actions."""
@@ -338,6 +356,7 @@ class LiveController:
         self._active_roi_job: ScheduledRoiScan | None = None
         self._active_roi_plan: ContextualRoiPlan | None = None
         self._active_roi_anchors: tuple[TrackedText, ...] = ()
+        self._active_ocr_cost: OcrComputeEstimate | None = None
         self._translation_futures: dict[
             Future[_TranslationWorkerResult], _TranslationSubmission
         ] = {}
@@ -363,6 +382,7 @@ class LiveController:
             tuple[str, int], _SourceLatencyOrigin
         ] = {}
         self._latency_stats = LiveLatencyStats()
+        self._ocr_cost_stats = OcrComputeStats()
         self._last_ocr_completed = 0.0
         self._next_ocr_allowed = 0.0
         self._settle_rescan_due: float | None = None
@@ -476,6 +496,8 @@ class LiveController:
                     f"候选覆盖 {self._roi_fallback_peak_candidate_coverage:.1%} / "
                     f"候选区域 {self._roi_fallback_peak_candidate_regions} 个"
                 )
+        if self._ocr_cost_stats.latest is not None:
+            print(self._ocr_cost_stats.summary())
         if self._ocr_scan_count:
             print("延迟统计：" + self._latency_stats.render().replace("\n", "；"))
 
@@ -575,6 +597,12 @@ class LiveController:
         self._active_roi_job = None
         self._active_roi_plan = None
         self._active_roi_anchors = ()
+        frame_height, frame_width = frame.shape[:2]
+        self._active_ocr_cost = estimate_ocr_compute_cost(
+            (frame_width, frame_height),
+            detection_max_side=self._config.ocr.detection_max_side,
+            executed_rois=None,
+        )
         self._ocr_future = self._ocr_executor.submit(
             self._run_ocr,
             frame,
@@ -596,15 +624,22 @@ class LiveController:
         )
         if not plan.regions:
             raise RuntimeError("动态 ROI 调度产生了空 OCR 计划")
+        planned_rois = tuple(region.roi for region in plan.regions)
         rois: tuple[OcrRoi, ...] | None = (
             None
             if plan.fallback_full_frame
-            else tuple(region.roi for region in plan.regions)
+            else planned_rois
         )
         self._active_ocr_frame = job.frame
         self._active_roi_job = job
         self._active_roi_plan = plan
         self._active_roi_anchors = anchors
+        self._active_ocr_cost = estimate_ocr_compute_cost(
+            (frame_width, frame_height),
+            detection_max_side=self._config.ocr.detection_max_side,
+            executed_rois=rois,
+            candidate_rois=plan.candidate_rois or planned_rois,
+        )
         self._ocr_future = self._ocr_executor.submit(
             self._run_ocr,
             job.frame,
@@ -655,11 +690,13 @@ class LiveController:
         roi_job = self._active_roi_job
         roi_plan = self._active_roi_plan
         roi_anchors = self._active_roi_anchors
+        ocr_cost = self._active_ocr_cost
         self._ocr_future = None
         self._active_ocr_frame = None
         self._active_roi_job = None
         self._active_roi_plan = None
         self._active_roi_anchors = ()
+        self._active_ocr_cost = None
         now = time.monotonic()
         self._next_ocr_allowed = (
             now + self._config.live.ocr_cooldown_ms / 1000
@@ -667,6 +704,16 @@ class LiveController:
         # A failed OCR attempt also starts the idle retry interval. Otherwise a
         # static frame could wait forever after the settle retry is exhausted.
         self._last_ocr_completed = now
+        if ocr_cost is not None:
+            self._ocr_cost_stats.record(
+                ocr_cost,
+                is_dynamic_roi=roi_plan is not None,
+            )
+            set_cost_status = getattr(self._control, "set_cost_status", None)
+            if callable(set_cost_status):
+                set_cost_status(self._ocr_cost_stats.render())
+            if self._debug:
+                print(self._ocr_cost_stats.render())
         try:
             task_result = future.result()
         except Exception as exc:
