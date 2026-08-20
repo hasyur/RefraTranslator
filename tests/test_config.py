@@ -52,6 +52,7 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.live.ocr_cooldown_ms == 0
     assert config.live.settle_rescan_ms == 500
     assert config.live.idle_rescan_ms == 2000
+    assert config.live.dynamic_roi_enabled is False
     assert config.profiles.root_dir == "profiles"
 
 
@@ -144,6 +145,14 @@ def test_load_config_rejects_non_boolean_text_filter_option(tmp_path: Path) -> N
         load_config(path)
 
 
+def test_load_config_rejects_non_boolean_dynamic_roi_option(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, "\n[live]\ndynamic_roi_enabled='yes'\n")
+
+    with pytest.raises(ConfigError, match="dynamic_roi_enabled"):
+        load_config(path)
+
+
 @pytest.mark.parametrize("field", ("settle_rescan_ms", "idle_rescan_ms"))
 def test_load_config_rejects_excessive_rescan_interval(
     tmp_path: Path,
@@ -218,6 +227,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         ocr_cooldown_ms=125,
         settle_rescan_ms=750,
         idle_rescan_ms=3500,
+        dynamic_roi_enabled=True,
     )
 
     assert saved.translation.base_url == "http://gpu.test/v1"
@@ -229,6 +239,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.live.ocr_cooldown_ms == 125
     assert saved.live.settle_rescan_ms == 750
     assert saved.live.idle_rescan_ms == 3500
+    assert saved.live.dynamic_roi_enabled is True
     text = path.read_text(encoding="utf-8")
     assert "[ocr]" in text
     assert 'device = "gpu:1"' in text
@@ -237,6 +248,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert "ocr_cooldown_ms = 125" in text
     assert "settle_rescan_ms = 750" in text
     assert "idle_rescan_ms = 3500" in text
+    assert "dynamic_roi_enabled = true" in text
 
     saved = save_runtime_selection(
         path,
@@ -249,8 +261,10 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.live.ocr_cooldown_ms == 125
     assert saved.live.settle_rescan_ms == 750
     assert saved.live.idle_rescan_ms == 3500
+    assert saved.live.dynamic_roi_enabled is True
     assert path.read_text(encoding="utf-8").count("device =") == 1
     assert path.read_text(encoding="utf-8").count("text_filter_enabled =") == 1
+    assert path.read_text(encoding="utf-8").count("dynamic_roi_enabled =") == 1
 
     saved = save_runtime_selection(
         path,

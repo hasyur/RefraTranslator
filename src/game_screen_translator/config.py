@@ -133,6 +133,7 @@ class LiveConfig:
     ocr_cooldown_ms: int = 0
     settle_rescan_ms: int = 500
     idle_rescan_ms: int = 2000
+    dynamic_roi_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.left < 0 or self.top < 0:
@@ -163,6 +164,8 @@ class LiveConfig:
             raise ConfigError("live.settle_rescan_ms 必须在 0 到 60000 之间")
         if not 0 <= self.idle_rescan_ms <= 60_000:
             raise ConfigError("live.idle_rescan_ms 必须在 0 到 60000 之间")
+        if type(self.dynamic_roi_enabled) is not bool:
+            raise ConfigError("live.dynamic_roi_enabled 必须是 true 或 false")
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,7 +243,8 @@ _OCR_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>device|text_filter_enabled)[ \t]*="
 )
 _LIVE_VALUE_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<key>ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms)"
+    r"^(?P<indent>[ \t]*)(?P<key>"
+    r"ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms|dynamic_roi_enabled)"
     r"[ \t]*="
 )
 
@@ -262,6 +266,7 @@ def save_translation_selection(
         ocr_cooldown_ms=None,
         settle_rescan_ms=None,
         idle_rescan_ms=None,
+        dynamic_roi_enabled=None,
     )
 
 
@@ -276,8 +281,9 @@ def save_runtime_selection(
     ocr_cooldown_ms: int | None = None,
     settle_rescan_ms: int | None = None,
     idle_rescan_ms: int | None = None,
+    dynamic_roi_enabled: bool | None = None,
 ) -> AppConfig:
-    """Atomically update launcher-owned translation, OCR and rescan settings."""
+    """Atomically update launcher-owned translation, OCR and scheduling settings."""
     return _save_selected_values(
         path,
         base_url=base_url,
@@ -288,6 +294,7 @@ def save_runtime_selection(
         ocr_cooldown_ms=ocr_cooldown_ms,
         settle_rescan_ms=settle_rescan_ms,
         idle_rescan_ms=idle_rescan_ms,
+        dynamic_roi_enabled=dynamic_roi_enabled,
     )
 
 
@@ -302,6 +309,7 @@ def _save_selected_values(
     ocr_cooldown_ms: int | None,
     settle_rescan_ms: int | None,
     idle_rescan_ms: int | None,
+    dynamic_roi_enabled: bool | None,
 ) -> AppConfig:
     config_path = Path(path).resolve()
     current = load_config(config_path)
@@ -340,6 +348,11 @@ def _save_selected_values(
             current.live.idle_rescan_ms
             if idle_rescan_ms is None
             else idle_rescan_ms
+        ),
+        dynamic_roi_enabled=(
+            current.live.dynamic_roi_enabled
+            if dynamic_roi_enabled is None
+            else dynamic_roi_enabled
         ),
     )
     if (
@@ -404,7 +417,12 @@ def _save_selected_values(
 
     if any(
         value is not None
-        for value in (ocr_cooldown_ms, settle_rescan_ms, idle_rescan_ms)
+        for value in (
+            ocr_cooldown_ms,
+            settle_rescan_ms,
+            idle_rescan_ms,
+            dynamic_roi_enabled,
+        )
     ):
         _upsert_live_values(
             lines,
@@ -421,6 +439,11 @@ def _save_selected_values(
             idle_rescan_ms=(
                 candidate_live.idle_rescan_ms
                 if idle_rescan_ms is not None
+                else None
+            ),
+            dynamic_roi_enabled=(
+                candidate_live.dynamic_roi_enabled
+                if dynamic_roi_enabled is not None
                 else None
             ),
         )
@@ -529,6 +552,7 @@ def _upsert_live_values(
     ocr_cooldown_ms: int | None,
     settle_rescan_ms: int | None,
     idle_rescan_ms: int | None,
+    dynamic_roi_enabled: bool | None,
 ) -> None:
     newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
     values = {
@@ -537,6 +561,7 @@ def _upsert_live_values(
             ("ocr_cooldown_ms", ocr_cooldown_ms),
             ("settle_rescan_ms", settle_rescan_ms),
             ("idle_rescan_ms", idle_rescan_ms),
+            ("dynamic_roi_enabled", dynamic_roi_enabled),
         )
         if value is not None
     }
@@ -561,7 +586,10 @@ def _upsert_live_values(
             continue
         key = value_match.group("key")
         ending = line[len(body) :]
-        lines[index] = f'{value_match.group("indent")}{key} = {values[key]}{ending}'
+        lines[index] = (
+            f'{value_match.group("indent")}{key} = '
+            f'{json.dumps(values[key], ensure_ascii=False)}{ending}'
+        )
         replaced_keys.add(key)
 
     missing_keys = tuple(key for key in values if key not in replaced_keys)
@@ -573,11 +601,17 @@ def _upsert_live_values(
         if lines and lines[-1].strip():
             lines.append(newline)
         lines.append(f"[live]{newline}")
-        lines.extend(f"{key} = {values[key]}{newline}" for key in missing_keys)
+        lines.extend(
+            f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}"
+            for key in missing_keys
+        )
         return
 
     if live_end_index > 0 and not lines[live_end_index - 1].endswith(("\n", "\r")):
         lines[live_end_index - 1] += newline
     for key in missing_keys:
-        lines.insert(live_end_index, f"{key} = {values[key]}{newline}")
+        lines.insert(
+            live_end_index,
+            f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}",
+        )
         live_end_index += 1

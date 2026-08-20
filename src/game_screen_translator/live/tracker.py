@@ -92,7 +92,42 @@ class StableTextTracker:
         return tuple(sorted(self._tracks.values(), key=lambda track: (track.bounds[1], track.bounds[0])))
 
     def observe(self, observations: Iterable[OcrText], now: float) -> TrackerUpdate:
-        unmatched_tracks = set(self._tracks)
+        return self._observe_replacing(
+            observations,
+            now,
+            replace_track_ids=set(self._tracks),
+        )
+
+    def observe_partial(
+        self,
+        observations: Iterable[OcrText],
+        now: float,
+        *,
+        replace_track_ids: Iterable[str],
+    ) -> TrackerUpdate:
+        """Replace only tracks covered by a successfully scanned OCR ROI.
+
+        Tracks outside ``replace_track_ids`` are intentionally untouched: a
+        local OCR crop says nothing about whether text elsewhere on screen is
+        still visible. New observations may still create tracks inside the
+        changed region.
+        """
+        return self._observe_replacing(
+            observations,
+            now,
+            replace_track_ids={
+                track_id for track_id in replace_track_ids if track_id in self._tracks
+            },
+        )
+
+    def _observe_replacing(
+        self,
+        observations: Iterable[OcrText],
+        now: float,
+        *,
+        replace_track_ids: set[str],
+    ) -> TrackerUpdate:
+        unmatched_tracks = set(replace_track_ids)
         stable_sources: list[SourceText] = []
 
         for observation in sorted(observations, key=lambda item: (item.bounds[1], item.bounds[0])):

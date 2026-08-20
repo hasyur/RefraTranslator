@@ -31,7 +31,18 @@ from game_screen_translator.live.tracker import (
     TrackedText,
     normalize_text,
 )
+from game_screen_translator.ocr.contextual_roi import (
+    ContextualRoiPlan,
+    ContextualRoiPlanner,
+    build_contextual_ocr_update,
+)
+from game_screen_translator.ocr.dynamic_roi import FullScreenRoiDetector
 from game_screen_translator.ocr.paddle import PaddleOcrEngine
+from game_screen_translator.ocr.roi import OcrRoi, recognize_ocr_rois
+from game_screen_translator.ocr.roi_scheduler import (
+    LatestFrameRoiScheduler,
+    ScheduledRoiScan,
+)
 from game_screen_translator.ocr.text_filter import OcrTextFilter, RejectedOcrText
 from game_screen_translator.ocr.types import OcrText
 from game_screen_translator.overlay.window import (
@@ -72,6 +83,11 @@ BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 _MAX_TRANSLATION_ATTEMPTS = 3
 _TRANSLATION_RETRY_BASE_SECONDS = 0.35
 _PENDING_TRANSLATION_BATCHES_PER_WORKER = 2
+_ROI_OCR_INTERVAL_SECONDS = 1.0 / 3.0
+_ROI_SETTLE_SECONDS = 0.18
+_ROI_MAX_COALESCE_SECONDS = 1.0 / 3.0
+_ROI_INITIAL_RETRY_SECONDS = 1.0
+_ROI_INTERNAL_EDGE_MARGIN = 12
 
 
 def _live_message(message: str) -> None:
@@ -282,6 +298,19 @@ class LiveController:
         self._profile = profile
         self._debug = debug
         self._detector = FrameChangeDetector(config.live.change_threshold)
+        self._roi_scheduler = (
+            LatestFrameRoiScheduler(
+                FullScreenRoiDetector(),
+                min_ocr_interval_s=_ROI_OCR_INTERVAL_SECONDS,
+                settle_interval_s=_ROI_SETTLE_SECONDS,
+                max_coalesce_s=_ROI_MAX_COALESCE_SECONDS,
+            )
+            if config.live.dynamic_roi_enabled
+            else None
+        )
+        self._roi_planner = (
+            ContextualRoiPlanner() if self._roi_scheduler is not None else None
+        )
         self._tracker = StableTextTracker(
             "live-zone-1",
             stable_observations=config.live.stable_observations,
@@ -302,6 +331,10 @@ class LiveController:
             thread_name_prefix="translation",
         )
         self._ocr_future: Future[_OcrTaskResult] | None = None
+        self._active_ocr_frame: np.ndarray | None = None
+        self._active_roi_job: ScheduledRoiScan | None = None
+        self._active_roi_plan: ContextualRoiPlan | None = None
+        self._active_roi_anchors: tuple[TrackedText, ...] = ()
         self._translation_futures: dict[
             Future[_TranslationWorkerResult], _TranslationSubmission
         ] = {}
@@ -337,6 +370,8 @@ class LiveController:
         self._cache_hit_count = 0
         self._model_result_count = 0
         self._ocr_scan_count = 0
+        self._roi_scan_count = 0
+        self._roi_full_fallback_count = 0
         self._ocr_text_count = 0
         self._filtered_text_count = 0
         self._stale_result_count = 0
@@ -364,17 +399,28 @@ class LiveController:
             output_size is not None
             and region == (0, 0, output_size[0], output_size[1])
         )
-        region_hint = " · 当前为整屏 OCR，框选字幕区域可继续降载" if full_screen else ""
+        if full_screen and self._roi_scheduler is not None:
+            region_hint = " · 整屏热图按变化区域调用 OCR"
+        elif full_screen:
+            region_hint = " · 当前为整屏 OCR，框选字幕区域可继续降载"
+        else:
+            region_hint = ""
         ocr_runtime = (
             f"{self._config.ocr.device} / {self._config.ocr.cpu_threads} 线程"
             if self._config.ocr.device == "cpu"
             else self._config.ocr.device
         )
+        scheduling = (
+            "实验性动态 ROI：热图 "
+            f"{self._config.live.change_poll_fps} Hz / OCR 上限 3 Hz"
+            if self._roi_scheduler is not None
+            else f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
+            f"静态复查 {self._config.live.idle_rescan_ms / 1000:g} 秒"
+        )
         self._control.set_status(
             "实时翻译运行中",
             f"捕获：{self._capture.active_backend} {region} · "
-            f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
-            f"静态复查 {self._config.live.idle_rescan_ms / 1000:g} 秒 · "
+            f"{scheduling} · "
             f"LLM 并发 {self._config.translation.max_concurrency} · "
             f"OCR {ocr_runtime} / 过滤"
             f"{'开' if self._config.ocr.text_filter_enabled else '关'} / 最长边 "
@@ -402,6 +448,11 @@ class LiveController:
             f"取消过期排队 {self._cancelled_stale_count} 条，"
             f"接回晚到译文 {self._reattached_result_count} 条"
         )
+        if self._roi_scheduler is not None:
+            print(
+                f"动态 ROI：局部/回退扫描 {self._roi_scan_count} 次/"
+                f"整帧回退 {self._roi_full_fallback_count} 次"
+            )
         if self._ocr_scan_count:
             print("延迟统计：" + self._latency_stats.render().replace("\n", "；"))
 
@@ -424,6 +475,26 @@ class LiveController:
 
         self._latest_frame = frame
         now = time.monotonic()
+        if self._roi_scheduler is not None:
+            self._tick_dynamic_roi(frame, now)
+        else:
+            self._tick_legacy_ocr(frame, now)
+
+        self._overlay.set_scene(frame, self._tracker.visible_tracks)
+
+    def _tick_dynamic_roi(self, frame: np.ndarray, now: float) -> None:
+        scheduler = self._roi_scheduler
+        assert scheduler is not None
+        if not scheduler.primed:
+            if self._ocr_future is None and now >= self._next_ocr_allowed:
+                self._submit_ocr(frame, triggered_at=now)
+            return
+
+        job = scheduler.observe(frame, now)
+        if job is not None:
+            self._submit_roi_ocr(job)
+
+    def _tick_legacy_ocr(self, frame: np.ndarray, now: float) -> None:
         changed = self._detector.changed(frame)
         if changed and self._config.live.settle_rescan_ms > 0:
             self._settle_rescan_due = (
@@ -470,8 +541,6 @@ class LiveController:
             self._pending_ocr_triggered_at = None
             self._submit_ocr(pending, triggered_at=triggered_at)
 
-        self._overlay.set_scene(frame, self._tracker.visible_tracks)
-
     def _submit_ocr(
         self,
         frame: np.ndarray,
@@ -479,11 +548,65 @@ class LiveController:
         triggered_at: float | None = None,
     ) -> None:
         trigger = time.monotonic() if triggered_at is None else triggered_at
-        self._ocr_future = self._ocr_executor.submit(self._run_ocr, frame, trigger)
+        self._active_ocr_frame = frame
+        self._active_roi_job = None
+        self._active_roi_plan = None
+        self._active_roi_anchors = ()
+        self._ocr_future = self._ocr_executor.submit(
+            self._run_ocr,
+            frame,
+            trigger,
+        )
 
-    def _run_ocr(self, frame: np.ndarray, triggered_at: float) -> _OcrTaskResult:
+    def _submit_roi_ocr(self, job: ScheduledRoiScan) -> None:
+        if self._ocr_future is not None:
+            raise RuntimeError("已有 OCR 任务运行时不能提交新的 ROI 任务")
+        planner = self._roi_planner
+        if planner is None:
+            raise RuntimeError("动态 ROI 规划器未初始化")
+        anchors = self._tracker.visible_tracks
+        frame_height, frame_width = job.frame.shape[:2]
+        plan = planner.plan_proposal(
+            job.proposal,
+            anchors,
+            frame_size=(frame_width, frame_height),
+        )
+        if not plan.regions:
+            raise RuntimeError("动态 ROI 调度产生了空 OCR 计划")
+        rois: tuple[OcrRoi, ...] | None = (
+            None
+            if plan.fallback_full_frame
+            else tuple(region.roi for region in plan.regions)
+        )
+        self._active_ocr_frame = job.frame
+        self._active_roi_job = job
+        self._active_roi_plan = plan
+        self._active_roi_anchors = anchors
+        self._ocr_future = self._ocr_executor.submit(
+            self._run_ocr,
+            job.frame,
+            job.observed_at_s,
+            rois=rois,
+        )
+
+    def _run_ocr(
+        self,
+        frame: np.ndarray,
+        triggered_at: float,
+        *,
+        rois: Sequence[OcrRoi] | None = None,
+    ) -> _OcrTaskResult:
         started_at = time.monotonic()
-        raw_observations = tuple(self._ocr.recognize_frame(frame))
+        raw_observations = (
+            tuple(self._ocr.recognize_frame(frame))
+            if rois is None
+            else recognize_ocr_rois(
+                self._ocr,
+                frame,
+                rois,
+                edge_margin=_ROI_INTERNAL_EDGE_MARGIN,
+            )
+        )
         filtered = self._text_filter.apply(raw_observations)
         completed_at = time.monotonic()
         return _OcrTaskResult(
@@ -499,7 +622,15 @@ class LiveController:
         future = self._ocr_future
         if future is None or not future.done():
             return
+        active_frame = self._active_ocr_frame
+        roi_job = self._active_roi_job
+        roi_plan = self._active_roi_plan
+        roi_anchors = self._active_roi_anchors
         self._ocr_future = None
+        self._active_ocr_frame = None
+        self._active_roi_job = None
+        self._active_roi_plan = None
+        self._active_roi_anchors = ()
         now = time.monotonic()
         self._next_ocr_allowed = (
             now + self._config.live.ocr_cooldown_ms / 1000
@@ -510,11 +641,44 @@ class LiveController:
         try:
             task_result = future.result()
         except Exception as exc:
-            self._control.set_status("OCR 暂时失败，等待画面变化或定时复查后重试", str(exc))
+            follow_up: ScheduledRoiScan | None = None
+            if roi_job is not None:
+                scheduler = self._roi_scheduler
+                assert scheduler is not None
+                follow_up = scheduler.complete(
+                    roi_job,
+                    accepted=False,
+                    completed_at_s=now,
+                )
+                retry_hint = "动态 ROI 已保留最新变化，等待空闲扫描槽重试"
+            elif self._roi_scheduler is not None and not self._roi_scheduler.primed:
+                self._next_ocr_allowed = max(
+                    self._next_ocr_allowed,
+                    now + _ROI_INITIAL_RETRY_SECONDS,
+                )
+                retry_hint = "首次全帧 OCR 将在 1 秒后重试"
+            else:
+                retry_hint = "等待画面变化或定时复查后重试"
+            self._control.set_status(f"OCR 暂时失败，{retry_hint}", str(exc))
             print(f"OCR 错误：{exc}", file=sys.stderr)
+            if follow_up is not None:
+                self._submit_roi_ocr(follow_up)
             return
 
         observations = task_result.observations
+        contextual_update = None
+        if roi_plan is not None:
+            contextual_update = build_contextual_ocr_update(
+                roi_plan,
+                observations,
+                roi_anchors,
+            )
+            tracker_observations = contextual_update.observations
+            self._roi_scan_count += 1
+            if roi_plan.fallback_full_frame:
+                self._roi_full_fallback_count += 1
+        else:
+            tracker_observations = observations
         self._ocr_text_count += task_result.raw_count
         self._filtered_text_count += len(task_result.rejected)
         set_filter_status = getattr(self._control, "set_filter_status", None)
@@ -550,10 +714,28 @@ class LiveController:
                 )
             if observations:
                 print("OCR 保留：" + " | ".join(item.text for item in observations))
+            if contextual_update is not None:
+                target_count = sum(
+                    len(group.targets)
+                    for group in contextual_update.context_groups
+                )
+                print(
+                    f"动态 ROI：{roi_plan.reason} / 覆盖 "
+                    f"{roi_plan.coverage_fraction:.1%} / "
+                    f"更新 {len(tracker_observations)} 条 / "
+                    f"target {target_count} 条"
+                )
         previous_keys = {
             (track.track_id, track.revision) for track in self._tracker.visible_tracks
         }
-        update = self._tracker.observe(observations, now)
+        if contextual_update is not None and not roi_plan.fallback_full_frame:
+            update = self._tracker.observe_partial(
+                tracker_observations,
+                now,
+                replace_track_ids=contextual_update.replace_track_ids,
+            )
+        else:
+            update = self._tracker.observe(tracker_observations, now)
         current_keys: set[tuple[str, int]] = set()
         for track in update.visible_tracks:
             key = (track.track_id, track.revision)
@@ -572,6 +754,22 @@ class LiveController:
             if self._debug:
                 print("稳定字幕：" + " | ".join(item.text for item in update.stable_sources))
             self._submit_translations(update.stable_sources)
+
+        follow_up = None
+        scheduler = self._roi_scheduler
+        if scheduler is not None:
+            if roi_job is not None:
+                follow_up = scheduler.complete(
+                    roi_job,
+                    accepted=True,
+                    completed_at_s=now,
+                )
+            elif not scheduler.primed:
+                if active_frame is None:
+                    raise RuntimeError("首次动态 ROI OCR 缺少基准帧")
+                scheduler.prime(active_frame, now)
+        if follow_up is not None:
+            self._submit_roi_ocr(follow_up)
 
     def _submit_translations(self, sources: Sequence[SourceText]) -> None:
         if not sources:

@@ -487,6 +487,18 @@ class LauncherWindow(QMainWindow):
         )
         service_form.addRow("OCR 过滤", self.ocr_filter_checkbox)
 
+        self.dynamic_roi_checkbox = QCheckBox("启用实验性动态 ROI")
+        self.dynamic_roi_checkbox.setChecked(
+            self._config.live.dynamic_roi_enabled
+        )
+        self.dynamic_roi_checkbox.setToolTip(
+            "先用整帧 OCR 建立文字地图，再以低分辨率热图定位变化区域；"
+            "Paddle 只识别合并后的最新 ROI。热图默认 6 Hz、OCR 固定最多"
+            "约 3 Hz、稳定等待 180 ms、最长合并 333 ms。关闭后恢复下方"
+            "三项旧调度参数。动态背景可能频繁触发整帧安全回退。"
+        )
+        service_form.addRow("OCR 调度", self.dynamic_roi_checkbox)
+
         self.settle_rescan_spin = QSpinBox()
         self.settle_rescan_spin.setRange(0, 60_000)
         self.settle_rescan_spin.setValue(self._config.live.settle_rescan_ms)
@@ -529,6 +541,12 @@ class LauncherWindow(QMainWindow):
             "或漏掉短字幕。"
         )
         service_form.addRow("OCR 冷却", self.ocr_cooldown_spin)
+        self.dynamic_roi_checkbox.toggled.connect(
+            self._sync_ocr_scheduling_controls
+        )
+        self._sync_ocr_scheduling_controls(
+            self.dynamic_roi_checkbox.isChecked()
+        )
         layout.addLayout(service_form)
 
         service_actions = QHBoxLayout()
@@ -538,6 +556,7 @@ class LauncherWindow(QMainWindow):
             f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device} · "
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
+            f"动态 ROI {'开' if self._config.live.dynamic_roi_enabled else '关'} · "
             f"补扫 {self._config.live.settle_rescan_ms} ms · "
             f"兜底 {self._config.live.idle_rescan_ms} ms · "
             f"冷却 {self._config.live.ocr_cooldown_ms} ms；"
@@ -756,7 +775,17 @@ class LauncherWindow(QMainWindow):
             settle_rescan_ms=self.settle_rescan_spin.value(),
             idle_rescan_ms=self.idle_rescan_spin.value(),
             ocr_cooldown_ms=self.ocr_cooldown_spin.value(),
+            dynamic_roi_enabled=self.dynamic_roi_checkbox.isChecked(),
         )
+
+    def _sync_ocr_scheduling_controls(self, dynamic_roi_enabled: bool) -> None:
+        legacy_enabled = not dynamic_roi_enabled
+        for control in (
+            self.settle_rescan_spin,
+            self.idle_rescan_spin,
+            self.ocr_cooldown_spin,
+        ):
+            control.setEnabled(legacy_enabled)
 
     def _refresh_models(self) -> None:
         if self._model_reply is not None:
@@ -863,6 +892,7 @@ class LauncherWindow(QMainWindow):
                 settle_rescan_ms=live.settle_rescan_ms,
                 idle_rescan_ms=live.idle_rescan_ms,
                 ocr_cooldown_ms=live.ocr_cooldown_ms,
+                dynamic_roi_enabled=live.dynamic_roi_enabled,
             )
         except (ConfigError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("保存运行设置失败", exc)
@@ -876,6 +906,9 @@ class LauncherWindow(QMainWindow):
         if device_index >= 0:
             self.ocr_device_combo.setCurrentIndex(device_index)
         self.ocr_filter_checkbox.setChecked(self._config.ocr.text_filter_enabled)
+        self.dynamic_roi_checkbox.setChecked(
+            self._config.live.dynamic_roi_enabled
+        )
         self.settle_rescan_spin.setValue(self._config.live.settle_rescan_ms)
         self.idle_rescan_spin.setValue(self._config.live.idle_rescan_ms)
         self.ocr_cooldown_spin.setValue(self._config.live.ocr_cooldown_ms)
@@ -885,6 +918,7 @@ class LauncherWindow(QMainWindow):
             f"并发 {self._config.translation.max_concurrency} · "
             f"OCR {self._config.ocr.device} · "
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
+            f"动态 ROI {'开' if self._config.live.dynamic_roi_enabled else '关'} · "
             f"补扫 {self._config.live.settle_rescan_ms} ms · "
             f"兜底 {self._config.live.idle_rescan_ms} ms · "
             f"冷却 {self._config.live.ocr_cooldown_ms} ms"

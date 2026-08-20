@@ -53,6 +53,15 @@ class TranslationContextGroup:
     context_after: tuple[ContextText, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ContextualOcrUpdate:
+    """Filtered local OCR output and the old tracks it is allowed to replace."""
+
+    observations: tuple[OcrText, ...]
+    replace_track_ids: tuple[str, ...]
+    context_groups: tuple[TranslationContextGroup, ...]
+
+
 class ContextualRoiPlanner:
     """Expand tight change seeds with related OCR tracks, without sticky flood fill."""
 
@@ -442,6 +451,26 @@ class ContextualRoiPlanner:
         return start, end
 
 
+def _normalized_text(text: str) -> str:
+    return _SPACE_RE.sub(" ", text).strip()
+
+
+def _unchanged_anchor_for(
+    item: OcrText,
+    anchors: Sequence[TextAnchor],
+) -> TextAnchor | None:
+    normalized = _normalized_text(item.text)
+    return next(
+        (
+            anchor
+            for anchor in anchors
+            if _normalized_text(anchor.text) == normalized
+            and ContextualRoiPlanner._intersects(item.bounds, anchor.bounds)
+        ),
+        None,
+    )
+
+
 def build_translation_context_group(
     region: ContextualOcrRegion,
     observations: Sequence[OcrText],
@@ -461,22 +490,10 @@ def build_translation_context_group(
         if track_id in anchor_by_id
     )
 
-    def unchanged_anchor_for(item: OcrText) -> TextAnchor | None:
-        normalized = _SPACE_RE.sub(" ", item.text).strip()
-        return next(
-            (
-                anchor
-                for anchor in affected_anchors
-                if _SPACE_RE.sub(" ", anchor.text).strip() == normalized
-                and ContextualRoiPlanner._intersects(item.bounds, anchor.bounds)
-            ),
-            None,
-        )
-
     unchanged_affected = {
         anchor.track_id
         for item in observations
-        for anchor in (unchanged_anchor_for(item),)
+        for anchor in (_unchanged_anchor_for(item, affected_anchors),)
         if anchor is not None
     }
 
@@ -489,7 +506,7 @@ def build_translation_context_group(
                     ContextualRoiPlanner._intersects(item.bounds, zone)
                     for zone in target_zones
                 )
-                and unchanged_anchor_for(item) is None
+                and _unchanged_anchor_for(item, affected_anchors) is None
             ),
             key=lambda item: (item.bounds[1], item.bounds[0]),
         )
@@ -527,3 +544,57 @@ def build_translation_context_group(
         context_items(before_ids),
         context_items(after_ids),
     )
+
+
+def build_contextual_ocr_update(
+    plan: ContextualRoiPlan,
+    observations: Sequence[OcrText],
+    anchors: Sequence[TextAnchor],
+) -> ContextualOcrUpdate:
+    """Select the local OCR results that may update the global text map.
+
+    OCR padding deliberately includes nearby stable lines so they can provide
+    translation context. Those lines must not become duplicate tracker input.
+    Only newly changed targets and OCR-confirmed versions of affected tracks
+    are returned. A full-frame fallback replaces the complete old map.
+    """
+    groups = tuple(
+        build_translation_context_group(region, observations, anchors)
+        for region in plan.regions
+    )
+    replace_track_ids = tuple(
+        dict.fromkeys(
+            track_id
+            for region in plan.regions
+            for track_id in region.affected_track_ids
+        )
+    )
+    if plan.fallback_full_frame:
+        return ContextualOcrUpdate(
+            tuple(
+                sorted(
+                    observations,
+                    key=lambda item: (item.bounds[1], item.bounds[0]),
+                )
+            ),
+            replace_track_ids,
+            groups,
+        )
+
+    affected_id_set = set(replace_track_ids)
+    affected_anchors = tuple(
+        anchor for anchor in anchors if anchor.track_id in affected_id_set
+    )
+    targets = {item for group in groups for item in group.targets}
+    selected = tuple(
+        sorted(
+            (
+                item
+                for item in observations
+                if item in targets
+                or _unchanged_anchor_for(item, affected_anchors) is not None
+            ),
+            key=lambda item: (item.bounds[1], item.bounds[0]),
+        )
+    )
+    return ContextualOcrUpdate(selected, replace_track_ids, groups)

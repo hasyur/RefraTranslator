@@ -116,3 +116,49 @@ def test_far_boxes_do_not_share_a_track() -> None:
     tracker.observe((_ocr("同じ", (800, 500, 900, 540)),), 1.1)
 
     assert len(tracker.visible_tracks) == 2
+
+
+def test_partial_observation_replaces_only_scanned_tracks() -> None:
+    tracker = StableTextTracker("zone", clear_after_seconds=1.0)
+    tracker.observe(
+        (
+            _ocr("待って。", (10, 10, 180, 40)),
+            _ocr("先へ進め。", (10, 80, 220, 110)),
+        ),
+        1.0,
+    )
+    before = {track.text: track for track in tracker.visible_tracks}
+
+    update = tracker.observe_partial(
+        (_ocr("止まれ。", (10, 10, 180, 40)),),
+        2.0,
+        replace_track_ids=(before["待って。"].track_id,),
+    )
+
+    after = {track.text: track for track in update.visible_tracks}
+    assert set(after) == {"止まれ。", "先へ進め。"}
+    assert after["止まれ。"].track_id == before["待って。"].track_id
+    assert after["止まれ。"].revision == 2
+    assert after["先へ進め。"].last_seen == before["先へ進め。"].last_seen
+
+
+def test_partial_empty_observation_marks_only_scanned_track_missing() -> None:
+    tracker = StableTextTracker("zone", clear_after_seconds=1.0)
+    tracker.observe(
+        (
+            _ocr("消える。", (10, 10, 180, 40)),
+            _ocr("残る。", (10, 80, 180, 110)),
+        ),
+        1.0,
+    )
+    before = {track.text: track for track in tracker.visible_tracks}
+
+    update = tracker.observe_partial(
+        (),
+        1.2,
+        replace_track_ids=(before["消える。"].track_id,),
+    )
+
+    after = {track.text: track for track in update.visible_tracks}
+    assert after["消える。"].missing_since == 1.2
+    assert after["残る。"].missing_since is None

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -79,6 +80,7 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.max_concurrency_spin.value() == 2
     assert window.ocr_device_combo.currentData() == "cpu"
     assert window.ocr_filter_checkbox.isChecked()
+    assert not window.dynamic_roi_checkbox.isChecked()
     assert window.settle_rescan_spin.value() == 500
     assert window.idle_rescan_spin.value() == 2000
     assert window.ocr_cooldown_spin.value() == 0
@@ -147,6 +149,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     window.settle_rescan_spin.setValue(800)
     window.idle_rescan_spin.setValue(4000)
     window.ocr_cooldown_spin.setValue(100)
+    window.dynamic_roi_checkbox.setChecked(True)
 
     window._start_live()
 
@@ -174,6 +177,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.live.settle_rescan_ms == 800
     assert saved.live.idle_rescan_ms == 4000
     assert saved.live.ocr_cooldown_ms == 100
+    assert saved.live.dynamic_roi_enabled is True
     window._live_monitor.stop()
     window.close()
     app.processEvents()
@@ -339,6 +343,34 @@ def test_launcher_saves_and_restores_live_ocr_timings(tmp_path: Path) -> None:
     assert restored.idle_rescan_spin.value() == 3500
     assert restored.ocr_cooldown_spin.value() == 125
     restored.close()
+    app.processEvents()
+
+
+def test_launcher_dynamic_roi_switch_disables_only_legacy_timing_controls(
+    tmp_path: Path,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+    filter_enabled_before = window.ocr_filter_checkbox.isEnabled()
+
+    window.dynamic_roi_checkbox.setChecked(True)
+
+    force_disabled = Qt.WidgetAttribute.WA_ForceDisabled
+    assert window.settle_rescan_spin.testAttribute(force_disabled)
+    assert window.idle_rescan_spin.testAttribute(force_disabled)
+    assert window.ocr_cooldown_spin.testAttribute(force_disabled)
+    assert window.ocr_filter_checkbox.isEnabled() == filter_enabled_before
+    assert window._save_translation_settings(announce=False)
+    assert load_config(config_path).live.dynamic_roi_enabled is True
+    assert "动态 ROI 开" in window.service_status_label.text()
+
+    window.dynamic_roi_checkbox.setChecked(False)
+    assert not window.settle_rescan_spin.testAttribute(force_disabled)
+    assert not window.idle_rescan_spin.testAttribute(force_disabled)
+    assert not window.ocr_cooldown_spin.testAttribute(force_disabled)
+    window.close()
     app.processEvents()
 
 

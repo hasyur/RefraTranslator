@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from game_screen_translator.ocr.contextual_roi import (
     ContextualRoiPlanner,
+    build_contextual_ocr_update,
     build_translation_context_group,
 )
 from game_screen_translator.ocr.dynamic_roi import DynamicRoiProposal
@@ -214,3 +215,58 @@ def test_neighboring_contextual_regions_merge_without_duplicate_track_ids() -> N
 
     assert len(plan.regions) == 1
     assert set(plan.regions[0].affected_track_ids) == {"left", "right"}
+
+
+def test_contextual_update_keeps_padding_context_out_of_tracker_input() -> None:
+    anchors = (
+        Anchor("speaker", "旅人", (100, 250, 180, 280)),
+        Anchor("line", "門は真夜中に", (100, 300, 340, 340)),
+    )
+    plan = ContextualRoiPlanner().plan(
+        ((335, 294, 120, 52),),
+        anchors,
+        frame_size=(1000, 600),
+    )
+    changed = _ocr("門は真夜中に開く。", (100, 300, 455, 340))
+    padding_context = _ocr("旅人", (100, 250, 180, 280))
+
+    update = build_contextual_ocr_update(
+        plan,
+        (padding_context, changed),
+        anchors,
+    )
+
+    assert update.replace_track_ids == ("line",)
+    assert update.observations == (changed,)
+    assert [item.text for item in update.context_groups[0].context_before] == [
+        "旅人"
+    ]
+
+
+def test_full_frame_contextual_update_returns_complete_ocr_map() -> None:
+    anchors = (
+        Anchor("one", "待って。", (10, 10, 160, 40)),
+        Anchor("two", "進め。", (10, 80, 160, 110)),
+    )
+    proposal = DynamicRoiProposal(
+        ((0, 0, 800, 600),),
+        0.5,
+        1.0,
+        True,
+        "widespread-change",
+        ((0, 0, 800, 600),),
+    )
+    plan = ContextualRoiPlanner().plan_proposal(
+        proposal,
+        anchors,
+        frame_size=(800, 600),
+    )
+    current = (
+        _ocr("止まれ。", (10, 10, 160, 40)),
+        _ocr("進め。", (10, 80, 160, 110)),
+    )
+
+    update = build_contextual_ocr_update(plan, current, anchors)
+
+    assert update.observations == current
+    assert update.replace_track_ids == ("one", "two")

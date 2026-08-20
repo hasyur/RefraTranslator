@@ -55,6 +55,10 @@ clear_after_ms = 900
 context_pairs = 8
 max_batch_size = 8
 capture_backend = "dxgi"
+# 实验性路径：首次整帧 OCR 后，以 6 Hz 热图定位变化，并将 Paddle ROI OCR
+# 限制在约 3 Hz。动态背景目前可能频繁触发整帧安全回退，默认保持关闭。
+dynamic_roi_enabled = false
+# 以下三项只用于关闭动态 ROI 时的旧全帧调度路径。
 # 每次 OCR 完成后的额外休息时间；0 优先避免短字幕被跳过。
 ocr_cooldown_ms = 0
 # 画面变化停止后再确认一次，避免首帧处于字幕绘制中途或 OCR 偶发漏检；0 可关闭。

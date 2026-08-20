@@ -37,6 +37,22 @@ class FakeCapture:
         self.closed = True
 
 
+class MutableCapture:
+    region = (0, 0, 1600, 900)
+    output_size = (1600, 900)
+    active_backend = "fake"
+
+    def __init__(self, frame: np.ndarray) -> None:
+        self.frame = frame
+        self.closed = False
+
+    def latest_frame(self):
+        return self.frame.copy()
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class FakeOcr:
     def recognize_frame(self, frame):
         return (
@@ -61,6 +77,35 @@ class FakeNoisyOcr:
             OcrText("⚙", 0.99, ((90, 10), (110, 10), (110, 30), (90, 30))),
             OcrText("待って。", 0.99, ((10, 50), (200, 50), (200, 90), (10, 90))),
         )
+
+
+class ColorBlockOcr:
+    _TEXT_BY_VALUE = {
+        100: "待って。",
+        150: "先へ進め。",
+        220: "止まれ。",
+    }
+
+    def __init__(self) -> None:
+        self.input_shapes: list[tuple[int, ...]] = []
+
+    def recognize_frame(self, frame):
+        self.input_shapes.append(tuple(frame.shape))
+        observations = []
+        for value, text in self._TEXT_BY_VALUE.items():
+            ys, xs = np.nonzero(frame[:, :, 0] == value)
+            if not len(xs):
+                continue
+            left, right = int(xs.min()), int(xs.max()) + 1
+            top, bottom = int(ys.min()), int(ys.max()) + 1
+            observations.append(
+                OcrText(
+                    text,
+                    0.99,
+                    ((left, top), (right, top), (right, bottom), (left, bottom)),
+                )
+            )
+        return tuple(observations)
 
 
 class FakeOverlay:
@@ -384,6 +429,125 @@ def test_failed_ocr_retries_on_idle_interval_without_new_frame_change(
     assert controller._ocr_future is None
 
     clock[0] = 32.1
+    controller._tick()
+    assert controller._ocr_future is not None
+    controller._ocr_future.exception(timeout=2)
+    controller.close()
+
+
+def _dynamic_roi_frame(*, changed: bool = False) -> np.ndarray:
+    frame = np.zeros((900, 1600, 3), dtype=np.uint8)
+    frame[200:260, 200:600] = 220 if changed else 100
+    frame[700:760, 200:600] = 150
+    return frame
+
+
+def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=99,
+            dynamic_roi_enabled=True,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    ocr = ColorBlockOcr()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.05
+    controller._tick()
+    assert controller._roi_scheduler is not None
+    assert controller._roi_scheduler.primed
+    assert [track.text for track in controller._tracker.visible_tracks] == [
+        "待って。",
+        "先へ進め。",
+    ]
+
+    capture.frame = _dynamic_roi_frame(changed=True)
+    clock[0] = 10.2
+    controller._tick()
+    assert controller._ocr_future is None
+
+    clock[0] = 10.4
+    controller._tick()
+    assert controller._ocr_future is not None
+    assert controller._active_roi_plan is not None
+    assert not controller._active_roi_plan.fallback_full_frame
+    controller._ocr_future.result(timeout=2)
+
+    clock[0] = 10.5
+    controller._tick()
+
+    assert [track.text for track in controller._tracker.visible_tracks] == [
+        "止まれ。",
+        "先へ進め。",
+    ]
+    assert ocr.input_shapes[0] == (900, 1600, 3)
+    assert ocr.input_shapes[1][0] < 900
+    assert ocr.input_shapes[1][1] < 1600
+    assert controller._ocr_scan_count == 2
+    assert controller._roi_scan_count == 1
+    assert controller._roi_full_fallback_count == 0
+    controller.close()
+
+
+def test_dynamic_roi_initial_failure_retries_without_legacy_idle_scan(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            dynamic_roi_enabled=True,
+            idle_rescan_ms=0,
+            ocr_cooldown_ms=0,
+        ),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeFailingOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [30.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.exception(timeout=2)
+    clock[0] = 30.1
+    controller._tick()
+    assert controller._ocr_future is None
+    assert controller._next_ocr_allowed == 31.1
+
+    clock[0] = 31.09
+    controller._tick()
+    assert controller._ocr_future is None
+
+    clock[0] = 31.1
     controller._tick()
     assert controller._ocr_future is not None
     controller._ocr_future.exception(timeout=2)
