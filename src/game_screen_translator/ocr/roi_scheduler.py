@@ -8,6 +8,7 @@ import numpy as np
 from game_screen_translator.ocr.dynamic_roi import (
     DynamicRoiProposal,
     FullScreenRoiDetector,
+    SampledRoiFrame,
 )
 from game_screen_translator.ocr.roi import OcrRoi
 
@@ -27,6 +28,7 @@ class ScheduledRoiScan:
     observed_at_s: float
     dispatched_at_s: float
     frame: np.ndarray
+    sampled_frame: SampledRoiFrame
     proposal: DynamicRoiProposal
     trigger_reason: str
 
@@ -79,11 +81,12 @@ class LatestFrameRoiScheduler:
         self._productive_result_count = 0
         self._peak_adaptive_ocr_interval_s = min_ocr_interval_s
 
-        self._accepted_frame: np.ndarray | None = None
+        self._accepted_sample: SampledRoiFrame | None = None
         self._accepted_at_s: float | None = None
         self._latest_frame: np.ndarray | None = None
+        self._latest_sample: SampledRoiFrame | None = None
         self._latest_at_s: float | None = None
-        self._last_observed_frame: np.ndarray | None = None
+        self._last_observed_sample: SampledRoiFrame | None = None
         self._last_observed_at_s: float | None = None
         self._last_motion_at_s: float | None = None
         self._last_dispatch_at_s: float | None = None
@@ -101,7 +104,7 @@ class LatestFrameRoiScheduler:
 
     @property
     def primed(self) -> bool:
-        return self._accepted_frame is not None
+        return self._accepted_sample is not None
 
     @property
     def busy(self) -> bool:
@@ -149,12 +152,13 @@ class LatestFrameRoiScheduler:
         self._validate_time(now_s)
         if self.primed:
             raise RuntimeError("scheduler 已经初始化")
-        self.detector._validate_frames(frame, frame)
-        self._accepted_frame = frame
+        sampled_frame = self.detector.sample_frame(frame)
+        self._accepted_sample = sampled_frame
         self._accepted_at_s = now_s
         self._latest_frame = frame
+        self._latest_sample = sampled_frame
         self._latest_at_s = now_s
-        self._last_observed_frame = frame
+        self._last_observed_sample = sampled_frame
         self._last_observed_at_s = now_s
         self._last_motion_at_s = now_s
         self._last_dispatch_at_s = now_s
@@ -163,24 +167,29 @@ class LatestFrameRoiScheduler:
         """Observe the newest frame and dispatch it if the OCR slot is ready."""
         self._require_primed()
         self._validate_monotonic_time(now_s)
-        assert self._last_observed_frame is not None
+        assert self._last_observed_sample is not None
 
-        adjacent = self.detector.propose(self._last_observed_frame, frame)
+        sampled_frame = self.detector.sample_frame(frame)
+        adjacent = self.detector.propose_sampled(
+            self._last_observed_sample,
+            sampled_frame,
+        )
         if adjacent.rois:
             self._last_motion_at_s = now_s
 
-        baseline = (
-            self._in_flight.frame
+        baseline_sample = (
+            self._in_flight.sampled_frame
             if self._in_flight is not None
-            else self._accepted_frame
+            else self._accepted_sample
         )
-        assert baseline is not None
-        proposal = self.detector.propose(baseline, frame)
+        assert baseline_sample is not None
+        proposal = self.detector.propose_sampled(baseline_sample, sampled_frame)
 
         self._generation += 1
         self._latest_frame = frame
+        self._latest_sample = sampled_frame
         self._latest_at_s = now_s
-        self._last_observed_frame = frame
+        self._last_observed_sample = sampled_frame
         self._last_observed_at_s = now_s
 
         if proposal.rois:
@@ -219,6 +228,7 @@ class LatestFrameRoiScheduler:
 
         proposal = self._pending_proposal()
         assert self._latest_frame is not None
+        assert self._latest_sample is not None
         assert self._latest_at_s is not None
         trigger_reason = (
             "forced"
@@ -233,6 +243,7 @@ class LatestFrameRoiScheduler:
             self._latest_at_s,
             now_s,
             self._latest_frame,
+            self._latest_sample,
             proposal,
             trigger_reason,
         )
@@ -281,7 +292,7 @@ class LatestFrameRoiScheduler:
         self._in_flight = None
 
         if accepted:
-            self._accepted_frame = job.frame
+            self._accepted_sample = job.sampled_frame
             self._accepted_at_s = completed_at_s
             if target_count is not None:
                 self._record_target_feedback(target_count)
@@ -289,10 +300,12 @@ class LatestFrameRoiScheduler:
             # The failed job did not consume its change. Rebuild from the last
             # accepted frame to the newest frame and retain any full-frame
             # safety decision made by either the failed or pending work.
-            assert self._accepted_frame is not None
+            assert self._accepted_sample is not None
             assert self._latest_frame is not None
-            rebuilt = self.detector.propose(
-                self._accepted_frame, self._latest_frame
+            assert self._latest_sample is not None
+            rebuilt = self.detector.propose_sampled(
+                self._accepted_sample,
+                self._latest_sample,
             )
             self._clear_pending()
             if rebuilt.rois:

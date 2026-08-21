@@ -106,6 +106,21 @@ def test_last_accepted_baseline_accumulates_subthreshold_local_changes() -> None
     assert accumulated.rois
 
 
+def test_reused_frame_samples_match_direct_proposal() -> None:
+    before = np.zeros((180, 320, 3), dtype=np.uint8)
+    after = before.copy()
+    after[64:88, 96:224] = 210
+    detector = _detector()
+
+    direct = detector.propose(before, after)
+    sampled = detector.propose_sampled(
+        detector.sample_frame(before),
+        detector.sample_frame(after),
+    )
+
+    assert sampled == direct
+
+
 def test_widespread_structural_change_falls_back_to_full_frame() -> None:
     before = np.zeros((180, 320, 3), dtype=np.uint8)
     after = before.copy()

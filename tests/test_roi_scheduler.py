@@ -66,6 +66,32 @@ def test_coalesces_10hz_observations_until_the_3hz_ocr_slot() -> None:
     assert any(_contains(roi, 245, 75) for roi in job.proposal.change_rois)
 
 
+def test_each_observed_frame_is_sampled_only_once(monkeypatch) -> None:
+    detector = _detector()
+    sample_calls = 0
+    original_sample_frame = detector.sample_frame
+
+    def sample_frame(frame: np.ndarray):
+        nonlocal sample_calls
+        sample_calls += 1
+        return original_sample_frame(frame)
+
+    monkeypatch.setattr(detector, "sample_frame", sample_frame)
+    scheduler = LatestFrameRoiScheduler(
+        detector,
+        min_ocr_interval_s=0.4,
+        settle_interval_s=0.1,
+        max_coalesce_s=0.4,
+    )
+    base = _blank()
+    scheduler.prime(base, 0.0)
+    scheduler.observe(_paint(base, 40, 70), 0.1)
+    scheduler.observe(_paint(base, 120, 70), 0.2)
+    scheduler.observe(_paint(base, 200, 70), 0.3)
+
+    assert sample_calls == 4
+
+
 def test_latest_wins_keeps_only_one_pending_frame_while_ocr_is_busy() -> None:
     base = _blank()
     first = _paint(base, 40, 70)

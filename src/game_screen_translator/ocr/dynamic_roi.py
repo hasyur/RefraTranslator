@@ -21,6 +21,14 @@ class DynamicRoiProposal:
     candidate_region_count: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class SampledRoiFrame:
+    """Low-resolution luminance samples reusable across change comparisons."""
+
+    luminance: np.ndarray
+    frame_size: tuple[int, int]
+
+
 class FullScreenRoiDetector:
     """Find changed regions without running OCR or retaining frame state.
 
@@ -79,13 +87,47 @@ class FullScreenRoiDetector:
         self.max_rois = max_rois
         self.max_coverage_fraction = max_coverage_fraction
         self.full_frame_change_fraction = full_frame_change_fraction
+        self._sample_index_shape: tuple[int, int] | None = None
+        self._sample_indices: tuple[tuple[np.ndarray, np.ndarray], ...] = ()
 
     def propose(self, baseline: np.ndarray, current: np.ndarray) -> DynamicRoiProposal:
         self._validate_frames(baseline, current)
-        frame_height, frame_width = current.shape[:2]
+        return self.propose_sampled(
+            self._sample_frame(baseline),
+            self._sample_frame(current),
+        )
+
+    def sample_frame(self, frame: np.ndarray) -> SampledRoiFrame:
+        """Sample one immutable frame for one or more later comparisons."""
+        self._validate_frame(frame)
+        return self._sample_frame(frame)
+
+    def propose_sampled(
+        self,
+        baseline: SampledRoiFrame,
+        current: SampledRoiFrame,
+    ) -> DynamicRoiProposal:
+        """Compare reusable samples without reading the full frames again."""
+        if not isinstance(baseline, SampledRoiFrame) or not isinstance(
+            current, SampledRoiFrame
+        ):
+            raise TypeError("baseline 和 current 必须是 SampledRoiFrame")
+        if baseline.frame_size != current.frame_size:
+            raise ValueError("baseline 和 current 的尺寸必须一致")
+        expected_shape = (4, self.sample_size[1], self.sample_size[0])
+        if (
+            baseline.luminance.shape != expected_shape
+            or current.luminance.shape != expected_shape
+        ):
+            raise ValueError("采样数据与 detector.sample_size 不一致")
+
+        frame_width, frame_height = current.frame_size
         full_frame = (0, 0, frame_width, frame_height)
 
-        difference = self._sampled_difference(baseline, current)
+        difference = self._sampled_difference(
+            baseline.luminance,
+            current.luminance,
+        )
         changed = difference >= self.pixel_threshold
         changed_fraction = float(np.mean(changed))
         if not np.any(changed):
@@ -160,42 +202,78 @@ class FullScreenRoiDetector:
 
     @staticmethod
     def _validate_frames(baseline: np.ndarray, current: np.ndarray) -> None:
-        if not isinstance(baseline, np.ndarray) or not isinstance(current, np.ndarray):
-            raise TypeError("baseline 和 current 必须是 numpy.ndarray")
+        FullScreenRoiDetector._validate_frame(baseline)
+        FullScreenRoiDetector._validate_frame(current)
         if baseline.shape != current.shape:
             raise ValueError("baseline 和 current 的尺寸必须一致")
-        if current.ndim not in (2, 3):
+
+    @staticmethod
+    def _validate_frame(frame: np.ndarray) -> None:
+        if not isinstance(frame, np.ndarray):
+            raise TypeError("frame 必须是 numpy.ndarray")
+        if frame.ndim not in (2, 3):
             raise ValueError("frame 必须是灰度或 RGB/BGR 数组")
-        if current.ndim == 3 and current.shape[2] < 3:
+        if frame.ndim == 3 and frame.shape[2] < 3:
             raise ValueError("彩色 frame 至少需要三个通道")
-        if current.shape[0] < 1 or current.shape[1] < 1:
+        if frame.shape[0] < 1 or frame.shape[1] < 1:
             raise ValueError("frame 不能为空")
 
     def _sampled_difference(
-        self, baseline: np.ndarray, current: np.ndarray
+        self,
+        baseline: np.ndarray,
+        current: np.ndarray,
     ) -> np.ndarray:
+        signed = current.astype(np.int16) - baseline.astype(np.int16)
+        global_shift = float(np.median(signed))
+        return np.max(np.abs(signed.astype(np.float32) - global_shift), axis=0)
+
+    def _sample_frame(self, frame: np.ndarray) -> SampledRoiFrame:
         sample_width, sample_height = self.sample_size
-        frame_height, frame_width = current.shape[:2]
-        signed_samples: list[np.ndarray] = []
-        for y_offset in (1, 3):
-            y_indices = (
-                (np.arange(sample_height, dtype=np.int64) * 4 + y_offset)
+        frame_height, frame_width = frame.shape[:2]
+        indices = self._indices_for_shape(frame_height, frame_width)
+        luminance = np.empty(
+            (len(indices), sample_height, sample_width),
+            dtype=np.uint8,
+        )
+        for index, (y_indices, x_indices) in enumerate(indices):
+            luminance[index] = self._sample_luminance(
+                frame,
+                y_indices,
+                x_indices,
+            )
+        return SampledRoiFrame(luminance, (frame_width, frame_height))
+
+    def _indices_for_shape(
+        self,
+        frame_height: int,
+        frame_width: int,
+    ) -> tuple[tuple[np.ndarray, np.ndarray], ...]:
+        shape = (frame_height, frame_width)
+        if shape == self._sample_index_shape:
+            return self._sample_indices
+
+        sample_width, sample_height = self.sample_size
+        y_indices = tuple(
+            (
+                (np.arange(sample_height, dtype=np.int64) * 4 + offset)
                 * frame_height
                 // (sample_height * 4)
             ).clip(0, frame_height - 1)
-            for x_offset in (1, 3):
-                x_indices = (
-                    (np.arange(sample_width, dtype=np.int64) * 4 + x_offset)
-                    * frame_width
-                    // (sample_width * 4)
-                ).clip(0, frame_width - 1)
-                before = self._sample_luminance(baseline, y_indices, x_indices)
-                after = self._sample_luminance(current, y_indices, x_indices)
-                signed_samples.append(after.astype(np.int16) - before.astype(np.int16))
-
-        stacked = np.stack(signed_samples, axis=0)
-        global_shift = float(np.median(stacked))
-        return np.max(np.abs(stacked.astype(np.float32) - global_shift), axis=0)
+            for offset in (1, 3)
+        )
+        x_indices = tuple(
+            (
+                (np.arange(sample_width, dtype=np.int64) * 4 + offset)
+                * frame_width
+                // (sample_width * 4)
+            ).clip(0, frame_width - 1)
+            for offset in (1, 3)
+        )
+        self._sample_index_shape = shape
+        self._sample_indices = tuple(
+            (ys, xs) for ys in y_indices for xs in x_indices
+        )
+        return self._sample_indices
 
     @staticmethod
     def _sample_luminance(
