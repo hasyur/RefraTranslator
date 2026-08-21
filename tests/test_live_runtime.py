@@ -601,6 +601,153 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     controller.close()
 
 
+def test_legacy_runtime_confirms_changed_visible_text_without_idle_timers(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=1,
+            stable_ms=0,
+            settle_rescan_ms=0,
+            idle_rescan_ms=0,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ColorBlockOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.05
+    controller._tick()
+    old = next(
+        track for track in controller._tracker.visible_tracks if track.text == "待って。"
+    )
+    controller._tracker.apply_translations(
+        (TranslationResult(old.source("live-zone-1"), "旧译文"),)
+    )
+
+    capture.frame = _dynamic_roi_frame(changed=True)
+    clock[0] = 10.2
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.25
+    controller._tick()
+
+    waiting = next(
+        track for track in controller._tracker.visible_tracks if track.track_id == old.track_id
+    )
+    assert controller._tracker.has_pending_revisions
+    assert waiting.text == "待って。"
+    assert waiting.display_translation == "旧译文"
+    assert controller._ocr_future is not None
+
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.3
+    controller._tick()
+
+    confirmed = next(
+        track for track in controller._tracker.visible_tracks if track.track_id == old.track_id
+    )
+    assert not controller._tracker.has_pending_revisions
+    assert confirmed.text == "止まれ。"
+    assert confirmed.revision == old.revision + 1
+    assert confirmed.translated_text is None
+    assert confirmed.display_translation == "旧译文"
+    controller.close()
+
+
+def test_dynamic_roi_retries_until_visible_text_revision_is_confirmed(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=1,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            dynamic_roi_settle_ms=0,
+            dynamic_roi_ocr_interval_ms=250,
+            dynamic_roi_max_coalesce_ms=250,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ColorBlockOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.05
+    controller._tick()
+    old = next(
+        track for track in controller._tracker.visible_tracks if track.text == "待って。"
+    )
+    controller._tracker.apply_translations(
+        (TranslationResult(old.source("live-zone-1"), "旧译文"),)
+    )
+
+    capture.frame = _dynamic_roi_frame(changed=True)
+    clock[0] = 10.3
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.35
+    controller._tick()
+
+    waiting = next(
+        track for track in controller._tracker.visible_tracks if track.track_id == old.track_id
+    )
+    assert controller._tracker.has_pending_revisions
+    assert waiting.text == "待って。"
+    assert waiting.display_translation == "旧译文"
+    assert controller._ocr_future is None
+
+    clock[0] = 10.6
+    controller._tick()
+    assert controller._ocr_future is not None
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.65
+    controller._tick()
+
+    confirmed = next(
+        track for track in controller._tracker.visible_tracks if track.track_id == old.track_id
+    )
+    assert not controller._tracker.has_pending_revisions
+    assert confirmed.text == "止まれ。"
+    assert confirmed.revision == old.revision + 1
+    assert confirmed.translated_text is None
+    assert confirmed.display_translation == "旧译文"
+    controller.close()
+
+
 def test_dynamic_roi_empty_results_back_off_without_losing_next_text(
     monkeypatch,
 ) -> None:

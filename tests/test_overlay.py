@@ -57,6 +57,46 @@ def test_overlay_renders_only_translated_track_region() -> None:
     app.processEvents()
 
 
+def test_overlay_renders_retained_translation_while_replacement_is_pending() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 320, 120),
+        style=OverlayStyle(blur_radius=0),
+    )
+    frame = np.full((120, 320, 3), (30, 40, 50), dtype=np.uint8)
+    track = TrackedText(
+        track_id="track",
+        revision=2,
+        text="新原文",
+        confidence=0.99,
+        bounds=(40, 30, 280, 90),
+        first_seen=0,
+        last_seen=1,
+        observations=2,
+        stable_emitted=True,
+        translated_text=None,
+        retained_translation="旧译文",
+    )
+
+    overlay.set_scene(frame, (track,))
+    target = QImage(320, 120, QImage.Format.Format_ARGB32)
+    target.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(target)
+    overlay.render(painter, QPoint())
+    painter.end()
+
+    assert overlay._tracks == (track,)
+    assert any(
+        target.pixelColor(x, y).red() >= 245
+        and target.pixelColor(x, y).green() >= 245
+        and target.pixelColor(x, y).blue() >= 245
+        for y in range(30, 90)
+        for x in range(40, 280)
+    )
+    overlay.close()
+    app.processEvents()
+
+
 def test_overlay_can_darken_the_blurred_game_frame() -> None:
     app = QApplication.instance() or QApplication([])
     overlay = TranslationOverlay(

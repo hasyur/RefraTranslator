@@ -136,7 +136,7 @@ class TranslationOverlay(QWidget):
         previous_backgrounds = self._background_pixmaps
         visible_tracks = tuple(tracks)
         self._tracks = tuple(
-            track for track in visible_tracks if track.translated_text
+            track for track in visible_tracks if track.display_translation
         )
         active_backgrounds = {
             self._background_key(track) for track in visible_tracks
@@ -155,7 +155,7 @@ class TranslationOverlay(QWidget):
         # surface, none of which can be distinguished safely by color alone.
         for track in visible_tracks:
             key = self._background_key(track)
-            if track.translated_text and key in self._background_pixmaps:
+            if track.display_translation and key in self._background_pixmaps:
                 continue
             source_bounds = self._source_bounds(track.bounds)
             if any(
@@ -270,14 +270,15 @@ class TranslationOverlay(QWidget):
         text_rect = rect.adjusted(4, 4, -4, -4)
         if text_rect.isEmpty():
             return
+        translation = track.display_translation or ""
         font = self._fit_font(
-            track.translated_text or "",
+            translation,
             text_rect,
             source_text=track.text,
         )
         painter.setFont(font)
         metrics = QT["QFontMetrics"](font)
-        lines = self._wrap(track.translated_text or "", metrics, text_rect.width())
+        lines = self._wrap(translation, metrics, text_rect.width())
         line_height = metrics.lineSpacing()
         y = text_rect.top() + max(0, (text_rect.height() - line_height * len(lines)) // 2)
         painter.save()

@@ -589,6 +589,20 @@ class LauncherWindow(QMainWindow):
         )
         service_form.addRow("变化检测频率", self.change_poll_spin)
 
+        self.clear_after_spin = QSpinBox()
+        self.clear_after_spin.setRange(0, 60_000)
+        self.clear_after_spin.setValue(self._config.live.clear_after_ms)
+        self.clear_after_spin.setSingleStep(50)
+        self.clear_after_spin.setAccelerated(True)
+        self.clear_after_spin.setSuffix(" ms")
+        self.clear_after_spin.setSpecialValueText("立即清除")
+        self.clear_after_spin.setToolTip(
+            "某轮有效 OCR 没有找到已显示的文字时，继续保留译文的时间；"
+            "期间重新识别到同一文字便取消清除。增大可抵抗偶发漏识别和"
+            "ROI 边缘波动，但真实字幕消失后也会多停留一段时间；0 表示立即清除。"
+        )
+        service_form.addRow("译文消失宽限", self.clear_after_spin)
+
         self.settle_rescan_spin = QSpinBox()
         self.settle_rescan_spin.setRange(0, 60_000)
         self.settle_rescan_spin.setValue(self._config.live.settle_rescan_ms)
@@ -966,6 +980,7 @@ class LauncherWindow(QMainWindow):
             settle_rescan_ms=self.settle_rescan_spin.value(),
             idle_rescan_ms=self.idle_rescan_spin.value(),
             ocr_cooldown_ms=self.ocr_cooldown_spin.value(),
+            clear_after_ms=self.clear_after_spin.value(),
             dynamic_roi_enabled=self.dynamic_roi_checkbox.isChecked(),
             change_poll_fps=self.change_poll_spin.value(),
             dynamic_roi_settle_ms=self.roi_settle_spin.value(),
@@ -1002,13 +1017,15 @@ class LauncherWindow(QMainWindow):
                 f"动态 ROI 开 · 热图 {live.change_poll_fps} Hz · "
                 f"稳定 {live.dynamic_roi_settle_ms} ms · "
                 f"OCR 间隔 {live.dynamic_roi_ocr_interval_ms} ms · "
-                f"合并 {live.dynamic_roi_max_coalesce_ms} ms"
+                f"合并 {live.dynamic_roi_max_coalesce_ms} ms · "
+                f"消失宽限 {live.clear_after_ms} ms"
             )
         return (
             f"动态 ROI 关 · 检测 {live.change_poll_fps} Hz · "
             f"补扫 {live.settle_rescan_ms} ms · "
             f"兜底 {live.idle_rescan_ms} ms · "
-            f"冷却 {live.ocr_cooldown_ms} ms"
+            f"冷却 {live.ocr_cooldown_ms} ms · "
+            f"消失宽限 {live.clear_after_ms} ms"
         )
 
     @staticmethod
@@ -1124,6 +1141,7 @@ class LauncherWindow(QMainWindow):
                 settle_rescan_ms=live.settle_rescan_ms,
                 idle_rescan_ms=live.idle_rescan_ms,
                 ocr_cooldown_ms=live.ocr_cooldown_ms,
+                clear_after_ms=live.clear_after_ms,
                 dynamic_roi_enabled=live.dynamic_roi_enabled,
                 change_poll_fps=live.change_poll_fps,
                 dynamic_roi_settle_ms=live.dynamic_roi_settle_ms,
@@ -1159,6 +1177,7 @@ class LauncherWindow(QMainWindow):
         self.settle_rescan_spin.setValue(self._config.live.settle_rescan_ms)
         self.idle_rescan_spin.setValue(self._config.live.idle_rescan_ms)
         self.ocr_cooldown_spin.setValue(self._config.live.ocr_cooldown_ms)
+        self.clear_after_spin.setValue(self._config.live.clear_after_ms)
         self.change_poll_spin.setValue(self._config.live.change_poll_fps)
         self.roi_settle_spin.setValue(
             self._config.live.dynamic_roi_settle_ms

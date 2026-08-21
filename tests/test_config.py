@@ -265,6 +265,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         ocr_cooldown_ms=125,
         settle_rescan_ms=750,
         idle_rescan_ms=3500,
+        clear_after_ms=1350,
         dynamic_roi_enabled=True,
         change_poll_fps=8,
         dynamic_roi_settle_ms=240,
@@ -284,6 +285,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.live.ocr_cooldown_ms == 125
     assert saved.live.settle_rescan_ms == 750
     assert saved.live.idle_rescan_ms == 3500
+    assert saved.live.clear_after_ms == 1350
     assert saved.live.dynamic_roi_enabled is True
     assert saved.live.change_poll_fps == 8
     assert saved.live.dynamic_roi_settle_ms == 240
@@ -300,6 +302,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert "ocr_cooldown_ms = 125" in text
     assert "settle_rescan_ms = 750" in text
     assert "idle_rescan_ms = 3500" in text
+    assert "clear_after_ms = 1350" in text
     assert "dynamic_roi_enabled = true" in text
     assert "change_poll_fps = 8" in text
     assert "dynamic_roi_settle_ms = 240" in text
@@ -320,6 +323,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.live.ocr_cooldown_ms == 125
     assert saved.live.settle_rescan_ms == 750
     assert saved.live.idle_rescan_ms == 3500
+    assert saved.live.clear_after_ms == 1350
     assert saved.live.dynamic_roi_enabled is True
     assert saved.live.change_poll_fps == 8
     assert saved.live.dynamic_roi_settle_ms == 240
@@ -331,6 +335,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert path.read_text(encoding="utf-8").count("text_merge_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("dynamic_roi_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("change_poll_fps =") == 1
+    assert path.read_text(encoding="utf-8").count("clear_after_ms =") == 1
     assert path.read_text(encoding="utf-8").count("dynamic_roi_settle_ms =") == 1
     assert (
         path.read_text(encoding="utf-8").count("dynamic_roi_ocr_interval_ms =")
@@ -369,6 +374,7 @@ def test_save_runtime_selection_updates_existing_live_timing_values(
 ocr_cooldown_ms = 350
 settle_rescan_ms = 500
 idle_rescan_ms = 2000
+clear_after_ms = 900
 dynamic_roi_settle_ms = 180
 dynamic_roi_ocr_interval_ms = 333
 dynamic_roi_max_coalesce_ms = 333
@@ -383,6 +389,7 @@ dynamic_roi_max_coalesce_ms = 333
         ocr_cooldown_ms=0,
         settle_rescan_ms=900,
         idle_rescan_ms=5000,
+        clear_after_ms=1400,
         dynamic_roi_settle_ms=260,
         dynamic_roi_ocr_interval_ms=400,
         dynamic_roi_max_coalesce_ms=600,
@@ -391,6 +398,7 @@ dynamic_roi_max_coalesce_ms = 333
     assert saved.live.ocr_cooldown_ms == 0
     assert saved.live.settle_rescan_ms == 900
     assert saved.live.idle_rescan_ms == 5000
+    assert saved.live.clear_after_ms == 1400
     assert saved.live.dynamic_roi_settle_ms == 260
     assert saved.live.dynamic_roi_ocr_interval_ms == 400
     assert saved.live.dynamic_roi_max_coalesce_ms == 600
@@ -398,12 +406,14 @@ dynamic_roi_max_coalesce_ms = 333
     assert "ocr_cooldown_ms = 0" in text
     assert "settle_rescan_ms = 900" in text
     assert "idle_rescan_ms = 5000" in text
+    assert "clear_after_ms = 1400" in text
     assert "dynamic_roi_settle_ms = 260" in text
     assert "dynamic_roi_ocr_interval_ms = 400" in text
     assert "dynamic_roi_max_coalesce_ms = 600" in text
     assert text.count("ocr_cooldown_ms =") == 1
     assert text.count("settle_rescan_ms =") == 1
     assert text.count("idle_rescan_ms =") == 1
+    assert text.count("clear_after_ms =") == 1
     assert text.count("dynamic_roi_settle_ms =") == 1
     assert text.count("dynamic_roi_ocr_interval_ms =") == 1
     assert text.count("dynamic_roi_max_coalesce_ms =") == 1

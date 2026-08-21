@@ -58,6 +58,14 @@ class TrackedText:
     stable_emitted: bool = False
     translated_text: str | None = None
     missing_since: float | None = None
+    retained_translation: str | None = None
+
+    @property
+    def display_translation(self) -> str | None:
+        """Return the current translation or the previous one held during replacement."""
+        if self.translated_text is not None:
+            return self.translated_text
+        return self.retained_translation
 
     def source(self, zone_id: str) -> SourceText:
         return SourceText(zone_id, self.track_id, self.revision, self.text)
@@ -70,6 +78,16 @@ class TrackerUpdate:
     removed_track_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _RevisionCandidate:
+    text: str
+    confidence: float
+    bounds: Bounds
+    first_seen: float
+    last_seen: float
+    observations: int
+
+
 class StableTextTracker:
     def __init__(
         self,
@@ -78,23 +96,32 @@ class StableTextTracker:
         stable_observations: int = 1,
         stable_seconds: float = 0.0,
         clear_after_seconds: float = 0.9,
+        revision_confirmations: int = 2,
     ) -> None:
         if not zone_id.strip():
             raise ValueError("zone_id 不能为空")
         if stable_observations < 1:
             raise ValueError("stable_observations 必须至少为 1")
+        if revision_confirmations < 1:
+            raise ValueError("revision_confirmations 必须至少为 1")
         if stable_seconds < 0 or clear_after_seconds < 0:
             raise ValueError("稳定与清理时间不能为负数")
         self.zone_id = zone_id
         self.stable_observations = stable_observations
         self.stable_seconds = stable_seconds
         self.clear_after_seconds = clear_after_seconds
+        self.revision_confirmations = revision_confirmations
         self._tracks: dict[str, TrackedText] = {}
+        self._revision_candidates: dict[str, _RevisionCandidate] = {}
         self._counter = 0
 
     @property
     def visible_tracks(self) -> tuple[TrackedText, ...]:
         return tuple(sorted(self._tracks.values(), key=lambda track: (track.bounds[1], track.bounds[0])))
+
+    @property
+    def has_pending_revisions(self) -> bool:
+        return bool(self._revision_candidates)
 
     def observe(self, observations: Iterable[OcrText], now: float) -> TrackerUpdate:
         return self._observe_replacing(
@@ -150,6 +177,7 @@ class StableTextTracker:
 
         removed: list[str] = []
         for track_id in tuple(unmatched_tracks):
+            self._revision_candidates.pop(track_id, None)
             track = self._tracks[track_id]
             missing_since = (
                 track.last_seen if track.missing_since is None else track.missing_since
@@ -173,6 +201,7 @@ class StableTextTracker:
                 and now - track.missing_since >= self.clear_after_seconds
             ):
                 removed.append(track_id)
+                self._revision_candidates.pop(track_id, None)
                 del self._tracks[track_id]
         return TrackerUpdate((), self.visible_tracks, tuple(removed))
 
@@ -184,6 +213,7 @@ class StableTextTracker:
             self._tracks[track.track_id] = replace(
                 track,
                 translated_text=result.translated_text,
+                retained_translation=None,
             )
         return self.visible_tracks
 
@@ -207,6 +237,7 @@ class StableTextTracker:
     def _update_track(self, track: TrackedText, observation: OcrText, now: float) -> TrackedText:
         text = normalize_text(observation.text)
         if text == track.text:
+            self._revision_candidates.pop(track.track_id, None)
             return replace(
                 track,
                 confidence=observation.confidence,
@@ -215,6 +246,9 @@ class StableTextTracker:
                 observations=track.observations + 1,
                 missing_since=None,
             )
+        if track.display_translation is not None:
+            return self._stage_revision(track, observation, text, now)
+        self._revision_candidates.pop(track.track_id, None)
         return replace(
             track,
             revision=track.revision + 1,
@@ -227,6 +261,58 @@ class StableTextTracker:
             missing_since=None,
             stable_emitted=False,
             translated_text=None,
+            retained_translation=None,
+        )
+
+    def _stage_revision(
+        self,
+        track: TrackedText,
+        observation: OcrText,
+        text: str,
+        now: float,
+    ) -> TrackedText:
+        candidate = self._revision_candidates.get(track.track_id)
+        if candidate is None or candidate.text != text:
+            candidate = _RevisionCandidate(
+                text,
+                observation.confidence,
+                observation.bounds,
+                now,
+                now,
+                1,
+            )
+        else:
+            candidate = replace(
+                candidate,
+                confidence=observation.confidence,
+                bounds=observation.bounds,
+                last_seen=now,
+                observations=candidate.observations + 1,
+            )
+        self._revision_candidates[track.track_id] = candidate
+        if candidate.observations < self.revision_confirmations:
+            return replace(
+                track,
+                confidence=observation.confidence,
+                bounds=observation.bounds,
+                last_seen=now,
+                missing_since=None,
+            )
+
+        del self._revision_candidates[track.track_id]
+        return replace(
+            track,
+            revision=track.revision + 1,
+            text=candidate.text,
+            confidence=candidate.confidence,
+            bounds=candidate.bounds,
+            first_seen=candidate.first_seen,
+            last_seen=candidate.last_seen,
+            observations=candidate.observations,
+            missing_since=None,
+            stable_emitted=False,
+            translated_text=None,
+            retained_translation=track.display_translation,
         )
 
     def _best_match(self, observation: OcrText, candidates: set[str]) -> str | None:

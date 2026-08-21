@@ -574,9 +574,12 @@ class LiveController:
             and now - self._last_ocr_completed
             >= self._config.live.idle_rescan_ms / 1000
         )
-        needs_stability_scan = any(
-            not track.stable_emitted or track.missing_since is not None
-            for track in self._tracker.visible_tracks
+        needs_stability_scan = (
+            self._tracker.has_pending_revisions
+            or any(
+                not track.stable_emitted or track.missing_since is not None
+                for track in self._tracker.visible_tracks
+            )
         ) and now - self._last_ocr_completed >= self._config.live.stable_ms / 1000
 
         if changed or needs_stability_scan or settle_rescan_due or idle_rescan_due:
@@ -883,11 +886,12 @@ class LiveController:
         scheduler = self._roi_scheduler
         if scheduler is not None:
             if roi_job is not None:
+                accepted = not self._tracker.has_pending_revisions
                 follow_up = scheduler.complete(
                     roi_job,
-                    accepted=True,
+                    accepted=accepted,
                     completed_at_s=now,
-                    target_count=roi_target_count,
+                    target_count=roi_target_count if accepted else None,
                 )
                 if self._debug:
                     print(

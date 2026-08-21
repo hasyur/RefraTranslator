@@ -266,7 +266,7 @@ _PREVIEW_VALUE_RE = re.compile(
 )
 _LIVE_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
-    r"change_poll_fps|ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms|"
+    r"change_poll_fps|ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms|clear_after_ms|"
     r"dynamic_roi_enabled|dynamic_roi_settle_ms|dynamic_roi_ocr_interval_ms|"
     r"dynamic_roi_max_coalesce_ms)"
     r"[ \t]*="
@@ -293,6 +293,7 @@ def save_translation_selection(
         ocr_cooldown_ms=None,
         settle_rescan_ms=None,
         idle_rescan_ms=None,
+        clear_after_ms=None,
         dynamic_roi_enabled=None,
         change_poll_fps=None,
         dynamic_roi_settle_ms=None,
@@ -315,6 +316,7 @@ def save_runtime_selection(
     ocr_cooldown_ms: int | None = None,
     settle_rescan_ms: int | None = None,
     idle_rescan_ms: int | None = None,
+    clear_after_ms: int | None = None,
     dynamic_roi_enabled: bool | None = None,
     change_poll_fps: int | None = None,
     dynamic_roi_settle_ms: int | None = None,
@@ -335,6 +337,7 @@ def save_runtime_selection(
         ocr_cooldown_ms=ocr_cooldown_ms,
         settle_rescan_ms=settle_rescan_ms,
         idle_rescan_ms=idle_rescan_ms,
+        clear_after_ms=clear_after_ms,
         dynamic_roi_enabled=dynamic_roi_enabled,
         change_poll_fps=change_poll_fps,
         dynamic_roi_settle_ms=dynamic_roi_settle_ms,
@@ -357,6 +360,7 @@ def _save_selected_values(
     ocr_cooldown_ms: int | None,
     settle_rescan_ms: int | None,
     idle_rescan_ms: int | None,
+    clear_after_ms: int | None,
     dynamic_roi_enabled: bool | None,
     change_poll_fps: int | None,
     dynamic_roi_settle_ms: int | None,
@@ -418,6 +422,11 @@ def _save_selected_values(
             current.live.idle_rescan_ms
             if idle_rescan_ms is None
             else idle_rescan_ms
+        ),
+        clear_after_ms=(
+            current.live.clear_after_ms
+            if clear_after_ms is None
+            else clear_after_ms
         ),
         dynamic_roi_enabled=(
             current.live.dynamic_roi_enabled
@@ -533,6 +542,7 @@ def _save_selected_values(
             ocr_cooldown_ms,
             settle_rescan_ms,
             idle_rescan_ms,
+            clear_after_ms,
             dynamic_roi_enabled,
             change_poll_fps,
             dynamic_roi_settle_ms,
@@ -555,6 +565,11 @@ def _save_selected_values(
             idle_rescan_ms=(
                 candidate_live.idle_rescan_ms
                 if idle_rescan_ms is not None
+                else None
+            ),
+            clear_after_ms=(
+                candidate_live.clear_after_ms
+                if clear_after_ms is not None
                 else None
             ),
             dynamic_roi_enabled=(
@@ -742,6 +757,7 @@ def _upsert_live_values(
     ocr_cooldown_ms: int | None,
     settle_rescan_ms: int | None,
     idle_rescan_ms: int | None,
+    clear_after_ms: int | None,
     dynamic_roi_enabled: bool | None,
     change_poll_fps: int | None,
     dynamic_roi_settle_ms: int | None,
@@ -755,6 +771,7 @@ def _upsert_live_values(
             ("ocr_cooldown_ms", ocr_cooldown_ms),
             ("settle_rescan_ms", settle_rescan_ms),
             ("idle_rescan_ms", idle_rescan_ms),
+            ("clear_after_ms", clear_after_ms),
             ("dynamic_roi_enabled", dynamic_roi_enabled),
             ("change_poll_fps", change_poll_fps),
             ("dynamic_roi_settle_ms", dynamic_roi_settle_ms),
