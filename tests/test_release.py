@@ -14,8 +14,11 @@ SOURCE_RELEASE_FILES = (
     "THIRD_PARTY_NOTICES.md",
     "bootstrap.ps1",
     "config.example.toml",
+    "install.bat",
     "start_gui.bat",
     "start_test_scenes.bat",
+    "update.bat",
+    "update.ps1",
 )
 PUBLIC_ENDPOINT_FILES = (
     PROJECT_ROOT / "README.md",
@@ -132,3 +135,38 @@ def test_gui_batch_preserves_native_crash_diagnostics() -> None:
     assert 'if not "%launcher_exit%"=="0" goto :launch_failed' in script
     assert "launcher exited unexpectedly" in script
     assert "if errorlevel 1 pause" not in script.lower()
+
+
+def test_install_batch_runs_gui_bootstrap_and_preserves_exit_code() -> None:
+    script = (PROJECT_ROOT / "install.bat").read_text(encoding="ascii")
+
+    assert 'cd /d "%~dp0"' in script
+    assert '-File "%~dp0bootstrap.ps1" -WithGui' in script
+    assert 'set "install_exit=%ERRORLEVEL%"' in script
+    assert 'exit /b %install_exit%' in script
+    assert "start_gui.bat" in script
+
+
+def test_update_batch_runs_powershell_updater_and_preserves_exit_code() -> None:
+    script = (PROJECT_ROOT / "update.bat").read_text(encoding="ascii")
+
+    assert 'cd /d "%~dp0"' in script
+    assert '-File "%~dp0update.ps1"' in script
+    assert 'set "update_exit=%ERRORLEVEL%"' in script
+    assert 'exit /b %update_exit%' in script
+
+
+def test_update_script_uses_safe_incremental_main_update() -> None:
+    script = (PROJECT_ROOT / "update.ps1").read_bytes()
+    text = script.decode("ascii")
+
+    assert 'if ($currentBranch -ne "main")' in text
+    assert '"--porcelain"' in text
+    assert '"--untracked-files=no"' in text
+    assert '@("pull", "--ff-only", "origin", "main")' in text
+    assert "diff --quiet" in text
+    assert "$oldCommit $newCommit -- pyproject.toml" in text
+    assert "-File $bootstrapPath -WithGui" in text
+    assert '$venvPython = Join-Path $projectRoot ".venv\\Scripts\\python.exe"' in text
+    assert "if ($environmentMissing -or $dependencyChanged)" in text
+    assert "GitHub ZIP downloads cannot be" in text

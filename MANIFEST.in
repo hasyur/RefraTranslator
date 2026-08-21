@@ -3,8 +3,11 @@ include README.md
 include THIRD_PARTY_NOTICES.md
 include bootstrap.ps1
 include config.example.toml
+include install.bat
 include start_gui.bat
 include start_test_scenes.bat
+include update.bat
+include update.ps1
 recursive-include scripts *.py
 recursive-include docs *.md
 recursive-include tests *.py

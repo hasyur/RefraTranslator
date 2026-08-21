@@ -20,13 +20,9 @@ RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具
 - 64 位 Python 3.11、3.12 或 3.13，并可在终端运行 `python`；
 - 一个提供 `/v1/models` 和 `/v1/chat/completions` 的 OpenAI-compatible 翻译服务。
 
-下载或克隆源码。请解压到较短的目录（例如 `C:\RefraTranslator`），不要让 GitHub ZIP 的长目录名重复嵌套；Paddle 在 Windows 下包含很深的文件路径。然后在项目根目录打开 PowerShell 并运行：
+下载或克隆源码，并放到较短的目录（例如 `C:\RefraTranslator`）；不要让 GitHub ZIP 的长目录名重复嵌套，Paddle 在 Windows 下包含很深的文件路径。然后双击 `install.bat`。安装器会询问 OCR 使用 NVIDIA GPU（默认）还是 CPU。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
-```
-
-安装器会询问 OCR 使用 NVIDIA GPU（默认）还是 CPU。所有 Python 包都安装到项目内的 `.venv`，不会污染系统环境；首次使用 GPU OCR 会下载数 GB 的运行库。
+所有 Python 包都安装到项目内的 `.venv`，不会污染系统环境；首次使用 GPU OCR 会下载数 GB 的运行库。
 
 安装完成后：
 
@@ -37,6 +33,18 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
 5. 点击“启动实时翻译”。
 
 模板中的 `http://127.0.0.1:1234/v1` 只是示例地址，不代表程序自带服务。第一次运行 OCR 时还会将 PaddleOCR 模型下载到 `.cache\paddlex`。
+
+## 更新
+
+如果首次使用 `git clone` 获取源码，关闭 RefraTranslator 后双击 `update.bat` 即可增量更新 `main`。已有 `.venv`、OCR 模型、配置、Profile、日志和翻译缓存都会保留；只有 `pyproject.toml` 发生变化时才会更新 Python 环境。
+
+GitHub ZIP 不包含 Git 历史，因此无法使用增量更新。希望长期更新时，建议只进行一次 Git 克隆和安装，之后始终保留同一个目录：
+
+```powershell
+git clone https://github.com/hasyur/RefraTranslator.git C:\RefraTranslator
+```
+
+更新器发现非 `main` 分支、detached HEAD 或尚未提交的源码改动时会安全停止，不会覆盖本机数据。
 
 也可以显式选择安装类型：
 
