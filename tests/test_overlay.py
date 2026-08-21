@@ -156,7 +156,19 @@ def test_overlay_keeps_clean_background_when_capture_returns_dimmed() -> None:
     # overlay window from capture: the painted area can be dimmed without being
     # pure black, so a black-pixel threshold is insufficient.
     excluded_frame = np.full_like(clean_frame, (45, 54, 63))
-    overlay.set_scene(excluded_frame, (track,))
+    jittered_track = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (42, 31, 282, 91),
+        0,
+        2,
+        3,
+        True,
+        "覆盖译文",
+    )
+    overlay.set_scene(excluded_frame, (jittered_track,))
     target = QImage(320, 120, QImage.Format.Format_ARGB32)
     target.fill(Qt.GlobalColor.transparent)
     painter = QPainter(target)
@@ -191,9 +203,21 @@ def test_overlay_caches_latest_background_before_translation_appears() -> None:
         np.full((120, 320, 3), (100, 120, 140), dtype=np.uint8),
         (untranslated_track,),
     )
+    refreshed_untranslated_track = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (40, 30, 280, 90),
+        0,
+        2,
+        3,
+        True,
+        None,
+    )
     overlay.set_scene(
         np.full((120, 320, 3), (180, 160, 140), dtype=np.uint8),
-        (untranslated_track,),
+        (refreshed_untranslated_track,),
     )
     translated_track = TrackedText(
         "track",
@@ -202,8 +226,8 @@ def test_overlay_caches_latest_background_before_translation_appears() -> None:
         0.99,
         (40, 30, 280, 90),
         0,
-        1,
         2,
+        3,
         True,
         "覆盖译文",
     )
@@ -218,6 +242,118 @@ def test_overlay_caches_latest_background_before_translation_appears() -> None:
     painter.end()
 
     assert target.pixelColor(38, 28).getRgb() == (180, 160, 140, 255)
+    overlay.close()
+    app.processEvents()
+
+
+def test_untranslated_background_refreshes_only_after_a_new_ocr_observation(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 320, 120),
+        style=OverlayStyle(blur_radius=8, overlay_opacity=0.0),
+    )
+    calls: list[tuple[int, int, int, int]] = []
+    original = overlay._background_patch
+
+    def record_background_patch(bounds):
+        calls.append(bounds)
+        return original(bounds)
+
+    monkeypatch.setattr(overlay, "_background_patch", record_background_patch)
+    track = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (40, 30, 280, 90),
+        0,
+        1,
+        2,
+        True,
+        None,
+    )
+    first_frame = np.full((120, 320, 3), (100, 120, 140), dtype=np.uint8)
+    overlay.set_scene(first_frame, (track,))
+    overlay.set_scene(np.full_like(first_frame, 180), (track,))
+    assert len(calls) == 1
+
+    observed_again = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (40, 30, 280, 90),
+        0,
+        2,
+        3,
+        True,
+        None,
+    )
+    overlay.set_scene(np.full_like(first_frame, 180), (observed_again,))
+    assert len(calls) == 2
+    overlay.close()
+    app.processEvents()
+
+
+def test_overlay_refreshes_background_when_a_track_moves_to_new_coordinates() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 320, 120),
+        style=OverlayStyle(blur_radius=0, overlay_opacity=0.0),
+    )
+    untranslated = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (30, 30, 170, 90),
+        0,
+        1,
+        2,
+        True,
+        None,
+    )
+    red_frame = np.full((120, 320, 3), (200, 40, 30), dtype=np.uint8)
+    overlay.set_scene(red_frame, (untranslated,))
+    translated = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (30, 30, 170, 90),
+        0,
+        1,
+        2,
+        True,
+        "旧位置译文",
+    )
+    overlay.set_scene(red_frame, (translated,))
+
+    moved = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (140, 30, 280, 90),
+        0,
+        2,
+        3,
+        True,
+        "新位置译文",
+    )
+    blue_frame = np.full((120, 320, 3), (30, 50, 210), dtype=np.uint8)
+    overlay.set_scene(blue_frame, (moved,))
+
+    cached = overlay._background_pixmaps[("track", 1)]
+    assert cached.source_bounds == (136, 26, 284, 94)
+    target = QImage(320, 120, QImage.Format.Format_ARGB32)
+    target.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(target)
+    overlay.render(painter, QPoint())
+    painter.end()
+    assert target.pixelColor(138, 28).getRgb() == (30, 50, 210, 255)
     overlay.close()
     app.processEvents()
 

@@ -34,6 +34,13 @@ class OverlayStyle:
             raise ValueError("overlay_opacity 必须在 0 到 1 之间")
 
 
+@dataclass(frozen=True, slots=True)
+class _CachedBackground:
+    source_bounds: tuple[int, int, int, int]
+    track_last_seen: float
+    pixmap: object
+
+
 def _load_qt():
     try:
         from PySide6.QtCore import QPoint, QRect, Qt
@@ -123,7 +130,7 @@ class TranslationOverlay(QWidget):
         self._debug_border = debug_border
         self._tracks: tuple[TrackedText, ...] = ()
         self._frame: np.ndarray | None = None
-        self._background_pixmaps: dict[tuple[str, int], object] = {}
+        self._background_pixmaps: dict[tuple[str, int], _CachedBackground] = {}
         self._font_family = self._install_font(style.font_path)
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt callback name
@@ -155,32 +162,67 @@ class TranslationOverlay(QWidget):
         # surface, none of which can be distinguished safely by color alone.
         for track in visible_tracks:
             key = self._background_key(track)
-            if track.display_translation and key in self._background_pixmaps:
-                continue
             source_bounds = self._source_bounds(track.bounds)
-            if any(
-                self._bounds_overlap(
+            cached = self._background_pixmaps.get(key)
+            cached_bounds_reusable = (
+                cached is not None
+                and self._background_bounds_reusable(
+                    cached.source_bounds,
+                    source_bounds,
+                )
+            )
+            if (
+                cached_bounds_reusable
+                and (
+                    track.display_translation
+                    or cached.track_last_seen == track.last_seen
+                )
+            ):
+                continue
+            if cached is not None and not cached_bounds_reusable:
+                self._background_pixmaps.pop(key, None)
+
+            overlapping_previous = tuple(
+                previous
+                for previous in previous_tracks
+                if self._bounds_overlap(
                     source_bounds,
                     self._source_bounds(previous.bounds),
                 )
-                for previous in previous_tracks
-            ):
-                if key not in self._background_pixmaps:
-                    prior = next(
-                        (
-                            pixmap
-                            for (track_id, _), pixmap in previous_backgrounds.items()
-                            if track_id == track.track_id
-                        ),
-                        None,
-                    )
-                    if prior is not None:
-                        self._background_pixmaps[key] = prior
-                continue
+            )
+            if overlapping_previous:
+                prior = next(
+                    (
+                        background
+                        for (track_id, _), background in previous_backgrounds.items()
+                        if track_id == track.track_id
+                        and self._background_bounds_reusable(
+                            background.source_bounds,
+                            source_bounds,
+                        )
+                    ),
+                    None,
+                )
+                if prior is not None:
+                    self._background_pixmaps[key] = prior
+                    continue
+                # A genuinely moved track must not stretch its old color patch
+                # over the new coordinates. Prefer a fresh aligned sample even
+                # though capture exclusion can make that sample imperfect.
+                if not any(
+                    previous.track_id == track.track_id
+                    for previous in overlapping_previous
+                ):
+                    continue
+
             patch = self._background_patch(source_bounds)
             if patch is None:
                 continue
-            self._background_pixmaps[key] = self._pixmap_from_patch(patch)
+            self._background_pixmaps[key] = _CachedBackground(
+                source_bounds,
+                track.last_seen,
+                self._pixmap_from_patch(patch),
+            )
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt callback name
@@ -227,11 +269,11 @@ class TranslationOverlay(QWidget):
 
     def _paint_track_background(self, painter, track, rect) -> None:
         key = self._background_key(track)
-        pixmap = self._background_pixmaps.get(key)
-        if pixmap is not None:
+        background = self._background_pixmaps.get(key)
+        if background is not None:
             painter.save()
             painter.setClipRect(rect)
-            painter.drawPixmap(rect, pixmap)
+            painter.drawPixmap(rect, background.pixmap)
             painter.restore()
 
     @staticmethod
@@ -256,6 +298,24 @@ class TranslationOverlay(QWidget):
             or second[2] <= first[0]
             or first[3] <= second[1]
             or second[3] <= first[1]
+        )
+
+    @staticmethod
+    def _background_bounds_reusable(first, second) -> bool:
+        first_width = max(1, first[2] - first[0])
+        first_height = max(1, first[3] - first[1])
+        second_width = max(1, second[2] - second[0])
+        second_height = max(1, second[3] - second[1])
+        short_side = min(
+            first_width,
+            first_height,
+            second_width,
+            second_height,
+        )
+        tolerance = max(2, min(6, round(short_side * 0.1)))
+        return all(
+            abs(first_edge - second_edge) <= tolerance
+            for first_edge, second_edge in zip(first, second, strict=True)
         )
 
     @staticmethod

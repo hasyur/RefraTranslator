@@ -106,6 +106,9 @@ class OcrConfig:
 
 @dataclass(frozen=True, slots=True)
 class PreviewConfig:
+    # A positive value is the minimum radius. Rendering raises it adaptively
+    # to 8-18 pixels from the OCR-region height so existing configs also hide
+    # source glyphs strongly enough after switching to direct frame blur.
     blur_radius: float = 8.0
     # 0 means blur only. The launcher exposes 0 and the historical 0.55 dark
     # layer as two named modes instead of asking users to tune this number.

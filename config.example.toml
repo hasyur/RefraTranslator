@@ -34,8 +34,9 @@ translate_latin = true
 translate_han_only = false
 
 [preview]
+# 正数是最低模糊半径；程序还会按文字框高度自动提高到 8～18px。
 blur_radius = 8.0
-# 0.55 为“黑化模糊”；0.0 为使用周边背景估算的“仅模糊”。
+# 0.55 为“黑化模糊”；0.0 为不叠黑的“仅模糊”。
 overlay_opacity = 0.55
 font_path = ""
 
