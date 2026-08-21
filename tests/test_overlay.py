@@ -97,6 +97,36 @@ def test_overlay_renders_retained_translation_while_replacement_is_pending() -> 
     app.processEvents()
 
 
+def test_live_overlay_caches_sampled_blur_pixmap() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 320, 120),
+        style=OverlayStyle(blur_radius=8),
+    )
+    frame = np.full((120, 320, 3), (30, 40, 50), dtype=np.uint8)
+    track = TrackedText(
+        "track",
+        1,
+        "原文",
+        0.99,
+        (40, 30, 280, 90),
+        0,
+        1,
+        2,
+        True,
+        "覆盖译文",
+    )
+
+    overlay.set_scene(frame, (track,))
+
+    cached = overlay._background_pixmaps[("track", 1)]
+    assert cached.source_bounds == (36, 26, 284, 94)
+    assert cached.pixmap.width() == 42
+    assert cached.pixmap.height() == 12
+    overlay.close()
+    app.processEvents()
+
+
 def test_overlay_can_darken_the_blurred_game_frame() -> None:
     app = QApplication.instance() or QApplication([])
     overlay = TranslationOverlay(

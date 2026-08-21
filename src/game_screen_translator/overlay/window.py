@@ -20,6 +20,11 @@ WS_EX_TRANSPARENT = 0x00000020
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_NOACTIVATE = 0x08000000
 
+# Sampling every sixth source pixel reduces live Gaussian-blur work to about
+# 1/36 of the original pixel count. QPainter scales the cached patch smoothly
+# over the native OCR bounds during composition.
+_LIVE_BLUR_SAMPLE_STEP = 6
+
 
 @dataclass(frozen=True, slots=True)
 class OverlayStyle:
@@ -379,6 +384,9 @@ class TranslationOverlay(QWidget):
             source_bounds,
             blur_radius=self._style.blur_radius,
             overlay_opacity=self._style.overlay_opacity,
+            sample_step=(
+                _LIVE_BLUR_SAMPLE_STEP if self._style.blur_radius > 0 else 1
+            ),
         )
         return None if rendered is None else rendered[1]
 
