@@ -86,6 +86,8 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.idle_rescan_spin.value() == 2000
     assert window.ocr_cooldown_spin.value() == 0
     assert window.clear_after_spin.value() == 900
+    assert window.clear_after_spin.minimum() == 50
+    assert window.clear_after_spin.maximum() == 1000
     assert window.change_poll_spin.value() == 6
     assert window.roi_settle_spin.value() == 180
     assert window.roi_ocr_interval_spin.value() == 333
@@ -172,7 +174,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     window.settle_rescan_spin.setValue(800)
     window.idle_rescan_spin.setValue(4000)
     window.ocr_cooldown_spin.setValue(100)
-    window.clear_after_spin.setValue(1300)
+    window.clear_after_spin.setValue(950)
     window.change_poll_spin.setValue(8)
     window.roi_settle_spin.setValue(240)
     window.roi_ocr_interval_spin.setValue(250)
@@ -206,7 +208,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.live.settle_rescan_ms == 800
     assert saved.live.idle_rescan_ms == 4000
     assert saved.live.ocr_cooldown_ms == 100
-    assert saved.live.clear_after_ms == 1300
+    assert saved.live.clear_after_ms == 950
     assert saved.live.dynamic_roi_enabled is True
     assert saved.live.change_poll_fps == 8
     assert saved.live.dynamic_roi_settle_ms == 240
@@ -380,18 +382,18 @@ def test_launcher_saves_and_restores_live_ocr_timings(tmp_path: Path) -> None:
     window.settle_rescan_spin.setValue(750)
     window.idle_rescan_spin.setValue(3500)
     window.ocr_cooldown_spin.setValue(125)
-    window.clear_after_spin.setValue(1250)
+    window.clear_after_spin.setValue(750)
 
     assert window._save_translation_settings(announce=False)
     saved = load_config(config_path)
     assert saved.live.settle_rescan_ms == 750
     assert saved.live.idle_rescan_ms == 3500
     assert saved.live.ocr_cooldown_ms == 125
-    assert saved.live.clear_after_ms == 1250
+    assert saved.live.clear_after_ms == 750
     assert "补扫 750 ms" in window.service_status_label.text()
     assert "兜底 3500 ms" in window.service_status_label.text()
     assert "冷却 125 ms" in window.service_status_label.text()
-    assert "消失宽限 1250 ms" in window.service_status_label.text()
+    assert "消失宽限 750 ms" in window.service_status_label.text()
     window.close()
     app.processEvents()
 
@@ -399,7 +401,7 @@ def test_launcher_saves_and_restores_live_ocr_timings(tmp_path: Path) -> None:
     assert restored.settle_rescan_spin.value() == 750
     assert restored.idle_rescan_spin.value() == 3500
     assert restored.ocr_cooldown_spin.value() == 125
-    assert restored.clear_after_spin.value() == 1250
+    assert restored.clear_after_spin.value() == 750
     restored.close()
     app.processEvents()
 

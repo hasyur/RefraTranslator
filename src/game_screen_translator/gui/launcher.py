@@ -590,16 +590,15 @@ class LauncherWindow(QMainWindow):
         service_form.addRow("变化检测频率", self.change_poll_spin)
 
         self.clear_after_spin = QSpinBox()
-        self.clear_after_spin.setRange(0, 60_000)
+        self.clear_after_spin.setRange(50, 1_000)
         self.clear_after_spin.setValue(self._config.live.clear_after_ms)
         self.clear_after_spin.setSingleStep(50)
         self.clear_after_spin.setAccelerated(True)
         self.clear_after_spin.setSuffix(" ms")
-        self.clear_after_spin.setSpecialValueText("立即清除")
         self.clear_after_spin.setToolTip(
             "某轮有效 OCR 没有找到已显示的文字时，继续保留译文的时间；"
             "期间重新识别到同一文字便取消清除。增大可抵抗偶发漏识别和"
-            "ROI 边缘波动，但真实字幕消失后也会多停留一段时间；0 表示立即清除。"
+            "ROI 边缘波动，但真实字幕消失后也会多停留一段时间。"
         )
         service_form.addRow("译文消失宽限", self.clear_after_spin)
 

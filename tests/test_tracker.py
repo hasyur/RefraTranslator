@@ -45,6 +45,18 @@ def test_layout_line_breaks_reach_the_translation_source() -> None:
     assert update.stable_sources[0].text == "この世界に\n希望はある"
 
 
+def test_clear_drops_visible_state_without_reusing_track_ids() -> None:
+    tracker = StableTextTracker("zone", stable_observations=1)
+    old = tracker.observe((_ocr("古い"),), now=1.0).stable_sources[0]
+
+    assert tracker.clear() == (old.track_id,)
+    assert tracker.visible_tracks == ()
+    assert not tracker.has_pending_revisions
+
+    new = tracker.observe((_ocr("新しい"),), now=2.0).stable_sources[0]
+    assert new.track_id != old.track_id
+
+
 def test_changed_text_reuses_track_but_increments_revision() -> None:
     tracker = StableTextTracker(
         "zone",

@@ -123,6 +123,13 @@ class StableTextTracker:
     def has_pending_revisions(self) -> bool:
         return bool(self._revision_candidates)
 
+    def clear(self) -> tuple[str, ...]:
+        """Drop visible state while keeping track ids unique for this session."""
+        removed = tuple(self._tracks)
+        self._tracks.clear()
+        self._revision_candidates.clear()
+        return removed
+
     def observe(self, observations: Iterable[OcrText], now: float) -> TrackerUpdate:
         return self._observe_replacing(
             observations,

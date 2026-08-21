@@ -9,7 +9,7 @@ from collections import Counter, deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 import numpy as np
 
@@ -107,6 +107,17 @@ def _bounds_distance_squared(first: Bounds | None, second: Bounds) -> float:
     return (first_x - second_x) ** 2 + (first_y - second_y) ** 2
 
 
+def _create_roi_scheduler(config: AppConfig) -> LatestFrameRoiScheduler | None:
+    if not config.live.dynamic_roi_enabled:
+        return None
+    return LatestFrameRoiScheduler(
+        FullScreenRoiDetector(),
+        min_ocr_interval_s=config.live.dynamic_roi_ocr_interval_ms / 1000,
+        settle_interval_s=config.live.dynamic_roi_settle_ms / 1000,
+        max_coalesce_s=config.live.dynamic_roi_max_coalesce_ms / 1000,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _OcrTaskResult:
     observations: tuple[OcrText, ...]
@@ -134,6 +145,7 @@ class _TranslationSubmission:
     pipeline_started_at: float
     first_recognized_at: float
     source_bounds: tuple[Bounds | None, ...]
+    session_epoch: int
     attempt: int = 1
 
 
@@ -186,8 +198,14 @@ def prefer_game_process_priority() -> bool:
 
 
 class LiveControlWindow(QWidget):
-    def __init__(self, stop_callback) -> None:
+    def __init__(
+        self,
+        stop_callback: Callable[[], None],
+        pause_callback: Callable[[bool], None] | None = None,
+    ) -> None:
         super().__init__(None, Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self._pause_callback = pause_callback
+        self._paused = False
         self.setWindowTitle(PRODUCT_NAME)
         self.setFixedWidth(520)
         self._status = QLabel("正在初始化……")
@@ -220,6 +238,9 @@ class LiveControlWindow(QWidget):
         self._restore_button.setToolTip("恢复显示运行状态、过滤和延迟信息")
         self._restore_button.clicked.connect(self.restore)
         self._restore_button.hide()
+        self._pause_button = QPushButton("暂停翻译")
+        self._pause_button.setToolTip("暂停 OCR 和新翻译请求，并隐藏当前译文")
+        self._pause_button.clicked.connect(self._toggle_pause)
         self._stop_button = QPushButton("关闭翻译")
         self._stop_button.clicked.connect(stop_callback)
         self._diagnostic_widgets = (
@@ -236,6 +257,7 @@ class LiveControlWindow(QWidget):
         actions.addStretch(1)
         actions.addWidget(self._shrink_button)
         actions.addWidget(self._restore_button)
+        actions.addWidget(self._pause_button)
         actions.addWidget(self._stop_button)
         self._layout.addLayout(actions)
 
@@ -257,8 +279,26 @@ class LiveControlWindow(QWidget):
     def set_cost_status(self, summary: str) -> None:
         self._cost.setText(summary)
 
+    def set_pause_callback(self, callback: Callable[[bool], None]) -> None:
+        self._pause_callback = callback
+
+    def set_paused(self, paused: bool) -> None:
+        self._paused = paused
+        self._pause_button.setText("恢复翻译" if paused else "暂停翻译")
+        self._pause_button.setToolTip(
+            "从当前画面重新识别并恢复翻译"
+            if paused
+            else "暂停 OCR 和新翻译请求，并隐藏当前译文"
+        )
+
+    def _toggle_pause(self) -> None:
+        paused = not self._paused
+        self.set_paused(paused)
+        if self._pause_callback is not None:
+            self._pause_callback(paused)
+
     def collapse(self) -> None:
-        """Compact the control window while keeping restore and stop actions."""
+        """Compact the control window while keeping runtime actions visible."""
         if self._shrink_button.isHidden():
             return
         right = self.geometry().right()
@@ -315,20 +355,7 @@ class LiveController:
         self._profile = profile
         self._debug = debug
         self._detector = FrameChangeDetector(config.live.change_threshold)
-        self._roi_scheduler = (
-            LatestFrameRoiScheduler(
-                FullScreenRoiDetector(),
-                min_ocr_interval_s=(
-                    config.live.dynamic_roi_ocr_interval_ms / 1000
-                ),
-                settle_interval_s=config.live.dynamic_roi_settle_ms / 1000,
-                max_coalesce_s=(
-                    config.live.dynamic_roi_max_coalesce_ms / 1000
-                ),
-            )
-            if config.live.dynamic_roi_enabled
-            else None
-        )
+        self._roi_scheduler = _create_roi_scheduler(config)
         self._roi_planner = (
             ContextualRoiPlanner() if self._roi_scheduler is not None else None
         )
@@ -352,6 +379,7 @@ class LiveController:
             thread_name_prefix="translation",
         )
         self._ocr_future: Future[_OcrTaskResult] | None = None
+        self._active_ocr_epoch: int | None = None
         self._active_ocr_frame: np.ndarray | None = None
         self._active_roi_job: ScheduledRoiScan | None = None
         self._active_roi_plan: ContextualRoiPlan | None = None
@@ -387,6 +415,10 @@ class LiveController:
         self._next_ocr_allowed = 0.0
         self._settle_rescan_due: float | None = None
         self._settle_rescan_triggered_at: float | None = None
+        self._session_epoch = 0
+        self._paused = False
+        self._force_full_scan = False
+        self._running_detail = ""
         self._shutting_down = False
         self._translated_count = 0
         self._manual_hit_count = 0
@@ -450,8 +482,7 @@ class LiveController:
             else f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
             f"静态复查 {self._config.live.idle_rescan_ms / 1000:g} 秒"
         )
-        self._control.set_status(
-            "实时翻译运行中",
+        self._running_detail = (
             f"捕获：{self._capture.active_backend} {region} · "
             f"{scheduling} · "
             f"LLM 并发 {self._config.translation.max_concurrency} · "
@@ -459,9 +490,71 @@ class LiveController:
             f"{'开' if self._config.ocr.text_filter_enabled else '关'} / 最长边 "
             f"{self._config.ocr.detection_max_side} / 合并"
             f"{'开' if self._config.ocr.text_merge_enabled else '关'} · "
-            f"{profile_label}{region_hint}",
+            f"{profile_label}{region_hint}"
         )
+        self._control.set_status("实时翻译运行中", self._running_detail)
+        set_paused = getattr(self._control, "set_paused", None)
+        if callable(set_paused):
+            set_paused(False)
         self._timer.start()
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    def set_paused(self, paused: bool) -> None:
+        if self._shutting_down or paused == self._paused:
+            return
+        self._paused = paused
+        set_control_paused = getattr(self._control, "set_paused", None)
+        if callable(set_control_paused):
+            set_control_paused(paused)
+        if paused:
+            self._pause_pipeline()
+        else:
+            self._resume_pipeline()
+
+    def _pause_pipeline(self) -> None:
+        self._session_epoch += 1
+        self._tracker.clear()
+        self._pending_ocr_frame = None
+        self._pending_ocr_triggered_at = None
+        self._settle_rescan_due = None
+        self._settle_rescan_triggered_at = None
+        self._pending_translations.clear()
+        self._translation_retries.clear()
+        self._completed_translations.clear()
+        self._early_context.clear()
+        self._translation_exhausted_keys.clear()
+        self._source_latency_origins.clear()
+        for future in self._translation_futures:
+            future.cancel()
+        if self._ocr_future is not None:
+            self._ocr_future.cancel()
+        if self._latest_frame is not None:
+            self._overlay.set_scene(self._latest_frame, ())
+        self._control.set_status(
+            "实时翻译已暂停",
+            "已停止提交 OCR 和新翻译请求；点击“恢复翻译”后从当前画面重新识别。",
+        )
+
+    def _resume_pipeline(self) -> None:
+        self._detector = FrameChangeDetector(self._config.live.change_threshold)
+        self._roi_scheduler = _create_roi_scheduler(self._config)
+        self._roi_planner = (
+            ContextualRoiPlanner() if self._roi_scheduler is not None else None
+        )
+        self._pending_ocr_frame = None
+        self._pending_ocr_triggered_at = None
+        self._last_ocr_completed = 0.0
+        self._next_ocr_allowed = 0.0
+        self._settle_rescan_due = None
+        self._settle_rescan_triggered_at = None
+        self._force_full_scan = True
+        self._control.set_status(
+            "实时翻译运行中",
+            self._running_detail or "已恢复，正在从当前画面重新识别。",
+        )
 
     def close(self) -> None:
         if self._shutting_down:
@@ -522,6 +615,9 @@ class LiveController:
         if self._shutting_down:
             return
         self._collect_ocr()
+        if self._paused:
+            self._collect_translations()
+            return
         self._expire_missing_tracks(time.monotonic())
         self._collect_translations()
         self._queue_untranslated_visible_sources()
@@ -537,6 +633,12 @@ class LiveController:
 
         self._latest_frame = frame
         now = time.monotonic()
+        if self._force_full_scan:
+            if self._ocr_future is None:
+                self._force_full_scan = False
+                self._submit_ocr(frame, triggered_at=now)
+            self._overlay.set_scene(frame, self._tracker.visible_tracks)
+            return
         if self._roi_scheduler is not None:
             self._tick_dynamic_roi(frame, now)
         else:
@@ -614,6 +716,7 @@ class LiveController:
     ) -> None:
         trigger = time.monotonic() if triggered_at is None else triggered_at
         self._active_ocr_frame = frame
+        self._active_ocr_epoch = self._session_epoch
         self._active_roi_job = None
         self._active_roi_plan = None
         self._active_roi_anchors = ()
@@ -651,6 +754,7 @@ class LiveController:
             else planned_rois
         )
         self._active_ocr_frame = job.frame
+        self._active_ocr_epoch = self._session_epoch
         self._active_roi_job = job
         self._active_roi_plan = plan
         self._active_roi_anchors = anchors
@@ -707,16 +811,26 @@ class LiveController:
         if future is None or not future.done():
             return
         active_frame = self._active_ocr_frame
+        active_epoch = self._active_ocr_epoch
         roi_job = self._active_roi_job
         roi_plan = self._active_roi_plan
         roi_anchors = self._active_roi_anchors
         ocr_cost = self._active_ocr_cost
         self._ocr_future = None
         self._active_ocr_frame = None
+        self._active_ocr_epoch = None
         self._active_roi_job = None
         self._active_roi_plan = None
         self._active_roi_anchors = ()
         self._active_ocr_cost = None
+        if active_epoch != self._session_epoch:
+            try:
+                future.result()
+            except Exception:
+                pass
+            if self._debug:
+                print("暂停期间完成的 OCR 已丢弃")
+            return
         now = time.monotonic()
         self._next_ocr_allowed = (
             now + self._config.live.ocr_cooldown_ms / 1000
@@ -994,6 +1108,7 @@ class LiveController:
                     pipeline_started_at,
                     first_recognized_at,
                     source_bounds,
+                    self._session_epoch,
                     1,
                 )
             )
@@ -1203,9 +1318,12 @@ class LiveController:
             if not future.done():
                 continue
             submission = self._translation_futures.pop(future)
+            stale_session = submission.session_epoch != self._session_epoch
             try:
                 worker_result = future.result()
             except Exception as exc:
+                if stale_session:
+                    continue
                 retry_scheduled = self._handle_translation_failure(submission, exc)
                 if retry_scheduled:
                     if isinstance(exc, TranslationProtocolError):
@@ -1219,6 +1337,10 @@ class LiveController:
                     error_label = "翻译错误"
                 self._control.set_status(status, str(exc))
                 print(f"{error_label}：{exc}", file=sys.stderr)
+                continue
+            if stale_session:
+                if self._debug:
+                    print("暂停期间完成的翻译已丢弃")
                 continue
 
             cached_outcome = worker_result.cached_outcome
@@ -1548,6 +1670,7 @@ class LiveController:
                     retry.pipeline_started_at,
                     retry.first_recognized_at,
                     source_bounds,
+                    self._session_epoch,
                     retry.attempt,
                 )
             )
@@ -1793,6 +1916,7 @@ def run_live(
         profile=profile,
         debug=debug_border,
     )
+    control.set_pause_callback(controller.set_paused)
     app.aboutToQuit.connect(controller.close)
     _live_message("showing overlay and control windows")
     overlay.show()

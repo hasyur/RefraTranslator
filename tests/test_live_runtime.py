@@ -1,5 +1,6 @@
 import os
 import threading
+from concurrent.futures import Future
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -124,9 +125,11 @@ class ColorBlockOcr:
 class FakeOverlay:
     def __init__(self) -> None:
         self.scenes = 0
+        self.last_tracks = ()
 
     def set_scene(self, frame, tracks) -> None:
         self.scenes += 1
+        self.last_tracks = tuple(tracks)
 
 
 class FakeControl:
@@ -136,6 +139,7 @@ class FakeControl:
         self.latency = ""
         self.filter_status = ""
         self.cost_status = ""
+        self.paused = False
 
     def set_status(self, status, detail="") -> None:
         self.status = status
@@ -149,6 +153,9 @@ class FakeControl:
 
     def set_cost_status(self, summary) -> None:
         self.cost_status = summary
+
+    def set_paused(self, paused) -> None:
+        self.paused = paused
 
 
 def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
@@ -669,6 +676,118 @@ def test_legacy_runtime_confirms_changed_visible_text_without_idle_timers(
     assert confirmed.revision == old.revision + 1
     assert confirmed.translated_text is None
     assert confirmed.display_translation == "旧译文"
+    controller.close()
+
+
+def test_pause_clears_overlay_and_resume_discards_stale_ocr(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=1,
+            dynamic_roi_enabled=True,
+        ),
+    )
+    capture = FakeCapture()
+    overlay = FakeOverlay()
+    control = FakeControl()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=FakeOcr(),
+        overlay=overlay,
+        control=control,
+        app=app,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    controller._tick()
+    old_track = controller._tracker.visible_tracks[0]
+    controller._tracker.apply_translations(
+        (TranslationResult(old_track.source("live-zone-1"), "旧译文"),)
+    )
+
+    controller._submit_ocr(capture.latest_frame())
+    stale_future = controller._ocr_future
+    stale_future.result(timeout=2)
+
+    controller.set_paused(True)
+    assert controller.paused
+    assert control.paused
+    assert control.status == "实时翻译已暂停"
+    assert controller._tracker.visible_tracks == ()
+    assert overlay.last_tracks == ()
+
+    controller._tick()
+    assert controller._ocr_future is None
+    assert controller._tracker.visible_tracks == ()
+
+    controller.set_paused(False)
+    assert not controller.paused
+    assert not control.paused
+    controller._tick()
+    fresh_future = controller._ocr_future
+    assert fresh_future is not None
+    assert fresh_future is not stale_future
+    assert controller._tracker.visible_tracks == ()
+
+    fresh_future.result(timeout=2)
+    controller._tick()
+    assert len(controller._tracker.visible_tracks) == 1
+    assert controller._tracker.visible_tracks[0].track_id != old_track.track_id
+    assert controller._ocr_scan_count == 2
+    controller.close()
+
+
+def test_pause_discards_late_translation_failure_without_changing_status() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+    )
+    control = FakeControl()
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=control,
+        app=app,
+    )
+    source = SourceText("live-zone-1", "old-track", 1, "待って。")
+    submission = live_runtime._TranslationSubmission(
+        batch=TranslationBatch((source,)),
+        context=(),
+        order_group=0,
+        order_path=(0,),
+        queued_at=1.0,
+        pipeline_started_at=1.0,
+        first_recognized_at=1.0,
+        source_bounds=(None,),
+        session_epoch=0,
+    )
+    future = Future()
+    future.set_exception(RuntimeError("late failure"))
+    controller._translation_futures[future] = submission
+
+    controller.set_paused(True)
+    controller._collect_translations()
+
+    assert controller._translation_futures == {}
+    assert controller._translation_retry_count == 0
+    assert controller._translation_failure_count == 0
+    assert control.status == "实时翻译已暂停"
     controller.close()
 
 
