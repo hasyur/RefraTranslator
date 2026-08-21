@@ -111,11 +111,13 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
 def test_detection_quality_presets_use_display_long_side() -> None:
     resolve = launcher_module._detection_max_side_for_display
 
-    assert resolve(2560, 0.25) == 640
     assert resolve(2560, 0.375) == 960
     assert resolve(2560, 0.5) == 1280
+    assert resolve(2560, 0.75) == 1920
     assert resolve(1920, 0.375) == 736
     assert resolve(3840, 0.5) == 1920
+    assert resolve(3840, 0.75) == 2880
+    assert resolve(7680, 0.75) == 4096
 
 
 def test_pair_editor_ignores_fully_blank_row_but_rejects_half_row() -> None:
@@ -164,7 +166,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
 
     monkeypatch.setattr(launcher_module.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(window, "_selected_display_long_side", lambda: 2560)
-    window.detection_quality_slider.setValue(1)
+    window.detection_quality_slider.setValue(0)
     window._refresh_detection_quality_label()
     assert window.detection_quality_label.text() == "性能 37.5% · 960px"
 
@@ -371,6 +373,39 @@ def test_launcher_saves_and_restores_ocr_text_merge_switch(tmp_path: Path) -> No
     restored = LauncherWindow(config_path, probe_ocr_devices=False)
     assert not restored.ocr_merge_checkbox.isChecked()
     restored.close()
+    app.processEvents()
+
+
+def test_ocr_text_merge_requires_at_least_half_detection_quality(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(config_path, load_config(config_path), "game")
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+    monkeypatch.setattr(window, "_selected_display_long_side", lambda: 2560)
+
+    window.detection_quality_slider.setValue(1)
+    window.ocr_merge_checkbox.setChecked(True)
+    assert window.ocr_merge_checkbox.isEnabled()
+    assert window._ocr_candidate().text_merge_enabled is True
+
+    window.detection_quality_slider.setValue(0)
+    assert window.detection_quality_label.text() == "性能 37.5% · 960px"
+    assert not window.ocr_merge_checkbox.isEnabled()
+    assert not window.ocr_merge_checkbox.isChecked()
+    assert window._ocr_candidate().text_merge_enabled is False
+
+    window.detection_quality_slider.setValue(2)
+    assert window.detection_quality_label.text() == "超质量 75% · 1920px"
+    assert window.ocr_merge_checkbox.isEnabled()
+    assert not window.ocr_merge_checkbox.isChecked()
+    window.ocr_merge_checkbox.setChecked(True)
+    assert window._ocr_candidate().text_merge_enabled is True
+
+    window.close()
     app.processEvents()
 
 

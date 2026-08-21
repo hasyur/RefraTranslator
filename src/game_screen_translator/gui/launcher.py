@@ -53,13 +53,14 @@ def _startup_message(message: str) -> None:
 _BLUR_MODE_DARK = "dark_blur"
 _BLUR_MODE_ONLY = "blur_only"
 _DETECTION_QUALITY_PRESETS = (
-    ("超性能", 0.25),
     ("性能", 0.375),
     ("质量", 0.5),
+    ("超质量", 0.75),
 )
 _DETECTION_MIN_SIDE = 640
-_DETECTION_MAX_SIDE = 1920
+_DETECTION_MAX_SIDE = 4096
 _DETECTION_ALIGNMENT = 32
+_TEXT_MERGE_MIN_DETECTION_SCALE = 0.5
 
 
 def _detection_max_side_for_display(display_long_side: int, scale: float) -> int:
@@ -518,14 +519,14 @@ class LauncherWindow(QMainWindow):
         self.detection_quality_slider.setPageStep(1)
         self.detection_quality_slider.setTickInterval(1)
         self.detection_quality_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.detection_quality_slider.setValue(len(_DETECTION_QUALITY_PRESETS) - 1)
+        self.detection_quality_slider.setValue(1)
         self.detection_quality_slider.setToolTip(
-            "按所选显示器物理长边提供 25%、37.5%、50% 三档。"
+            "按所选显示器物理长边提供 37.5%、50%、75% 三档。"
             "GUI 只保存最终 detection_max_side，不跟踪游戏窗口分辨率。"
         )
         self.detection_quality_label = QLabel()
         self.detection_quality_slider.valueChanged.connect(
-            self._refresh_detection_quality_label
+            self._detection_quality_changed
         )
         detection_layout.addWidget(self.detection_quality_slider, 1)
         detection_layout.addWidget(self.detection_quality_label)
@@ -544,7 +545,7 @@ class LauncherWindow(QMainWindow):
         self.ocr_merge_checkbox.setToolTip(
             "开启后会在文字过滤和翻译前，将连续换行句子及日文竖排碎片"
             "整理成较完整的翻译块；关闭后保留 PaddleOCR 返回的原始文字框。"
-            "保存后从下一次实时翻译开始生效。"
+            "仅在 OCR 检测质量不低于 50% 时可用，保存后从下一次实时翻译开始生效。"
         )
         service_form.addRow("OCR 排版", self.ocr_merge_checkbox)
 
@@ -916,7 +917,10 @@ class LauncherWindow(QMainWindow):
             device=device,
             detection_max_side=self._selected_detection_max_side(),
             text_filter_enabled=self.ocr_filter_checkbox.isChecked(),
-            text_merge_enabled=self.ocr_merge_checkbox.isChecked(),
+            text_merge_enabled=(
+                self._text_merge_allowed()
+                and self.ocr_merge_checkbox.isChecked()
+            ),
         )
 
     def _selected_display_long_side(self) -> int:
@@ -934,12 +938,22 @@ class LauncherWindow(QMainWindow):
         return max(_DETECTION_MIN_SIDE, self._config.ocr.detection_max_side * 2)
 
     def _selected_detection_max_side(self) -> int:
-        _label, scale = _DETECTION_QUALITY_PRESETS[
-            self.detection_quality_slider.value()
-        ]
+        scale = self._selected_detection_quality_scale()
         return _detection_max_side_for_display(
             self._selected_display_long_side(),
             scale,
+        )
+
+    def _selected_detection_quality_scale(self) -> float:
+        _label, scale = _DETECTION_QUALITY_PRESETS[
+            self.detection_quality_slider.value()
+        ]
+        return scale
+
+    def _text_merge_allowed(self) -> bool:
+        return (
+            self._selected_detection_quality_scale()
+            >= _TEXT_MERGE_MIN_DETECTION_SCALE
         )
 
     def _detection_quality_summary(self) -> str:
@@ -953,6 +967,16 @@ class LauncherWindow(QMainWindow):
 
     def _refresh_detection_quality_label(self, *args) -> None:
         self.detection_quality_label.setText(self._detection_quality_summary())
+
+    def _detection_quality_changed(self, *args) -> None:
+        self._refresh_detection_quality_label()
+        self._sync_ocr_merge_availability()
+
+    def _sync_ocr_merge_availability(self) -> None:
+        allowed = self._text_merge_allowed()
+        if not allowed:
+            self.ocr_merge_checkbox.setChecked(False)
+        self.ocr_merge_checkbox.setEnabled(allowed)
 
     def _restore_detection_quality_from_config(self) -> None:
         configured = self._config.ocr.detection_max_side
@@ -971,7 +995,7 @@ class LauncherWindow(QMainWindow):
             ),
         )
         self.detection_quality_slider.setValue(position)
-        self._refresh_detection_quality_label()
+        self._detection_quality_changed()
 
     def _live_candidate(self):
         return replace(
