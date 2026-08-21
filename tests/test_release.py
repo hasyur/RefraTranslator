@@ -87,6 +87,18 @@ def test_bootstrap_gui_install_prompts_for_ocr_device_with_nvidia_default() -> N
     assert 'Write-Host "  [2] CPU"' in script
 
 
+def test_bootstrap_rejects_max_path_unsafe_ocr_install_location() -> None:
+    script = (PROJECT_ROOT / "bootstrap.ps1").read_text(encoding="ascii")
+
+    assert "function Assert-OcrInstallPathLength" in script
+    assert "predicated_tile_access_iterator_residual_last.h" in script
+    assert "if ($paddleDeepPath.Length -le 259)" in script
+    assert "if ($installCpuOcr -or $installGpuOcr)" in script
+    path_check_call = "Assert-OcrInstallPathLength -ProjectRoot $projectRoot"
+    venv_creation = "if (-not (Test-Path -LiteralPath $venvPython))"
+    assert script.index(path_check_call) < script.index(venv_creation)
+
+
 def test_bootstrap_removes_only_pip_cache_after_success_unless_kept() -> None:
     script = (PROJECT_ROOT / "bootstrap.ps1").read_text(encoding="ascii")
 

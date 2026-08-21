@@ -64,6 +64,39 @@ switch ($ocrInstallDevice) {
     default { Write-Host "OCR installation skipped" }
 }
 
+function Assert-OcrInstallPathLength {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectRoot
+    )
+
+    # Paddle 3.3 ships deeply nested C++ headers. On Windows installations that
+    # still use the traditional MAX_PATH limit, this exact file is the first
+    # known path that can fail while pip expands the wheel.
+    $paddleDeepPath = Join-Path $ProjectRoot (
+        ".venv\Lib\site-packages\paddle\include\paddle\phi\kernels\fusion\" +
+        "cutlass\memory_efficient_attention\iterators\" +
+        "predicated_tile_access_iterator_residual_last.h"
+    )
+    if ($paddleDeepPath.Length -le 259) {
+        return
+    }
+
+    $driveRoot = [System.IO.Path]::GetPathRoot($ProjectRoot)
+    $suggestedRoot = Join-Path $driveRoot "RefraTranslator"
+    throw (
+        "Project path is too long for a reliable PaddleOCR install on Windows. " +
+        "The deepest Paddle file would use $($paddleDeepPath.Length) characters " +
+        "(safe maximum: 259). Move or extract the project to a shorter path, " +
+        "for example '$suggestedRoot'. If an earlier attempt created .venv, " +
+        "remove only that partial folder after moving, then rerun bootstrap.ps1."
+    )
+}
+
+if ($installCpuOcr -or $installGpuOcr) {
+    Assert-OcrInstallPathLength -ProjectRoot $projectRoot
+}
+
 function Assert-SupportedPython {
     param(
         [Parameter(Mandatory = $true)]

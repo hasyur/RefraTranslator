@@ -20,7 +20,7 @@ RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具
 - 64 位 Python 3.11、3.12 或 3.13，并可在终端运行 `python`；
 - 一个提供 `/v1/models` 和 `/v1/chat/completions` 的 OpenAI-compatible 翻译服务。
 
-下载或克隆源码，在项目根目录打开 PowerShell，然后运行：
+下载或克隆源码。请解压到较短的目录（例如 `C:\RefraTranslator`），不要让 GitHub ZIP 的长目录名重复嵌套；Paddle 在 Windows 下包含很深的文件路径。然后在项目根目录打开 PowerShell 并运行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
