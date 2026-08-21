@@ -52,6 +52,24 @@ def _startup_message(message: str) -> None:
 
 _BLUR_MODE_DARK = "dark_blur"
 _BLUR_MODE_ONLY = "blur_only"
+_DETECTION_QUALITY_PRESETS = (
+    ("超性能", 0.25),
+    ("性能", 0.375),
+    ("质量", 0.5),
+)
+_DETECTION_MIN_SIDE = 640
+_DETECTION_MAX_SIDE = 1920
+_DETECTION_ALIGNMENT = 32
+
+
+def _detection_max_side_for_display(display_long_side: int, scale: float) -> int:
+    target = max(
+        _DETECTION_MIN_SIDE,
+        min(_DETECTION_MAX_SIDE, display_long_side * scale),
+    )
+    return int(
+        (target + _DETECTION_ALIGNMENT / 2) // _DETECTION_ALIGNMENT
+    ) * _DETECTION_ALIGNMENT
 
 
 def _log_tail(path: Path, *, max_characters: int = 4000) -> str:
@@ -83,6 +101,7 @@ try:
         QMainWindow,
         QMessageBox,
         QPushButton,
+        QSlider,
         QSpinBox,
         QTabWidget,
         QTableWidget,
@@ -375,6 +394,7 @@ class LauncherWindow(QMainWindow):
         self.setCentralWidget(central)
         self.statusBar().showMessage("正在读取游戏 Profile……")
         self.refresh_profiles()
+        self._restore_detection_quality_from_config()
         if probe_ocr_devices:
             self._start_ocr_device_probe()
         if self._preferences_warning:
@@ -485,6 +505,31 @@ class LauncherWindow(QMainWindow):
             "启动实时翻译时仍会再次隔离校验。"
         )
         service_form.addRow("OCR 设备", self.ocr_device_combo)
+
+        detection_widget = QWidget()
+        detection_layout = QHBoxLayout(detection_widget)
+        detection_layout.setContentsMargins(0, 0, 0, 0)
+        self.detection_quality_slider = QSlider(Qt.Orientation.Horizontal)
+        self.detection_quality_slider.setRange(
+            0,
+            len(_DETECTION_QUALITY_PRESETS) - 1,
+        )
+        self.detection_quality_slider.setSingleStep(1)
+        self.detection_quality_slider.setPageStep(1)
+        self.detection_quality_slider.setTickInterval(1)
+        self.detection_quality_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.detection_quality_slider.setValue(len(_DETECTION_QUALITY_PRESETS) - 1)
+        self.detection_quality_slider.setToolTip(
+            "按所选显示器物理长边提供 25%、37.5%、50% 三档。"
+            "GUI 只保存最终 detection_max_side，不跟踪游戏窗口分辨率。"
+        )
+        self.detection_quality_label = QLabel()
+        self.detection_quality_slider.valueChanged.connect(
+            self._refresh_detection_quality_label
+        )
+        detection_layout.addWidget(self.detection_quality_slider, 1)
+        detection_layout.addWidget(self.detection_quality_label)
+        service_form.addRow("OCR 检测质量", detection_widget)
 
         self.ocr_filter_checkbox = QCheckBox("启用文字过滤")
         self.ocr_filter_checkbox.setChecked(self._config.ocr.text_filter_enabled)
@@ -668,7 +713,11 @@ class LauncherWindow(QMainWindow):
                 f"· {screen.devicePixelRatio():g}x",
                 index,
             )
+        self.monitor_combo.currentIndexChanged.connect(
+            self._refresh_detection_quality_label
+        )
         form.addRow("显示器", self.monitor_combo)
+        self._refresh_detection_quality_label()
 
         region_widget = QWidget()
         region_layout = QHBoxLayout(region_widget)
@@ -852,9 +901,64 @@ class LauncherWindow(QMainWindow):
         return replace(
             self._config.ocr,
             device=device,
+            detection_max_side=self._selected_detection_max_side(),
             text_filter_enabled=self.ocr_filter_checkbox.isChecked(),
             text_merge_enabled=self.ocr_merge_checkbox.isChecked(),
         )
+
+    def _selected_display_long_side(self) -> int:
+        app = QApplication.instance()
+        screens = app.screens() if app is not None else []
+        monitor_index = self.monitor_combo.currentData()
+        if isinstance(monitor_index, int) and 0 <= monitor_index < len(screens):
+            screen = screens[monitor_index]
+            geometry = screen.geometry()
+            pixel_ratio = max(1.0, float(screen.devicePixelRatio()))
+            return max(
+                1,
+                round(max(geometry.width(), geometry.height()) * pixel_ratio),
+            )
+        return max(_DETECTION_MIN_SIDE, self._config.ocr.detection_max_side * 2)
+
+    def _selected_detection_max_side(self) -> int:
+        _label, scale = _DETECTION_QUALITY_PRESETS[
+            self.detection_quality_slider.value()
+        ]
+        return _detection_max_side_for_display(
+            self._selected_display_long_side(),
+            scale,
+        )
+
+    def _detection_quality_summary(self) -> str:
+        label, scale = _DETECTION_QUALITY_PRESETS[
+            self.detection_quality_slider.value()
+        ]
+        return (
+            f"{label} {scale * 100:g}% · "
+            f"{self._selected_detection_max_side()}px"
+        )
+
+    def _refresh_detection_quality_label(self, *args) -> None:
+        self.detection_quality_label.setText(self._detection_quality_summary())
+
+    def _restore_detection_quality_from_config(self) -> None:
+        configured = self._config.ocr.detection_max_side
+        long_side = self._selected_display_long_side()
+        position = min(
+            range(len(_DETECTION_QUALITY_PRESETS)),
+            key=lambda index: (
+                abs(
+                    _detection_max_side_for_display(
+                        long_side,
+                        _DETECTION_QUALITY_PRESETS[index][1],
+                    )
+                    - configured
+                ),
+                -index,
+            ),
+        )
+        self.detection_quality_slider.setValue(position)
+        self._refresh_detection_quality_label()
 
     def _live_candidate(self):
         return replace(
@@ -1013,6 +1117,7 @@ class LauncherWindow(QMainWindow):
                 model=translation.model,
                 ocr_device=ocr.device,
                 max_concurrency=translation.max_concurrency,
+                ocr_detection_max_side=ocr.detection_max_side,
                 ocr_text_filter_enabled=ocr.text_filter_enabled,
                 ocr_text_merge_enabled=ocr.text_merge_enabled,
                 preview_overlay_opacity=preview_overlay_opacity,

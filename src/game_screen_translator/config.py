@@ -259,7 +259,7 @@ _TRANSLATION_VALUE_RE = re.compile(
 )
 _OCR_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
-    r"device|text_filter_enabled|text_merge_enabled)[ \t]*="
+    r"device|detection_max_side|text_filter_enabled|text_merge_enabled)[ \t]*="
 )
 _PREVIEW_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>overlay_opacity)[ \t]*="
@@ -286,6 +286,7 @@ def save_translation_selection(
         model=model,
         max_concurrency=None,
         ocr_device=None,
+        ocr_detection_max_side=None,
         ocr_text_filter_enabled=None,
         ocr_text_merge_enabled=None,
         preview_overlay_opacity=None,
@@ -307,6 +308,7 @@ def save_runtime_selection(
     model: str,
     ocr_device: str,
     max_concurrency: int | None = None,
+    ocr_detection_max_side: int | None = None,
     ocr_text_filter_enabled: bool | None = None,
     ocr_text_merge_enabled: bool | None = None,
     preview_overlay_opacity: float | None = None,
@@ -326,6 +328,7 @@ def save_runtime_selection(
         model=model,
         max_concurrency=max_concurrency,
         ocr_device=ocr_device,
+        ocr_detection_max_side=ocr_detection_max_side,
         ocr_text_filter_enabled=ocr_text_filter_enabled,
         ocr_text_merge_enabled=ocr_text_merge_enabled,
         preview_overlay_opacity=preview_overlay_opacity,
@@ -347,6 +350,7 @@ def _save_selected_values(
     model: str,
     max_concurrency: int | None,
     ocr_device: str | None,
+    ocr_detection_max_side: int | None,
     ocr_text_filter_enabled: bool | None,
     ocr_text_merge_enabled: bool | None,
     preview_overlay_opacity: float | None,
@@ -374,6 +378,11 @@ def _save_selected_values(
     candidate_ocr = replace(
         current.ocr,
         device=current.ocr.device if ocr_device is None else ocr_device.strip(),
+        detection_max_side=(
+            current.ocr.detection_max_side
+            if ocr_detection_max_side is None
+            else ocr_detection_max_side
+        ),
         text_filter_enabled=(
             current.ocr.text_filter_enabled
             if ocr_text_filter_enabled is None
@@ -488,12 +497,18 @@ def _save_selected_values(
 
     if (
         ocr_device is not None
+        or ocr_detection_max_side is not None
         or ocr_text_filter_enabled is not None
         or ocr_text_merge_enabled is not None
     ):
         _upsert_ocr_values(
             lines,
             device=candidate_ocr.device if ocr_device is not None else None,
+            detection_max_side=(
+                candidate_ocr.detection_max_side
+                if ocr_detection_max_side is not None
+                else None
+            ),
             text_filter_enabled=(
                 candidate_ocr.text_filter_enabled
                 if ocr_text_filter_enabled is not None
@@ -604,6 +619,7 @@ def _upsert_ocr_values(
     lines: list[str],
     *,
     device: str | None,
+    detection_max_side: int | None,
     text_filter_enabled: bool | None,
     text_merge_enabled: bool | None,
 ) -> None:
@@ -612,6 +628,7 @@ def _upsert_ocr_values(
         key: value
         for key, value in (
             ("device", device),
+            ("detection_max_side", detection_max_side),
             ("text_filter_enabled", text_filter_enabled),
             ("text_merge_enabled", text_merge_enabled),
         )

@@ -258,6 +258,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         model="small-model",
         ocr_device="gpu:1",
         max_concurrency=7,
+        ocr_detection_max_side=960,
         ocr_text_filter_enabled=False,
         ocr_text_merge_enabled=False,
         preview_overlay_opacity=0.0,
@@ -275,6 +276,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.translation.model == "small-model"
     assert saved.translation.max_concurrency == 7
     assert saved.ocr.device == "gpu:1"
+    assert saved.ocr.detection_max_side == 960
     assert saved.ocr.text_filter_enabled is False
     assert saved.ocr.text_merge_enabled is False
     assert saved.preview.overlay_opacity == 0.0
@@ -290,6 +292,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     text = path.read_text(encoding="utf-8")
     assert "[ocr]" in text
     assert 'device = "gpu:1"' in text
+    assert "detection_max_side = 960" in text
     assert "text_filter_enabled = false" in text
     assert "text_merge_enabled = false" in text
     assert "overlay_opacity = 0.0" in text
@@ -310,6 +313,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         ocr_device="cpu",
     )
     assert saved.ocr.device == "cpu"
+    assert saved.ocr.detection_max_side == 960
     assert saved.ocr.text_filter_enabled is False
     assert saved.ocr.text_merge_enabled is False
     assert saved.preview.overlay_opacity == 0.0
@@ -322,6 +326,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.live.dynamic_roi_ocr_interval_ms == 250
     assert saved.live.dynamic_roi_max_coalesce_ms == 450
     assert path.read_text(encoding="utf-8").count("device =") == 1
+    assert path.read_text(encoding="utf-8").count("detection_max_side =") == 1
     assert path.read_text(encoding="utf-8").count("text_filter_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("text_merge_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("dynamic_roi_enabled =") == 1

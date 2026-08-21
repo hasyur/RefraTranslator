@@ -105,6 +105,16 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     app.processEvents()
 
 
+def test_detection_quality_presets_use_display_long_side() -> None:
+    resolve = launcher_module._detection_max_side_for_display
+
+    assert resolve(2560, 0.25) == 640
+    assert resolve(2560, 0.375) == 960
+    assert resolve(2560, 0.5) == 1280
+    assert resolve(1920, 0.375) == 736
+    assert resolve(3840, 0.5) == 1920
+
+
 def test_pair_editor_ignores_fully_blank_row_but_rejects_half_row() -> None:
     app = QApplication.instance() or QApplication([])
     editor = PairTableEditor(
@@ -150,6 +160,11 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
         return FakeProcess()
 
     monkeypatch.setattr(launcher_module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(window, "_selected_display_long_side", lambda: 2560)
+    window.detection_quality_slider.setValue(1)
+    window._refresh_detection_quality_label()
+    assert window.detection_quality_label.text() == "性能 37.5% · 960px"
+
     window.server_url_combo.setCurrentText("http://203.0.113.10:9000/v1")
     window.model_combo.setCurrentText("alternate-model")
     window.max_concurrency_spin.setValue(6)
@@ -185,6 +200,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.translation.model == "alternate-model"
     assert saved.translation.max_concurrency == 6
     assert saved.ocr.device == "cpu"
+    assert saved.ocr.detection_max_side == 960
     assert saved.live.settle_rescan_ms == 800
     assert saved.live.idle_rescan_ms == 4000
     assert saved.live.ocr_cooldown_ms == 100
