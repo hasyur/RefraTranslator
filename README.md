@@ -36,7 +36,7 @@ RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具
 
 ## 更新
 
-如果首次使用 `git clone` 获取源码，关闭 RefraTranslator 后双击 `update.bat` 即可增量更新 `main`。已有 `.venv`、OCR 模型、配置、Profile、日志和翻译缓存都会保留；只有 `pyproject.toml` 发生变化时才会更新 Python 环境。
+如果首次使用 `git clone` 获取源码，关闭 RefraTranslator 后双击 `update.bat` 即可从 `origin/main` 增量更新。已有 `.venv`、OCR 模型、配置、Profile、日志和翻译缓存都会保留；只有 `pyproject.toml` 发生变化时才会更新 Python 环境。旧版克隆如果仍使用本地 `master` 分支，更新器也会安全地将它快进到 `origin/main`。
 
 GitHub ZIP 不包含 Git 历史，因此无法使用增量更新。希望长期更新时，建议只进行一次 Git 克隆和安装，之后始终保留同一个目录：
 
@@ -44,7 +44,7 @@ GitHub ZIP 不包含 Git 历史，因此无法使用增量更新。希望长期�
 git clone https://github.com/hasyur/RefraTranslator.git C:\RefraTranslator
 ```
 
-更新器发现非 `main` 分支、detached HEAD 或尚未提交的源码改动时会安全停止，不会覆盖本机数据。
+更新器发现非 `main`/旧版 `master` 分支、detached HEAD 或尚未提交的源码改动时会安全停止，不会覆盖本机数据。
 
 也可以显式选择安装类型：
 

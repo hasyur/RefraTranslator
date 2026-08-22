@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
+
+import pytest
 
 from game_screen_translator.config import load_config
 
@@ -160,7 +165,10 @@ def test_update_script_uses_safe_incremental_main_update() -> None:
     script = (PROJECT_ROOT / "update.ps1").read_bytes()
     text = script.decode("ascii")
 
-    assert 'if ($currentBranch -ne "main")' in text
+    assert '$supportedBranches = @("main", "master")' in text
+    assert 'if ($currentBranch -notin $supportedBranches)' in text
+    assert 'if ($currentBranch -eq "master")' in text
+    assert "Legacy master branch detected" in text
     assert '"--porcelain"' in text
     assert '"--untracked-files=no"' in text
     assert '@("pull", "--ff-only", "origin", "main")' in text
@@ -170,3 +178,77 @@ def test_update_script_uses_safe_incremental_main_update() -> None:
     assert '$venvPython = Join-Path $projectRoot ".venv\\Scripts\\python.exe"' in text
     assert "if ($environmentMissing -or $dependencyChanged)" in text
     assert "GitHub ZIP downloads cannot be" in text
+
+
+@pytest.mark.skipif(os.name != "nt", reason="update.ps1 requires Windows PowerShell")
+def test_update_script_fast_forwards_a_clean_legacy_master_clone(
+    tmp_path: Path,
+) -> None:
+    git = shutil.which("git")
+    powershell = shutil.which("powershell.exe")
+    if git is None or powershell is None:
+        pytest.skip("Git and Windows PowerShell are required")
+
+    remote = tmp_path / "remote.git"
+    seed = tmp_path / "seed"
+    legacy = tmp_path / "legacy"
+
+    def run(*arguments: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            arguments,
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    run(git, "init", "--bare", str(remote))
+    run(git, "init", "--initial-branch=main", str(seed))
+    run(git, "config", "user.name", "RefraTranslator Test", cwd=seed)
+    run(git, "config", "user.email", "test@example.invalid", cwd=seed)
+    shutil.copy2(PROJECT_ROOT / "update.ps1", seed / "update.ps1")
+    (seed / "pyproject.toml").write_text("[project]\nname='fixture'\n", encoding="ascii")
+    (seed / "bootstrap.ps1").write_text(
+        'throw "bootstrap should not run"\n',
+        encoding="ascii",
+    )
+    run(git, "add", ".", cwd=seed)
+    run(git, "commit", "-m", "base", cwd=seed)
+    run(git, "remote", "add", "origin", str(remote), cwd=seed)
+    run(git, "push", "-u", "origin", "main", cwd=seed)
+
+    run(git, "clone", "--branch", "main", str(remote), str(legacy))
+    run(git, "branch", "-m", "master", cwd=legacy)
+    venv_python = legacy / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_bytes(b"")
+
+    (seed / "source.txt").write_text("new source\n", encoding="ascii")
+    run(git, "add", "source.txt", cwd=seed)
+    run(git, "commit", "-m", "remote update", cwd=seed)
+    run(git, "push", "origin", "main", cwd=seed)
+
+    completed = run(
+        powershell,
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(legacy / "update.ps1"),
+        cwd=legacy,
+    )
+
+    assert "Legacy master branch detected" in completed.stdout
+    assert "Updated source:" in completed.stdout
+    assert "keeping the existing .venv" in completed.stdout
+    assert run(git, "branch", "--show-current", cwd=legacy).stdout.strip() == "master"
+    assert run(git, "rev-parse", "HEAD", cwd=legacy).stdout == run(
+        git,
+        "rev-parse",
+        "HEAD",
+        cwd=seed,
+    ).stdout
+    assert (legacy / "source.txt").read_text(encoding="ascii") == "new source\n"
+    assert venv_python.is_file()

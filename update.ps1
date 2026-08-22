@@ -40,8 +40,15 @@ $currentBranch = (
 if ([string]::IsNullOrWhiteSpace($currentBranch)) {
     throw "The repository is in detached HEAD state. Switch to main before updating."
 }
-if ($currentBranch -ne "main") {
-    throw "update.bat only updates main; the current branch is '$currentBranch'."
+$supportedBranches = @("main", "master")
+if ($currentBranch -notin $supportedBranches) {
+    throw (
+        "update.bat updates origin/main only from main or the legacy master " +
+        "branch; the current branch is '$currentBranch'."
+    )
+}
+if ($currentBranch -eq "master") {
+    Write-Host "Legacy master branch detected; safely updating it from origin/main."
 }
 
 $trackedChanges = @(
