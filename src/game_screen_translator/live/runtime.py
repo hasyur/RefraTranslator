@@ -483,7 +483,8 @@ class LiveController:
             f"静态复查 {self._config.live.idle_rescan_ms / 1000:g} 秒"
         )
         self._running_detail = (
-            f"捕获：{self._capture.active_backend} {region} · "
+            f"捕获：{self._capture.active_backend} {region} @ "
+            f"{self._config.live.capture_fps} FPS · "
             f"{scheduling} · "
             f"LLM 并发 {self._config.translation.max_concurrency} · "
             f"OCR {ocr_runtime} / 过滤"
@@ -1849,6 +1850,7 @@ def run_live(
     _live_message(f"OCR ready: {ocr.runtime_description}")
     _live_message(
         f"starting capture: monitor={config.live.monitor_index} "
+        f"fps={config.live.capture_fps} "
         f"region={config.live.left},{config.live.top},"
         f"{config.live.width},{config.live.height}"
     )

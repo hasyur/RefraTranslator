@@ -51,7 +51,7 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.live.capture_backend == "dxgi"
     assert config.live.stable_observations == 1
     assert config.live.stable_ms == 0
-    assert config.live.capture_fps == 15
+    assert config.live.capture_fps == 12
     assert config.live.change_poll_fps == 6
     assert config.live.ocr_cooldown_ms == 0
     assert config.live.settle_rescan_ms == 500
@@ -233,6 +233,29 @@ capture_fps = 12
     assert "capture_fps = 12" in text
 
 
+def test_live_capture_fps_follows_change_poll_frequency(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    _write(
+        path,
+        "\n[live]\ncapture_fps=99\nchange_poll_fps=7\n",
+    )
+
+    config = load_config(path)
+
+    assert config.live.change_poll_fps == 7
+    assert config.live.capture_fps == 14
+
+
+def test_load_config_rejects_change_poll_frequency_above_derived_limit(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, "\n[live]\nchange_poll_fps=121\n")
+
+    with pytest.raises(ConfigError, match="change_poll_fps"):
+        load_config(path)
+
+
 def test_save_translation_selection_rejects_invalid_url_without_writing(
     tmp_path: Path,
 ) -> None:
@@ -281,7 +304,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.ocr.text_filter_enabled is False
     assert saved.ocr.text_merge_enabled is False
     assert saved.preview.overlay_opacity == 0.0
-    assert saved.live.capture_fps == 12
+    assert saved.live.capture_fps == 16
     assert saved.live.ocr_cooldown_ms == 125
     assert saved.live.settle_rescan_ms == 750
     assert saved.live.idle_rescan_ms == 3500
@@ -304,6 +327,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert "idle_rescan_ms = 3500" in text
     assert "clear_after_ms = 1350" in text
     assert "dynamic_roi_enabled = true" in text
+    assert "capture_fps = 16" in text
     assert "change_poll_fps = 8" in text
     assert "dynamic_roi_settle_ms = 240" in text
     assert "dynamic_roi_ocr_interval_ms = 250" in text
@@ -334,6 +358,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert path.read_text(encoding="utf-8").count("text_filter_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("text_merge_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("dynamic_roi_enabled =") == 1
+    assert path.read_text(encoding="utf-8").count("capture_fps =") == 1
     assert path.read_text(encoding="utf-8").count("change_poll_fps =") == 1
     assert path.read_text(encoding="utf-8").count("clear_after_ms =") == 1
     assert path.read_text(encoding="utf-8").count("dynamic_roi_settle_ms =") == 1

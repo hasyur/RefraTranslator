@@ -51,7 +51,7 @@ top = 0
 width = 0
 height = 0
 monitor_index = 0
-capture_fps = 15
+# 屏幕捕获频率自动为 change_poll_fps 的 2 倍（默认 12 FPS）。
 # 两条调度路径共用的轻量变化检测频率；动态 ROI 开启时即热图频率。
 change_poll_fps = 6
 change_threshold = 3.0

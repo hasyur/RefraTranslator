@@ -11,9 +11,11 @@ from pathlib import Path
 from game_screen_translator.branding import GUI_PROCESS_NAME, PRODUCT_NAME
 from game_screen_translator.config import (
     AppConfig,
+    CAPTURE_FPS_PER_CHANGE_POLL,
     ConfigError,
     DEFAULT_DARK_OVERLAY_OPACITY,
     LiveConfig,
+    MAX_CHANGE_POLL_FPS,
     load_config,
     save_runtime_selection,
 )
@@ -580,13 +582,14 @@ class LauncherWindow(QMainWindow):
         service_form.addRow("OCR 调度", self.dynamic_roi_checkbox)
 
         self.change_poll_spin = QSpinBox()
-        self.change_poll_spin.setRange(1, self._config.live.capture_fps)
+        self.change_poll_spin.setRange(1, MAX_CHANGE_POLL_FPS)
         self.change_poll_spin.setValue(self._config.live.change_poll_fps)
         self.change_poll_spin.setSuffix(" Hz")
         self.change_poll_spin.setToolTip(
             "每秒取最新帧执行轻量变化检测的次数。旧全帧路径用它检查"
             "是否需要 OCR，动态 ROI 路径用它运行低分辨率热图；提高后"
             "能更早发现短暂变化，但不会直接让 Paddle 以相同频率运行。"
+            f"屏幕捕获会自动使用它的 {CAPTURE_FPS_PER_CHANGE_POLL} 倍帧率。"
         )
         service_form.addRow("变化检测频率", self.change_poll_spin)
 
@@ -1037,14 +1040,16 @@ class LauncherWindow(QMainWindow):
     def _scheduling_summary(live: LiveConfig) -> str:
         if live.dynamic_roi_enabled:
             return (
-                f"动态 ROI 开 · 热图 {live.change_poll_fps} Hz · "
+                f"动态 ROI 开 · 捕获 {live.capture_fps} FPS · "
+                f"热图 {live.change_poll_fps} Hz · "
                 f"稳定 {live.dynamic_roi_settle_ms} ms · "
                 f"OCR 间隔 {live.dynamic_roi_ocr_interval_ms} ms · "
                 f"合并 {live.dynamic_roi_max_coalesce_ms} ms · "
                 f"消失宽限 {live.clear_after_ms} ms"
             )
         return (
-            f"动态 ROI 关 · 检测 {live.change_poll_fps} Hz · "
+            f"动态 ROI 关 · 捕获 {live.capture_fps} FPS · "
+            f"检测 {live.change_poll_fps} Hz · "
             f"补扫 {live.settle_rescan_ms} ms · "
             f"兜底 {live.idle_rescan_ms} ms · "
             f"冷却 {live.ocr_cooldown_ms} ms · "

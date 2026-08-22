@@ -89,6 +89,7 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.clear_after_spin.minimum() == 50
     assert window.clear_after_spin.maximum() == 1000
     assert window.change_poll_spin.value() == 6
+    assert window.change_poll_spin.maximum() == 120
     assert window.roi_settle_spin.value() == 180
     assert window.roi_ocr_interval_spin.value() == 333
     assert window.roi_max_coalesce_spin.value() == 333
@@ -213,6 +214,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.live.clear_after_ms == 950
     assert saved.live.dynamic_roi_enabled is True
     assert saved.live.change_poll_fps == 8
+    assert saved.live.capture_fps == 16
     assert saved.live.dynamic_roi_settle_ms == 240
     assert saved.live.dynamic_roi_ocr_interval_ms == 250
     assert saved.live.dynamic_roi_max_coalesce_ms == 450
@@ -518,10 +520,12 @@ def test_launcher_dynamic_roi_switches_visible_scheduling_controls(
     saved = load_config(config_path)
     assert saved.live.dynamic_roi_enabled is True
     assert saved.live.change_poll_fps == 10
+    assert saved.live.capture_fps == 20
     assert saved.live.dynamic_roi_settle_ms == 220
     assert saved.live.dynamic_roi_ocr_interval_ms == 200
     assert saved.live.dynamic_roi_max_coalesce_ms == 500
     assert "动态 ROI 开" in window.service_status_label.text()
+    assert "捕获 20 FPS" in window.service_status_label.text()
     assert "热图 10 Hz" in window.service_status_label.text()
 
     window.dynamic_roi_checkbox.setChecked(False)

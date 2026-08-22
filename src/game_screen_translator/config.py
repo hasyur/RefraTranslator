@@ -16,6 +16,9 @@ class ConfigError(ValueError):
 
 
 DEFAULT_DARK_OVERLAY_OPACITY = 0.55
+CAPTURE_FPS_PER_CHANGE_POLL = 2
+MAX_CAPTURE_FPS = 240
+MAX_CHANGE_POLL_FPS = MAX_CAPTURE_FPS // CAPTURE_FPS_PER_CHANGE_POLL
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +132,9 @@ class LiveConfig:
     width: int = 0
     height: int = 0
     monitor_index: int = 0
-    capture_fps: int = 15
+    # Retained as a load-compatible field for older config.toml files.  The
+    # effective value is always derived from change_poll_fps in __post_init__.
+    capture_fps: int = 12
     change_poll_fps: int = 6
     change_threshold: float = 3.0
     stable_observations: int = 1
@@ -153,10 +158,18 @@ class LiveConfig:
             raise ConfigError("live.width/height 不能为负数")
         if self.monitor_index < 0:
             raise ConfigError("live.monitor_index 不能为负数")
-        if not 1 <= self.capture_fps <= 240:
-            raise ConfigError("live.capture_fps 必须在 1 到 240 之间")
-        if not 1 <= self.change_poll_fps <= self.capture_fps:
-            raise ConfigError("live.change_poll_fps 必须在 1 到 capture_fps 之间")
+        if (
+            type(self.change_poll_fps) is not int
+            or not 1 <= self.change_poll_fps <= MAX_CHANGE_POLL_FPS
+        ):
+            raise ConfigError(
+                f"live.change_poll_fps 必须在 1 到 {MAX_CHANGE_POLL_FPS} 之间"
+            )
+        object.__setattr__(
+            self,
+            "capture_fps",
+            self.change_poll_fps * CAPTURE_FPS_PER_CHANGE_POLL,
+        )
         if self.change_threshold < 0:
             raise ConfigError("live.change_threshold 不能为负数")
         if self.stable_observations < 1:
@@ -269,7 +282,7 @@ _PREVIEW_VALUE_RE = re.compile(
 )
 _LIVE_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
-    r"change_poll_fps|ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms|clear_after_ms|"
+    r"capture_fps|change_poll_fps|ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms|clear_after_ms|"
     r"dynamic_roi_enabled|dynamic_roi_settle_ms|dynamic_roi_ocr_interval_ms|"
     r"dynamic_roi_max_coalesce_ms)"
     r"[ \t]*="
@@ -771,6 +784,12 @@ def _upsert_live_values(
     values = {
         key: value
         for key, value in (
+            (
+                "capture_fps",
+                change_poll_fps * CAPTURE_FPS_PER_CHANGE_POLL
+                if change_poll_fps is not None
+                else None,
+            ),
             ("ocr_cooldown_ms", ocr_cooldown_ms),
             ("settle_rescan_ms", settle_rescan_ms),
             ("idle_rescan_ms", idle_rescan_ms),
