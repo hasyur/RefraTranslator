@@ -56,8 +56,8 @@ _BLUR_MODE_DARK = "dark_blur"
 _BLUR_MODE_ONLY = "blur_only"
 _DETECTION_QUALITY_PRESETS = (
     ("性能", 0.375),
-    ("质量", 0.5),
-    ("超质量", 0.75),
+    ("平衡", 0.5),
+    ("质量", 0.75),
 )
 _DETECTION_MIN_SIDE = 640
 _DETECTION_MAX_SIDE = 4096
@@ -86,7 +86,7 @@ def _log_tail(path: Path, *, max_characters: int = 4000) -> str:
 
 
 try:
-    from PySide6.QtCore import QTimer, Qt, QUrl
+    from PySide6.QtCore import QEvent, QTimer, Qt, QUrl
     from PySide6.QtGui import QFont, QFontDatabase
     from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
     from PySide6.QtWidgets import (
@@ -97,6 +97,8 @@ try:
         QDialog,
         QDialogButtonBox,
         QFormLayout,
+        QFrame,
+        QGridLayout,
         QHBoxLayout,
         QHeaderView,
         QLabel,
@@ -104,16 +106,57 @@ try:
         QMainWindow,
         QMessageBox,
         QPushButton,
+        QScrollArea,
         QSlider,
         QSpinBox,
         QTabWidget,
         QTableWidget,
         QTableWidgetItem,
+        QToolButton,
         QVBoxLayout,
         QWidget,
     )
 except ImportError as exc:  # pragma: no cover - exercised only without GUI extra
     raise RuntimeError("尚未安装 GUI 依赖。请运行：.\\bootstrap.ps1 -WithGui") from exc
+
+
+def _settings_card(
+    title: str,
+    description: str,
+    *,
+    scope: str | None = None,
+) -> tuple[QFrame, QVBoxLayout]:
+    card = QFrame()
+    card.setObjectName("settingsCard")
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(18, 16, 18, 16)
+    layout.setSpacing(12)
+
+    heading = QHBoxLayout()
+    heading.setSpacing(8)
+    title_label = QLabel(title)
+    title_label.setObjectName("cardTitle")
+    heading.addWidget(title_label)
+    if scope:
+        scope_label = QLabel(scope)
+        scope_label.setObjectName("scopeBadge")
+        heading.addWidget(scope_label)
+    heading.addStretch(1)
+    layout.addLayout(heading)
+
+    if description:
+        description_label = QLabel(description)
+        description_label.setObjectName("cardDescription")
+        description_label.setWordWrap(True)
+        layout.addWidget(description_label)
+    return card, layout
+
+
+def _status_chip(text: str, *, tone: str = "neutral") -> QLabel:
+    label = QLabel(text)
+    label.setObjectName("statusChip")
+    label.setProperty("tone", tone)
+    return label
 
 
 def _install_ui_font(app: QApplication, config: AppConfig, config_path: Path) -> None:
@@ -209,16 +252,16 @@ def _parse_ocr_device_probe_output(output: str) -> tuple[tuple[str, str], ...]:
 class NewProfileDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("新建游戏 Profile")
+        self.setWindowTitle("新建配置")
         self.setMinimumWidth(430)
         self.profile_id_edit = QLineEdit()
         self.profile_id_edit.setPlaceholderText("例如 cyberpunk2077")
         self.display_name_edit = QLineEdit()
         self.display_name_edit.setPlaceholderText("例如 赛博朋克 2077")
         form = QFormLayout()
-        form.addRow("Profile ID", self.profile_id_edit)
-        form.addRow("显示名称", self.display_name_edit)
-        note = QLabel("ID 创建后用于目录名，只能包含文字、数字、连字符和下划线。")
+        form.addRow("配置 ID", self.profile_id_edit)
+        form.addRow("配置名称", self.display_name_edit)
+        note = QLabel("配置 ID 创建后用于目录名，只能包含文字、数字、连字符和下划线。")
         note.setWordWrap(True)
         note.setObjectName("secondaryText")
         buttons = QDialogButtonBox(
@@ -343,29 +386,53 @@ class LauncherWindow(QMainWindow):
         self._ocr_device_probe_monitor.setInterval(100)
         self._ocr_device_probe_monitor.timeout.connect(self._check_ocr_device_probe)
         self.setWindowTitle(PRODUCT_NAME)
-        self.resize(960, 700)
-        self.setMinimumSize(780, 580)
+        self.resize(1080, 760)
+        self.setMinimumSize(820, 620)
         self._apply_theme()
         if app is not None:
             app.styleHints().colorSchemeChanged.connect(self._system_theme_changed)
+            app.installEventFilter(self)
 
         central = QWidget()
         central.setObjectName("launcherCentral")
         root = QVBoxLayout(central)
+        root.setContentsMargins(16, 14, 16, 12)
+        root.setSpacing(12)
+
+        top_bar = QFrame()
+        top_bar.setObjectName("topBar")
+        top_bar_layout = QHBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(16, 12, 16, 12)
+        top_bar_layout.setSpacing(10)
+
+        brand_layout = QVBoxLayout()
+        brand_layout.setSpacing(0)
+        brand_title = QLabel(PRODUCT_NAME)
+        brand_title.setObjectName("brandTitle")
+        brand_subtitle = QLabel("实时屏幕翻译控制台")
+        brand_subtitle.setObjectName("brandSubtitle")
+        brand_layout.addWidget(brand_title)
+        brand_layout.addWidget(brand_subtitle)
+        top_bar_layout.addLayout(brand_layout)
+        top_bar_layout.addStretch(1)
+
         profile_row = QHBoxLayout()
-        profile_row.addWidget(QLabel("当前游戏"))
+        profile_row.setSpacing(8)
+        current_config_label = QLabel("当前配置")
+        current_config_label.setObjectName("currentConfigLabel")
+        profile_row.addWidget(current_config_label)
         self.profile_combo = QComboBox()
-        self.profile_combo.setMinimumWidth(320)
+        self.profile_combo.setMinimumWidth(270)
         self.profile_combo.currentIndexChanged.connect(self._load_selected_profile)
-        new_profile_button = QPushButton("新建 Profile")
+        new_profile_button = QPushButton("新建配置")
         refresh_button = QPushButton("刷新")
         new_profile_button.clicked.connect(self._create_profile)
         refresh_button.clicked.connect(lambda: self.refresh_profiles())
         profile_row.addWidget(self.profile_combo, 1)
         profile_row.addWidget(new_profile_button)
         profile_row.addWidget(refresh_button)
-        profile_row.addSpacing(10)
-        profile_row.addWidget(QLabel("界面"))
+        profile_row.addSpacing(6)
+        profile_row.addWidget(QLabel("主题"))
         self.theme_combo = QComboBox()
         self.theme_combo.setMinimumWidth(105)
         for value, label in THEME_OPTIONS:
@@ -374,12 +441,13 @@ class LauncherWindow(QMainWindow):
         self.theme_combo.setCurrentIndex(max(theme_index, 0))
         self.theme_combo.currentIndexChanged.connect(self._theme_changed)
         profile_row.addWidget(self.theme_combo)
-        root.addLayout(profile_row)
+        top_bar_layout.addLayout(profile_row)
+        root.addWidget(top_bar)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_launch_tab(), "启动与区域")
+        self.tabs.addTab(self._build_launch_tab(), "实时翻译")
         self._glossary_editor = PairTableEditor(
-            left_header="游戏原文",
+            left_header="识别原文",
             right_header="固定译名",
             save_text="保存术语表",
             save_callback=self._save_glossary,
@@ -392,10 +460,10 @@ class LauncherWindow(QMainWindow):
             save_callback=self._save_corrections,
         )
         self.tabs.addTab(self._correction_editor, "人工修订")
-        self.tabs.addTab(self._build_info_tab(), "资料库状态")
+        self.tabs.addTab(self._build_info_tab(), "数据与诊断")
         root.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
-        self.statusBar().showMessage("正在读取游戏 Profile……")
+        self.statusBar().showMessage("正在读取配置……")
         self.refresh_profiles()
         self._restore_detection_quality_from_config()
         if probe_ocr_devices:
@@ -449,49 +517,158 @@ class LauncherWindow(QMainWindow):
         if process is not None and process.poll() is None:
             process.terminate()
         self._ocr_device_probe_monitor.stop()
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
         super().closeEvent(event)
 
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt callback name
+        if event.type() == QEvent.Type.Wheel and isinstance(
+            watched,
+            (QComboBox, QSlider, QSpinBox),
+        ):
+            event.ignore()
+            return True
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt callback name
+        super().resizeEvent(event)
+        if hasattr(self, "_launch_card_grid"):
+            self._relayout_launch_cards(event.size().width())
+
+    def _relayout_launch_cards(self, width: int) -> None:
+        compact = width < 980
+        if getattr(self, "_launch_cards_compact", None) is compact:
+            return
+        grid = self._launch_card_grid
+        capture_card, ocr_card, translation_card, advanced_card = self._launch_cards
+        for card in self._launch_cards:
+            grid.removeWidget(card)
+        if compact:
+            grid.addWidget(capture_card, 0, 0)
+            grid.addWidget(ocr_card, 1, 0)
+            grid.addWidget(translation_card, 2, 0)
+            grid.addWidget(advanced_card, 3, 0)
+            grid.setColumnStretch(1, 0)
+        else:
+            grid.addWidget(capture_card, 0, 0)
+            grid.addWidget(ocr_card, 0, 1)
+            grid.addWidget(translation_card, 1, 0, 1, 2)
+            grid.addWidget(advanced_card, 2, 0, 1, 2)
+            grid.setColumnStretch(0, 2)
+            grid.setColumnStretch(1, 3)
+        self._launch_cards_compact = compact
+
     def _build_launch_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(10)
 
-        service_form = QFormLayout()
-        self._service_form = service_form
-        self.server_url_combo = QComboBox()
-        self.server_url_combo.setEditable(True)
-        self.server_url_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.server_url_combo.addItem(self._config.translation.base_url)
-        if self.server_url_combo.lineEdit() is not None:
-            self.server_url_combo.lineEdit().setPlaceholderText(
-                "例如 http://127.0.0.1:1234/v1"
-            )
-        service_form.addRow("API 服务器", self.server_url_combo)
-
-        model_widget = QWidget()
-        model_layout = QHBoxLayout(model_widget)
-        model_layout.setContentsMargins(0, 0, 0, 0)
-        self.model_combo = QComboBox()
-        self.model_combo.setEditable(True)
-        self.model_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.model_combo.addItem(self._config.translation.model)
-        if self.model_combo.lineEdit() is not None:
-            self.model_combo.lineEdit().setPlaceholderText("输入模型 ID 或读取服务器列表")
-        self.refresh_models_button = QPushButton("读取模型列表")
-        self.refresh_models_button.clicked.connect(self._refresh_models)
-        model_layout.addWidget(self.model_combo, 1)
-        model_layout.addWidget(self.refresh_models_button)
-        service_form.addRow("API 模型", model_widget)
-
-        self.max_concurrency_spin = QSpinBox()
-        self.max_concurrency_spin.setRange(1, 32)
-        self.max_concurrency_spin.setValue(self._config.translation.max_concurrency)
-        self.max_concurrency_spin.setSuffix(" 路")
-        self.max_concurrency_spin.setToolTip(
-            "同时处理的翻译批次数。实际并发还受 LLM 后端限制；"
-            "过高可能增加显存占用和单批延迟。"
+        status_strip = QFrame()
+        status_strip.setObjectName("statusStrip")
+        status_layout = QHBoxLayout(status_strip)
+        status_layout.setContentsMargins(12, 8, 12, 8)
+        status_layout.setSpacing(8)
+        self.llm_status_chip = _status_chip("LLM · 已配置")
+        self.llm_status_chip.setToolTip(
+            f"{self._config.translation.model}\n"
+            f"{self._config.translation.normalized_base_url}"
         )
-        service_form.addRow("LLM 并发", self.max_concurrency_spin)
+        self.ocr_status_chip = _status_chip("OCR · 检测中")
+        self.region_status_chip = _status_chip("区域 · 等待配置")
+        status_layout.addWidget(self.llm_status_chip)
+        status_layout.addWidget(self.ocr_status_chip)
+        status_layout.addWidget(self.region_status_chip)
+        status_layout.addStretch(1)
+        status_hint = QLabel("启动时会自动保存当前页面设置")
+        status_hint.setObjectName("secondaryText")
+        status_layout.addWidget(status_hint)
+        page_layout.addWidget(status_strip)
 
+        scroll = QScrollArea()
+        scroll.setObjectName("launchScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        content.setObjectName("launchContent")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(2, 2, 2, 8)
+        content_layout.setSpacing(12)
+        card_grid = QGridLayout()
+        card_grid.setContentsMargins(0, 0, 0, 0)
+        card_grid.setHorizontalSpacing(12)
+        card_grid.setVerticalSpacing(12)
+        card_grid.setColumnStretch(0, 2)
+        card_grid.setColumnStretch(1, 3)
+
+        capture_card, capture_layout = _settings_card(
+            "捕获区域",
+            "指定要识别的显示器和字幕范围，设置只属于当前配置。",
+            scope="此配置",
+        )
+        capture_form = QFormLayout()
+        capture_form.setHorizontalSpacing(14)
+        capture_form.setVerticalSpacing(10)
+        self.monitor_combo = QComboBox()
+        self.monitor_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.monitor_combo.setMinimumContentsLength(18)
+        app = QApplication.instance()
+        for index, screen in enumerate(app.screens() if app is not None else ()):  # type: ignore[union-attr]
+            geometry = screen.geometry()
+            self.monitor_combo.addItem(
+                f"{index}: {screen.name()} · {geometry.width()}×{geometry.height()} "
+                f"· {screen.devicePixelRatio():g}x",
+                index,
+            )
+        capture_form.addRow("显示器", self.monitor_combo)
+
+        region_widget = QWidget()
+        region_layout = QGridLayout(region_widget)
+        region_layout.setContentsMargins(0, 0, 0, 0)
+        region_layout.setHorizontalSpacing(6)
+        region_layout.setVerticalSpacing(6)
+        self.region_spins: list[QSpinBox] = []
+        for index, label in enumerate(("左", "上", "宽", "高")):
+            row = index // 2
+            column = (index % 2) * 2
+            region_layout.addWidget(QLabel(label), row, column)
+            spin = QSpinBox()
+            spin.setRange(0, 100_000)
+            spin.setAccelerated(True)
+            spin.valueChanged.connect(self._update_region_status_chip)
+            self.region_spins.append(spin)
+            region_layout.addWidget(spin, row, column + 1)
+            region_layout.setColumnStretch(column + 1, 1)
+        capture_form.addRow("字幕区域", region_widget)
+        capture_layout.addLayout(capture_form)
+
+        region_buttons = QHBoxLayout()
+        select_button = QPushButton("框选字幕区域")
+        full_button = QPushButton("使用整个显示器")
+        select_button.clicked.connect(self._select_region)
+        full_button.clicked.connect(self._use_full_screen)
+        region_buttons.addWidget(select_button)
+        region_buttons.addWidget(full_button)
+        region_buttons.addStretch(1)
+        capture_layout.addLayout(region_buttons)
+        capture_note = QLabel(
+            "宽和高同时为 0 表示识别整个显示器；框选字幕区域可减少无关 OCR 和翻译请求。"
+        )
+        capture_note.setObjectName("cardDescription")
+        capture_note.setWordWrap(True)
+        capture_layout.addWidget(capture_note)
+
+        ocr_card, ocr_layout = _settings_card(
+            "OCR 与画面",
+            "调整文字检测质量、结果整理和译文背景。",
+            scope="全局",
+        )
+        ocr_form = QFormLayout()
+        ocr_form.setHorizontalSpacing(14)
+        ocr_form.setVerticalSpacing(10)
         self.ocr_device_combo = QComboBox()
         self.ocr_device_combo.addItem("CPU", "cpu")
         configured_device = self._config.ocr.device
@@ -507,32 +684,39 @@ class LauncherWindow(QMainWindow):
             "正在后台检测当前隔离环境中 Paddle 实际可用的 OCR 硬件；"
             "启动实时翻译时仍会再次隔离校验。"
         )
-        service_form.addRow("OCR 设备", self.ocr_device_combo)
+        self.ocr_device_combo.currentIndexChanged.connect(
+            self._update_ocr_status_from_selection
+        )
+        ocr_form.addRow("OCR 设备", self.ocr_device_combo)
 
         detection_widget = QWidget()
-        detection_layout = QHBoxLayout(detection_widget)
+        detection_layout = QVBoxLayout(detection_widget)
         detection_layout.setContentsMargins(0, 0, 0, 0)
+        detection_layout.setSpacing(5)
+        quality_row = QHBoxLayout()
+        quality_row.setContentsMargins(0, 0, 0, 0)
+        quality_row.setSpacing(10)
         self.detection_quality_slider = QSlider(Qt.Orientation.Horizontal)
-        self.detection_quality_slider.setRange(
-            0,
-            len(_DETECTION_QUALITY_PRESETS) - 1,
-        )
+        self.detection_quality_slider.setObjectName("qualitySlider")
+        self.detection_quality_slider.setRange(0, len(_DETECTION_QUALITY_PRESETS) - 1)
         self.detection_quality_slider.setSingleStep(1)
         self.detection_quality_slider.setPageStep(1)
         self.detection_quality_slider.setTickInterval(1)
         self.detection_quality_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.detection_quality_slider.setValue(1)
-        self.detection_quality_slider.setToolTip(
-            "按所选显示器物理长边提供 37.5%、50%、75% 三档。"
-            "GUI 只保存最终 detection_max_side，不跟踪游戏窗口分辨率。"
-        )
         self.detection_quality_label = QLabel()
+        self.detection_quality_label.setObjectName("detectionQualityDetail")
         self.detection_quality_slider.valueChanged.connect(
             self._detection_quality_changed
         )
-        detection_layout.addWidget(self.detection_quality_slider, 1)
-        detection_layout.addWidget(self.detection_quality_label)
-        service_form.addRow("OCR 检测质量", detection_widget)
+        quality_row.addWidget(self.detection_quality_slider, 1)
+        quality_row.addWidget(self.detection_quality_label)
+        detection_layout.addLayout(quality_row)
+        detection_widget.setToolTip(
+            "按所选显示器物理长边提供 37.5%、50%、75% 三档。"
+            "GUI 只保存最终 detection_max_side，不跟踪应用窗口分辨率。"
+        )
+        ocr_form.addRow("检测质量", detection_widget)
 
         self.ocr_filter_checkbox = QCheckBox("启用文字过滤")
         self.ocr_filter_checkbox.setChecked(self._config.ocr.text_filter_enabled)
@@ -540,16 +724,15 @@ class LauncherWindow(QMainWindow):
             "关闭后，图标、数字、中文和其他非源语言 OCR 文本也会进入跟踪与翻译；"
             "OCR 置信度阈值仍然有效。"
         )
-        service_form.addRow("OCR 过滤", self.ocr_filter_checkbox)
+        ocr_form.addRow("文字过滤", self.ocr_filter_checkbox)
 
-        self.ocr_merge_checkbox = QCheckBox("合并文字")
+        self.ocr_merge_checkbox = QCheckBox("合并连续文字")
         self.ocr_merge_checkbox.setChecked(self._config.ocr.text_merge_enabled)
         self.ocr_merge_checkbox.setToolTip(
             "开启后会在文字过滤和翻译前，将连续换行句子及日文竖排碎片"
-            "整理成较完整的翻译块；关闭后保留 PaddleOCR 返回的原始文字框。"
-            "仅在 OCR 检测质量不低于 50% 时可用，保存后从下一次实时翻译开始生效。"
+            "整理成较完整的翻译块。仅在 OCR 检测质量不低于 50% 时可用。"
         )
-        service_form.addRow("OCR 排版", self.ocr_merge_checkbox)
+        ocr_form.addRow("文字排版", self.ocr_merge_checkbox)
 
         self.blur_mode_combo = QComboBox()
         self.blur_mode_combo.addItem("黑化模糊", _BLUR_MODE_DARK)
@@ -563,35 +746,106 @@ class LauncherWindow(QMainWindow):
             max(self.blur_mode_combo.findData(configured_blur_mode), 0)
         )
         self.blur_mode_combo.setToolTip(
-            "黑化模糊会在模糊后的原文字区域叠加暗层，提高白色译文对比度；"
-            "仅模糊会根据文字框周边估算背景后再模糊，避免原文字颜色扩散成色块。"
-            "保存后从下一次实时翻译开始生效。"
+            "黑化模糊会叠加暗层提高白色译文对比度；"
+            "仅模糊保留原画面的明暗和颜色。"
         )
-        service_form.addRow("译文背景", self.blur_mode_combo)
+        ocr_form.addRow("译文背景", self.blur_mode_combo)
 
-        self.dynamic_roi_checkbox = QCheckBox("启用实验性动态 ROI")
-        self.dynamic_roi_checkbox.setChecked(
-            self._config.live.dynamic_roi_enabled
-        )
+        self.dynamic_roi_checkbox = QCheckBox("启用动态 ROI")
+        self.dynamic_roi_checkbox.setChecked(self._config.live.dynamic_roi_enabled)
         self.dynamic_roi_checkbox.setToolTip(
             "先用整帧 OCR 建立文字地图，再以低分辨率热图定位变化区域；"
-            "Paddle 只识别合并后的最新 ROI。开启后显示 ROI 调度参数并隐藏"
-            "不生效的旧全帧参数；关闭后反向切换。动态背景可能频繁触发"
-            "整帧安全回退。"
+            "Paddle 只识别合并后的最新 ROI。具体调度参数放在高级设置中。"
         )
-        service_form.addRow("OCR 调度", self.dynamic_roi_checkbox)
+        ocr_form.addRow("识别调度", self.dynamic_roi_checkbox)
+        ocr_layout.addLayout(ocr_form)
+
+        translation_card, translation_layout = _settings_card(
+            "翻译服务",
+            "连接 OpenAI 兼容的本地或局域网 LLM 后端。",
+            scope="全局",
+        )
+        translation_form = QFormLayout()
+        translation_form.setHorizontalSpacing(14)
+        translation_form.setVerticalSpacing(10)
+        self.server_url_combo = QComboBox()
+        self.server_url_combo.setEditable(True)
+        self.server_url_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.server_url_combo.addItem(self._config.translation.base_url)
+        if self.server_url_combo.lineEdit() is not None:
+            self.server_url_combo.lineEdit().setPlaceholderText(
+                "例如 http://127.0.0.1:1234/v1"
+            )
+        translation_form.addRow("API 服务器", self.server_url_combo)
+
+        model_widget = QWidget()
+        model_layout = QHBoxLayout(model_widget)
+        model_layout.setContentsMargins(0, 0, 0, 0)
+        model_layout.setSpacing(8)
+        self.model_combo = QComboBox()
+        self.model_combo.setEditable(True)
+        self.model_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.model_combo.addItem(self._config.translation.model)
+        if self.model_combo.lineEdit() is not None:
+            self.model_combo.lineEdit().setPlaceholderText("输入模型 ID 或读取服务器列表")
+        self.refresh_models_button = QPushButton("测试连接并读取模型")
+        self.refresh_models_button.clicked.connect(self._refresh_models)
+        model_layout.addWidget(self.model_combo, 1)
+        model_layout.addWidget(self.refresh_models_button)
+        translation_form.addRow("API 模型", model_widget)
+
+        self.max_concurrency_spin = QSpinBox()
+        self.max_concurrency_spin.setRange(1, 32)
+        self.max_concurrency_spin.setValue(self._config.translation.max_concurrency)
+        self.max_concurrency_spin.setSuffix(" 路")
+        self.max_concurrency_spin.setToolTip(
+            "同时处理的翻译批次数。实际并发还受 LLM 后端限制；"
+            "过高可能增加显存占用和单批延迟。"
+        )
+        translation_form.addRow("LLM 并发", self.max_concurrency_spin)
+        translation_layout.addLayout(translation_form)
+        self.service_status_label = QLabel(
+            f"当前：{self._config.translation.model} · "
+            f"{self._config.translation.normalized_base_url} · "
+            f"并发 {self._config.translation.max_concurrency} · "
+            f"OCR {self._config.ocr.device} · "
+            f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
+            f"合并{'开' if self._config.ocr.text_merge_enabled else '关'} · "
+            f"背景 {self._background_summary(self._config.preview.overlay_opacity)} · "
+            f"{self._scheduling_summary(self._config.live)}"
+        )
+        self.service_status_label.setObjectName("secondaryText")
+        self.service_status_label.setWordWrap(True)
+        translation_layout.addWidget(self.service_status_label)
+
+        advanced_card, advanced_layout = _settings_card(
+            "高级 OCR 调度",
+            "只有在需要平衡响应速度、漏扫和负载时才需要调整。",
+            scope="全局",
+        )
+        self.advanced_settings_button = QToolButton()
+        self.advanced_settings_button.setObjectName("advancedToggle")
+        self.advanced_settings_button.setText("展开高级参数")
+        self.advanced_settings_button.setCheckable(True)
+        self.advanced_settings_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.advanced_settings_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        advanced_layout.addWidget(self.advanced_settings_button)
+        self.advanced_settings_content = QWidget()
+        self._service_form = QFormLayout(self.advanced_settings_content)
+        self._service_form.setHorizontalSpacing(18)
+        self._service_form.setVerticalSpacing(10)
 
         self.change_poll_spin = QSpinBox()
         self.change_poll_spin.setRange(1, MAX_CHANGE_POLL_FPS)
         self.change_poll_spin.setValue(self._config.live.change_poll_fps)
         self.change_poll_spin.setSuffix(" Hz")
         self.change_poll_spin.setToolTip(
-            "每秒取最新帧执行轻量变化检测的次数。旧全帧路径用它检查"
-            "是否需要 OCR，动态 ROI 路径用它运行低分辨率热图；提高后"
-            "能更早发现短暂变化，但不会直接让 Paddle 以相同频率运行。"
+            "每秒取最新帧执行轻量变化检测的次数；"
             f"屏幕捕获会自动使用它的 {CAPTURE_FPS_PER_CHANGE_POLL} 倍帧率。"
         )
-        service_form.addRow("变化检测频率", self.change_poll_spin)
+        self._service_form.addRow("变化检测频率", self.change_poll_spin)
 
         self.clear_after_spin = QSpinBox()
         self.clear_after_spin.setRange(50, 1_000)
@@ -600,11 +854,9 @@ class LauncherWindow(QMainWindow):
         self.clear_after_spin.setAccelerated(True)
         self.clear_after_spin.setSuffix(" ms")
         self.clear_after_spin.setToolTip(
-            "某轮有效 OCR 没有找到已显示的文字时，继续保留译文的时间；"
-            "期间重新识别到同一文字便取消清除。增大可抵抗偶发漏识别和"
-            "ROI 边缘波动，但真实字幕消失后也会多停留一段时间。"
+            "某轮有效 OCR 没有找到已显示的文字时，继续保留译文的时间。"
         )
-        service_form.addRow("译文消失宽限", self.clear_after_spin)
+        self._service_form.addRow("译文消失宽限", self.clear_after_spin)
 
         self.settle_rescan_spin = QSpinBox()
         self.settle_rescan_spin.setRange(0, 60_000)
@@ -614,11 +866,9 @@ class LauncherWindow(QMainWindow):
         self.settle_rescan_spin.setSuffix(" ms")
         self.settle_rescan_spin.setSpecialValueText("关闭")
         self.settle_rescan_spin.setToolTip(
-            "最后一次检测到画面变化后，等待这段时间自动补扫一次；"
-            "用于补全字幕绘制中途的首轮 OCR。若首轮仍在执行，只保留"
-            "最新帧并在其结束及冷却后补扫；0 表示关闭。"
+            "最后一次检测到画面变化后，等待这段时间自动补扫一次。"
         )
-        service_form.addRow("画面稳定补扫", self.settle_rescan_spin)
+        self._service_form.addRow("画面稳定补扫", self.settle_rescan_spin)
 
         self.idle_rescan_spin = QSpinBox()
         self.idle_rescan_spin.setRange(0, 60_000)
@@ -628,11 +878,9 @@ class LauncherWindow(QMainWindow):
         self.idle_rescan_spin.setSuffix(" ms")
         self.idle_rescan_spin.setSpecialValueText("关闭")
         self.idle_rescan_spin.setToolTip(
-            "从最近一次 OCR 完成开始计时；期间没有新扫描时，按此间隔"
-            "兜底复查静止画面。任何 OCR 完成都会重新计时；"
-            "增大可降低静止画面负载，0 表示关闭。"
+            "从最近一次 OCR 完成开始计时；期间没有新扫描时兜底复查静止画面。"
         )
-        service_form.addRow("静止画面兜底", self.idle_rescan_spin)
+        self._service_form.addRow("静止画面兜底", self.idle_rescan_spin)
 
         self.ocr_cooldown_spin = QSpinBox()
         self.ocr_cooldown_spin.setRange(0, 10_000)
@@ -642,12 +890,9 @@ class LauncherWindow(QMainWindow):
         self.ocr_cooldown_spin.setSuffix(" ms")
         self.ocr_cooldown_spin.setSpecialValueText("无冷却")
         self.ocr_cooldown_spin.setToolTip(
-            "每次 OCR 完成后至少等待这段时间才启动下一轮；"
-            "它同时约束画面变化、稳定补扫和静止兜底，但等待期间只保留"
-            "最新待识别帧。增大可降低连续变化时的负载，但可能增加延迟"
-            "或漏掉短字幕。"
+            "每次 OCR 完成后至少等待这段时间才启动下一轮。"
         )
-        service_form.addRow("OCR 冷却", self.ocr_cooldown_spin)
+        self._service_form.addRow("OCR 冷却", self.ocr_cooldown_spin)
 
         self.roi_settle_spin = QSpinBox()
         self.roi_settle_spin.setRange(0, 10_000)
@@ -657,130 +902,84 @@ class LauncherWindow(QMainWindow):
         self.roi_settle_spin.setSuffix(" ms")
         self.roi_settle_spin.setSpecialValueText("立即")
         self.roi_settle_spin.setToolTip(
-            "最后一次检测到局部变化后，画面持续稳定多久才允许提交最新 ROI；"
-            "较大值更适合打字机效果，较小值响应更快。"
+            "最后一次检测到局部变化后，画面持续稳定多久才允许提交最新 ROI。"
         )
-        service_form.addRow("ROI 稳定等待", self.roi_settle_spin)
+        self._service_form.addRow("ROI 稳定等待", self.roi_settle_spin)
 
         self.roi_ocr_interval_spin = QSpinBox()
         self.roi_ocr_interval_spin.setRange(50, 10_000)
-        self.roi_ocr_interval_spin.setValue(
-            self._config.live.dynamic_roi_ocr_interval_ms
-        )
+        self.roi_ocr_interval_spin.setValue(self._config.live.dynamic_roi_ocr_interval_ms)
         self.roi_ocr_interval_spin.setSingleStep(25)
         self.roi_ocr_interval_spin.setAccelerated(True)
         self.roi_ocr_interval_spin.setSuffix(" ms")
         self.roi_ocr_interval_spin.setToolTip(
-            "两次 ROI OCR 提交之间的最短间隔。333 ms 约等于 3 Hz；"
-            "减小会提高响应和 OCR 负载。"
+            "两次 ROI OCR 提交之间的最短间隔。333 ms 约等于 3 Hz。"
         )
-        service_form.addRow("ROI OCR 间隔", self.roi_ocr_interval_spin)
+        self._service_form.addRow("ROI OCR 间隔", self.roi_ocr_interval_spin)
 
         self.roi_max_coalesce_spin = QSpinBox()
         self.roi_max_coalesce_spin.setRange(50, 10_000)
-        self.roi_max_coalesce_spin.setValue(
-            self._config.live.dynamic_roi_max_coalesce_ms
-        )
+        self.roi_max_coalesce_spin.setValue(self._config.live.dynamic_roi_max_coalesce_ms)
         self.roi_max_coalesce_spin.setSingleStep(25)
         self.roi_max_coalesce_spin.setAccelerated(True)
         self.roi_max_coalesce_spin.setSuffix(" ms")
         self.roi_max_coalesce_spin.setToolTip(
-            "连续变化最多合并多久。即使画面一直没有稳定，到达此时间也会"
-            "尝试处理最新状态，避免打字机或持续运动无限等待。"
+            "连续变化最多合并多久；超时后会尝试处理最新状态。"
         )
-        service_form.addRow("ROI 最大合并", self.roi_max_coalesce_spin)
-
+        self._service_form.addRow("ROI 最大合并", self.roi_max_coalesce_spin)
+        advanced_layout.addWidget(self.advanced_settings_content)
+        self.advanced_settings_content.setVisible(False)
+        self.advanced_settings_button.toggled.connect(
+            self._toggle_advanced_settings
+        )
         self.dynamic_roi_checkbox.toggled.connect(
             self._sync_ocr_scheduling_controls
         )
-        self._sync_ocr_scheduling_controls(
-            self.dynamic_roi_checkbox.isChecked()
-        )
-        layout.addLayout(service_form)
+        self._sync_ocr_scheduling_controls(self.dynamic_roi_checkbox.isChecked())
 
-        service_actions = QHBoxLayout()
-        self.service_status_label = QLabel(
-            f"当前：{self._config.translation.model} · "
-            f"{self._config.translation.normalized_base_url} · "
-            f"并发 {self._config.translation.max_concurrency} · "
-            f"OCR {self._config.ocr.device} · "
-            f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
-            f"合并{'开' if self._config.ocr.text_merge_enabled else '关'} · "
-            f"背景 {self._background_summary(self._config.preview.overlay_opacity)} · "
-            f"{self._scheduling_summary(self._config.live)}；"
-            "可手动填写，读取列表不会自动保存。"
-        )
-        self.service_status_label.setObjectName("secondaryText")
-        self.service_status_label.setWordWrap(True)
-        save_service_button = QPushButton("保存运行设置")
-        save_service_button.clicked.connect(
-            lambda: self._save_translation_settings()
-        )
-        service_actions.addWidget(self.service_status_label, 1)
-        service_actions.addWidget(save_service_button)
-        layout.addLayout(service_actions)
-
-        form = QFormLayout()
-        self.monitor_combo = QComboBox()
-        app = QApplication.instance()
-        for index, screen in enumerate(app.screens() if app is not None else ()):  # type: ignore[union-attr]
-            geometry = screen.geometry()
-            self.monitor_combo.addItem(
-                f"{index}: {screen.name()} · {geometry.width()}×{geometry.height()} "
-                f"· {screen.devicePixelRatio():g}x",
-                index,
-            )
         self.monitor_combo.currentIndexChanged.connect(
             self._refresh_detection_quality_label
         )
-        form.addRow("显示器", self.monitor_combo)
-        self._refresh_detection_quality_label()
-
-        region_widget = QWidget()
-        region_layout = QHBoxLayout(region_widget)
-        region_layout.setContentsMargins(0, 0, 0, 0)
-        self.region_spins: list[QSpinBox] = []
-        for label in ("左", "上", "宽", "高"):
-            region_layout.addWidget(QLabel(label))
-            spin = QSpinBox()
-            spin.setRange(0, 100_000)
-            spin.setAccelerated(True)
-            self.region_spins.append(spin)
-            region_layout.addWidget(spin, 1)
-        form.addRow("字幕区域", region_widget)
-        layout.addLayout(form)
-
-        note = QLabel(
-            "性能提示：宽和高都为 0 会对整个屏幕执行 OCR；GPU 通常明显快于 CPU。"
-            "区域坐标相对于所选显示器，限制字幕区域仍能减少无关文字和翻译请求。"
+        self.monitor_combo.currentIndexChanged.connect(
+            self._update_region_status_chip
         )
-        note.setWordWrap(True)
-        note.setObjectName("secondaryText")
-        layout.addWidget(note)
+        self._refresh_detection_quality_label()
+        self._update_ocr_status_from_selection()
+        self._update_region_status_chip()
 
-        region_buttons = QHBoxLayout()
-        select_button = QPushButton("框选字幕区域")
-        full_button = QPushButton("使用整个显示器")
-        save_button = QPushButton("保存区域")
-        select_button.clicked.connect(self._select_region)
-        full_button.clicked.connect(self._use_full_screen)
-        save_button.clicked.connect(self._save_capture_settings)
-        region_buttons.addWidget(select_button)
-        region_buttons.addWidget(full_button)
-        region_buttons.addStretch(1)
-        region_buttons.addWidget(save_button)
-        layout.addLayout(region_buttons)
+        self._launch_card_grid = card_grid
+        self._launch_cards = (
+            capture_card,
+            ocr_card,
+            translation_card,
+            advanced_card,
+        )
+        self._launch_cards_compact: bool | None = None
+        self._relayout_launch_cards(self.width())
+        content_layout.addLayout(card_grid)
+        content_layout.addStretch(1)
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll, 1)
 
+        action_bar = QFrame()
+        action_bar.setObjectName("actionBar")
+        action_layout = QHBoxLayout(action_bar)
+        action_layout.setContentsMargins(14, 10, 14, 10)
+        action_layout.setSpacing(10)
         self.debug_checkbox = QCheckBox("显示 OCR/翻译区域调试边框")
-        layout.addWidget(self.debug_checkbox)
-        layout.addStretch(1)
+        action_layout.addWidget(self.debug_checkbox)
+        action_layout.addStretch(1)
+        self.apply_button = QPushButton("应用设置")
+        self.apply_button.setObjectName("applyButton")
+        self.apply_button.clicked.connect(self._apply_all_settings)
+        action_layout.addWidget(self.apply_button)
         self.start_button = QPushButton("启动实时翻译")
         self.start_button.setObjectName("startButton")
-        self.start_button.setMinimumHeight(48)
-        self.start_button.setStyleSheet("font-size: 16px; font-weight: 600;")
+        self.start_button.setMinimumHeight(44)
         self.start_button.clicked.connect(self._start_live)
-        layout.addWidget(self.start_button)
-        return widget
+        action_layout.addWidget(self.start_button)
+        page_layout.addWidget(action_bar)
+        return page
 
     def _start_ocr_device_probe(self) -> None:
         process = self._ocr_device_probe_process
@@ -898,6 +1097,77 @@ class LauncherWindow(QMainWindow):
                 f"当前配置的 OCR 设备 {current} 未被 Paddle 检测到，请选择可用硬件",
                 10000,
             )
+        self._update_ocr_status_from_selection(
+            tone="error" if error else ("warning" if unavailable else "success")
+        )
+
+    @staticmethod
+    def _set_status_chip(
+        label: QLabel,
+        text: str,
+        *,
+        tone: str,
+        tooltip: str | None = None,
+    ) -> None:
+        label.setText(text)
+        label.setProperty("tone", tone)
+        if tooltip is not None:
+            label.setToolTip(tooltip)
+        style = label.style()
+        style.unpolish(label)
+        style.polish(label)
+
+    def _update_ocr_status_from_selection(
+        self,
+        *args,
+        tone: str = "neutral",
+    ) -> None:
+        if not hasattr(self, "ocr_status_chip") or not hasattr(
+            self,
+            "ocr_device_combo",
+        ):
+            return
+        device = self.ocr_device_combo.currentData()
+        if device == "cpu":
+            short_label = "CPU"
+        elif isinstance(device, str) and device.startswith("gpu:"):
+            short_label = f"GPU {device.removeprefix('gpu:')}"
+        else:
+            short_label = "未选择"
+            tone = "warning"
+        self._set_status_chip(
+            self.ocr_status_chip,
+            f"OCR · {short_label}",
+            tone=tone,
+            tooltip=self.ocr_device_combo.currentText(),
+        )
+
+    def _update_region_status_chip(self, *args) -> None:
+        if not hasattr(self, "region_status_chip") or not hasattr(
+            self,
+            "region_spins",
+        ):
+            return
+        if self._profile is None:
+            self._set_status_chip(
+                self.region_status_chip,
+                "区域 · 等待配置",
+                tone="neutral",
+            )
+            return
+        left, top, width, height = self._current_region()
+        monitor_index = self.monitor_combo.currentData()
+        monitor_text = f"显示器 {monitor_index}" if isinstance(monitor_index, int) else "显示器"
+        if width == 0 and height == 0:
+            summary = "整个显示器"
+        else:
+            summary = f"{width}×{height}"
+        self._set_status_chip(
+            self.region_status_chip,
+            f"区域 · {summary}",
+            tone="success",
+            tooltip=f"{monitor_text} · 左 {left} · 上 {top} · 宽 {width} · 高 {height}",
+        )
 
     def _translation_candidate(self, *, require_model: bool = True):
         base_url = self.server_url_combo.currentText().strip()
@@ -1036,6 +1306,15 @@ class LauncherWindow(QMainWindow):
         ):
             self._service_form.setRowVisible(control, dynamic_roi_enabled)
 
+    def _toggle_advanced_settings(self, expanded: bool) -> None:
+        self.advanced_settings_content.setVisible(expanded)
+        self.advanced_settings_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+        self.advanced_settings_button.setText(
+            "收起高级参数" if expanded else "展开高级参数"
+        )
+
     @staticmethod
     def _scheduling_summary(live: LiveConfig) -> str:
         if live.dynamic_roi_enabled:
@@ -1069,6 +1348,12 @@ class LauncherWindow(QMainWindow):
             if not url.isValid() or not url.host():
                 raise ValueError("API 服务器地址无效")
         except (ConfigError, ValueError) as exc:
+            self._set_status_chip(
+                self.llm_status_chip,
+                "LLM · 配置错误",
+                tone="error",
+                tooltip=str(exc),
+            )
             self._show_error("无法读取模型列表", exc)
             return
 
@@ -1083,8 +1368,14 @@ class LauncherWindow(QMainWindow):
         reply = self._network_manager.get(request)
         self._model_reply = reply
         self.refresh_models_button.setEnabled(False)
-        self.refresh_models_button.setText("正在读取……")
+        self.refresh_models_button.setText("正在连接……")
         self.service_status_label.setText(f"正在连接 {url.toString()}……")
+        self._set_status_chip(
+            self.llm_status_chip,
+            "LLM · 连接中",
+            tone="neutral",
+            tooltip=url.toString(),
+        )
         reply.finished.connect(
             lambda current_reply=reply, requested=url.toString(): self._models_loaded(
                 current_reply,
@@ -1098,7 +1389,7 @@ class LauncherWindow(QMainWindow):
             return
         self._model_reply = None
         self.refresh_models_button.setEnabled(True)
-        self.refresh_models_button.setText("读取模型列表")
+        self.refresh_models_button.setText("测试连接并读取模型")
         try:
             if reply.error() != QNetworkReply.NetworkError.NoError:
                 status = reply.attribute(
@@ -1116,6 +1407,12 @@ class LauncherWindow(QMainWindow):
             models = parse_model_ids(payload)
         except TranslationTransportError as exc:
             self.service_status_label.setText(f"读取失败：{exc}")
+            self._set_status_chip(
+                self.llm_status_chip,
+                "LLM · 连接失败",
+                tone="error",
+                tooltip=str(exc),
+            )
             self.statusBar().showMessage(f"读取模型列表失败：{exc}", 10000)
             QMessageBox.warning(self, "读取模型列表失败", str(exc))
         else:
@@ -1123,6 +1420,12 @@ class LauncherWindow(QMainWindow):
             suffix = "；当前手填模型已保留" if retained else ""
             self.service_status_label.setText(
                 f"已从 {requested_url} 读取 {len(models)} 个模型{suffix}。"
+            )
+            self._set_status_chip(
+                self.llm_status_chip,
+                "LLM · 已连接",
+                tone="success",
+                tooltip=f"{requested_url}\n可用模型：{len(models)} 个",
             )
             self.statusBar().showMessage(f"已读取 {len(models)} 个 API 模型", 5000)
         finally:
@@ -1233,6 +1536,16 @@ class LauncherWindow(QMainWindow):
             )
         return True
 
+    def _apply_all_settings(self) -> None:
+        if not self._save_translation_settings(announce=False):
+            return
+        if not self._save_capture_settings():
+            return
+        self.statusBar().showMessage(
+            "已应用全局运行设置和当前配置的捕获区域",
+            6000,
+        )
+
     def _build_info_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -1253,7 +1566,7 @@ class LauncherWindow(QMainWindow):
         try:
             profiles = list_game_profiles(self._config_path, self._config)
         except (ProfileError, RuntimeError, ValueError) as exc:
-            self._show_error("无法读取 Profile", exc)
+            self._show_error("无法读取配置", exc)
             return
 
         self.profile_combo.blockSignals(True)
@@ -1277,9 +1590,10 @@ class LauncherWindow(QMainWindow):
             self._glossary_editor.set_pairs(())
             self._correction_editor.set_pairs(())
             self.info_label.setText(
-                "尚未创建游戏 Profile。点击窗口上方的“新建 Profile”开始。"
+                "尚未创建配置。点击窗口上方的“新建配置”开始。"
             )
-            self.statusBar().showMessage("请先新建一个游戏 Profile")
+            self._update_region_status_chip()
+            self.statusBar().showMessage("请先新建一个配置")
 
     def _set_profile_enabled(self, enabled: bool) -> None:
         for index in range(self.tabs.count()):
@@ -1297,7 +1611,7 @@ class LauncherWindow(QMainWindow):
                 display_name=dialog.display_name,
             )
         except (ProfileError, OSError, RuntimeError, ValueError) as exc:
-            self._show_error("新建 Profile 失败", exc)
+            self._show_error("新建配置失败", exc)
             return
         self.refresh_profiles(profile.profile_id)
         self.statusBar().showMessage(f"已创建 {profile.display_name}", 5000)
@@ -1313,7 +1627,7 @@ class LauncherWindow(QMainWindow):
                 target_language=self._config.translation.target_language,
             )
         except (ProfileError, RuntimeError, ValueError) as exc:
-            self._show_error("加载 Profile 失败", exc)
+            self._show_error("加载配置失败", exc)
             return
         self._profile = profile
         self._set_profile_enabled(True)
@@ -1328,7 +1642,7 @@ class LauncherWindow(QMainWindow):
         else:
             self.monitor_combo.setCurrentIndex(0)
             self.statusBar().showMessage(
-                f"Profile 中的显示器 {monitor_index} 当前不存在，已临时选择显示器 0",
+                f"配置中的显示器 {monitor_index} 当前不存在，已临时选择显示器 0",
                 8000,
             )
         region = capture.region or (
@@ -1345,6 +1659,7 @@ class LauncherWindow(QMainWindow):
         self._correction_editor.set_pairs(
             (entry.source_text, entry.translated_text) for entry in corrections
         )
+        self._update_region_status_chip()
         self._update_info()
         self.statusBar().showMessage(f"已加载 {profile.display_name}", 3000)
 
@@ -1417,6 +1732,7 @@ class LauncherWindow(QMainWindow):
             self._show_error("保存区域失败", exc)
             return False
         self._update_info()
+        self._update_region_status_chip()
         self.statusBar().showMessage(
             f"区域已保存到 {profile.display_name}：{','.join(map(str, settings.region or ())) }",
             6000,
@@ -1565,7 +1881,7 @@ class LauncherWindow(QMainWindow):
             else "未单独设置（使用 config.toml）"
         )
         self.info_label.setText(
-            f"Profile：{profile.display_name} ({profile.profile_id})\n\n"
+            f"配置：{profile.display_name} ({profile.profile_id})\n\n"
             f"目录：{profile.directory}\n"
             f"显示器：{monitor}\n"
             f"字幕区域：{region}\n\n"
@@ -1576,7 +1892,7 @@ class LauncherWindow(QMainWindow):
 
     def _require_profile(self) -> GameProfile | None:
         if self._profile is None:
-            self._show_error("尚未选择游戏", ValueError("请先新建或选择一个 Profile"))
+            self._show_error("尚未选择配置", ValueError("请先新建或选择一个配置"))
         return self._profile
 
     def _show_error(self, title: str, error: Exception) -> None:

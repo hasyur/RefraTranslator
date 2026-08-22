@@ -5,8 +5,9 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QEvent
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel, QScrollArea
 
 from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.config import load_config
@@ -401,7 +402,7 @@ def test_ocr_text_merge_requires_at_least_half_detection_quality(
     assert window._ocr_candidate().text_merge_enabled is False
 
     window.detection_quality_slider.setValue(2)
-    assert window.detection_quality_label.text() == "超质量 75% · 1920px"
+    assert window.detection_quality_label.text() == "质量 75% · 1920px"
     assert window.ocr_merge_checkbox.isEnabled()
     assert not window.ocr_merge_checkbox.isChecked()
     window.ocr_merge_checkbox.setChecked(True)
@@ -611,3 +612,72 @@ def test_light_theme_checkbox_uses_a_contrasting_checked_indicator() -> None:
     assert "QCheckBox::indicator:checked" in stylesheet
     assert "background-color: #1677ff" in stylesheet
     assert "checkmark.svg" in stylesheet
+
+
+def test_launcher_uses_configuration_wording_and_collapsible_cards(
+    tmp_path: Path,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(config_path, load_config(config_path), "game")
+
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+
+    current_label = window.findChild(QLabel, "currentConfigLabel")
+    assert current_label is not None
+    assert current_label.text() == "当前配置"
+    assert window.tabs.tabText(0) == "实时翻译"
+    assert window.tabs.tabText(3) == "数据与诊断"
+    assert not window.advanced_settings_content.isVisible()
+    assert window.advanced_settings_button.text() == "展开高级参数"
+
+    window.show()
+    assert window.detection_quality_slider.isVisible()
+    assert window.detection_quality_slider.tickInterval() == 1
+    assert (
+        window.detection_quality_slider.tickPosition()
+        == window.detection_quality_slider.TickPosition.TicksBelow
+    )
+    window.advanced_settings_button.setChecked(True)
+    app.processEvents()
+    assert window.advanced_settings_content.isVisible()
+    assert window.advanced_settings_button.text() == "收起高级参数"
+
+    window.resize(820, 620)
+    app.processEvents()
+    launch_scroll = window.findChild(QScrollArea, "launchScroll")
+    assert launch_scroll is not None
+    assert window._launch_cards_compact is True
+    assert launch_scroll.horizontalScrollBar().maximum() == 0
+
+    window.resize(1080, 760)
+    app.processEvents()
+    assert window._launch_cards_compact is False
+    capture_card, ocr_card, _translation_card, _advanced_card = window._launch_cards
+    assert ocr_card.width() > capture_card.width()
+
+    window.close()
+    app.processEvents()
+
+
+def test_launcher_blocks_wheel_changes_on_value_controls(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+
+    for control in (
+        window.profile_combo,
+        window.theme_combo,
+        window.max_concurrency_spin,
+        window.detection_quality_slider,
+    ):
+        event = QEvent(QEvent.Type.Wheel)
+        assert window.eventFilter(control, event)
+        assert not event.isAccepted()
+
+    assert not window.eventFilter(window.start_button, QEvent(QEvent.Type.Wheel))
+
+    window.close()
+    app.processEvents()

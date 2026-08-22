@@ -56,6 +56,12 @@ class ThemeColors:
     accent_hover: str
     selection: str
     selected_text: str
+    success: str
+    success_background: str
+    warning: str
+    warning_background: str
+    danger: str
+    danger_background: str
 
 
 _LIGHT_COLORS = ThemeColors(
@@ -74,6 +80,12 @@ _LIGHT_COLORS = ThemeColors(
     accent_hover="#095fc7",
     selection="#b8d8ff",
     selected_text="#101820",
+    success="#137a4e",
+    success_background="#e9f8f0",
+    warning="#9a6700",
+    warning_background="#fff4d6",
+    danger="#c73535",
+    danger_background="#fdecec",
 )
 
 _DARK_COLORS = ThemeColors(
@@ -92,6 +104,12 @@ _DARK_COLORS = ThemeColors(
     accent_hover="#69a6ff",
     selection="#275f99",
     selected_text="#ffffff",
+    success="#5bd6a0",
+    success_background="#173c30",
+    warning="#f5c451",
+    warning_background="#443718",
+    danger="#ff7b7b",
+    danger_background="#472526",
 )
 
 
@@ -221,18 +239,81 @@ def theme_stylesheet(theme: str) -> str:
         }}
         QWidget {{ color: {colors.text}; }}
         QWidget#launcherCentral {{ background-color: {colors.window}; }}
+        QWidget#launchContent {{ background-color: transparent; }}
         QLabel {{ background-color: transparent; }}
         QLabel#secondaryText {{ color: {colors.muted}; }}
+        QLabel#brandTitle {{
+            color: {colors.text};
+            font-size: 17px;
+            font-weight: 700;
+        }}
+        QLabel#brandSubtitle, QLabel#cardDescription,
+        QLabel#detectionQualityDetail {{
+            color: {colors.muted};
+        }}
+        QLabel#brandSubtitle {{ font-size: 11px; }}
+        QLabel#cardTitle {{
+            color: {colors.text};
+            font-size: 14px;
+            font-weight: 650;
+        }}
+        QLabel#scopeBadge {{
+            color: {colors.accent};
+            background-color: {colors.selection};
+            border-radius: 8px;
+            padding: 2px 7px;
+            font-size: 11px;
+        }}
+        QLabel#statusChip {{
+            color: {colors.muted};
+            background-color: {colors.alternate};
+            border: 1px solid {colors.border};
+            border-radius: 10px;
+            padding: 3px 9px;
+            font-weight: 600;
+        }}
+        QLabel#statusChip[tone="success"] {{
+            color: {colors.success};
+            background-color: {colors.success_background};
+            border-color: {colors.success};
+        }}
+        QLabel#statusChip[tone="warning"] {{
+            color: {colors.warning};
+            background-color: {colors.warning_background};
+            border-color: {colors.warning};
+        }}
+        QLabel#statusChip[tone="error"] {{
+            color: {colors.danger};
+            background-color: {colors.danger_background};
+            border-color: {colors.danger};
+        }}
+        QFrame#topBar, QFrame#statusStrip, QFrame#actionBar,
+        QFrame#settingsCard {{
+            background-color: {colors.panel};
+            border: 1px solid {colors.border};
+            border-radius: 8px;
+        }}
+        QFrame#statusStrip {{ background-color: {colors.alternate}; }}
+        QFrame#actionBar {{ border-radius: 7px; }}
+        QScrollArea#launchScroll {{
+            background-color: transparent;
+            border: 0;
+        }}
         QTabWidget::pane {{
             border: 1px solid {colors.border};
             background-color: {colors.panel};
+            border-radius: 7px;
+            top: -1px;
         }}
         QTabBar::tab {{
-            padding: 8px 16px;
+            padding: 9px 18px;
+            margin-right: 3px;
             color: {colors.muted};
             background-color: {colors.tab};
             border: 1px solid {colors.border};
             border-bottom: 0;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
         }}
         QTabBar::tab:selected {{
             color: {colors.accent};
@@ -248,8 +329,8 @@ def theme_stylesheet(theme: str) -> str:
             border-radius: 3px;
         }}
         QLineEdit, QComboBox, QSpinBox {{
-            padding: 4px;
-            min-height: 22px;
+            padding: 4px 7px;
+            min-height: 25px;
         }}
         QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTableWidget:focus {{
             border-color: {colors.accent};
@@ -275,20 +356,59 @@ def theme_stylesheet(theme: str) -> str:
             color: {colors.text};
             background-color: {colors.button};
             border: 1px solid {colors.border};
-            border-radius: 4px;
-            padding: 6px 12px;
+            border-radius: 5px;
+            padding: 7px 13px;
         }}
         QPushButton:hover {{ background-color: {colors.button_hover}; }}
         QPushButton:pressed {{ border-color: {colors.accent}; }}
         QPushButton:disabled {{ color: {colors.disabled}; }}
+        QPushButton#applyButton {{
+            color: {colors.accent};
+            background-color: {colors.panel};
+            border-color: {colors.accent};
+            font-weight: 600;
+        }}
+        QPushButton#applyButton:hover {{ background-color: {colors.selection}; }}
         QPushButton#startButton {{
             background-color: {colors.accent};
             color: white;
             border: 0;
-            border-radius: 5px;
-            padding: 10px;
+            border-radius: 6px;
+            padding: 10px 22px;
+            font-size: 15px;
+            font-weight: 700;
         }}
         QPushButton#startButton:hover {{ background-color: {colors.accent_hover}; }}
+        QToolButton#advancedToggle {{
+            color: {colors.accent};
+            background-color: transparent;
+            border: 0;
+            padding: 5px 0;
+            font-weight: 600;
+        }}
+        QToolButton#advancedToggle:hover {{ color: {colors.accent_hover}; }}
+        QSlider#qualitySlider {{ min-height: 24px; }}
+        QSlider#qualitySlider::groove:horizontal {{
+            height: 5px;
+            background-color: {colors.border};
+            border-radius: 2px;
+        }}
+        QSlider#qualitySlider::sub-page:horizontal {{
+            background-color: {colors.accent};
+            border-radius: 2px;
+        }}
+        QSlider#qualitySlider::handle:horizontal {{
+            width: 16px;
+            height: 16px;
+            margin: -6px 0;
+            background-color: {colors.panel};
+            border: 3px solid {colors.accent};
+            border-radius: 8px;
+        }}
+        QSlider#qualitySlider::handle:horizontal:hover {{
+            background-color: {colors.selection};
+            border-color: {colors.accent_hover};
+        }}
         QCheckBox {{ spacing: 7px; background-color: transparent; }}
         QCheckBox::indicator {{
             width: 16px;
