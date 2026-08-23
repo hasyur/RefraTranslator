@@ -698,7 +698,8 @@ def test_legacy_runtime_confirms_changed_visible_text_without_idle_timers(
     )
     assert controller._tracker.has_pending_revisions
     assert waiting.text == "待って。"
-    assert waiting.display_translation == "旧译文"
+    assert waiting.translation_suppressed
+    assert waiting.display_translation is None
     assert controller._ocr_future is not None
 
     controller._ocr_future.result(timeout=2)
@@ -712,7 +713,8 @@ def test_legacy_runtime_confirms_changed_visible_text_without_idle_timers(
     assert confirmed.text == "止まれ。"
     assert confirmed.revision == old.revision + 1
     assert confirmed.translated_text is None
-    assert confirmed.display_translation == "旧译文"
+    assert not confirmed.translation_suppressed
+    assert confirmed.display_translation is None
     controller.close()
 
 
@@ -885,7 +887,8 @@ def test_dynamic_roi_retries_until_visible_text_revision_is_confirmed(
     )
     assert controller._tracker.has_pending_revisions
     assert waiting.text == "待って。"
-    assert waiting.display_translation == "旧译文"
+    assert waiting.translation_suppressed
+    assert waiting.display_translation is None
     assert controller._ocr_future is None
 
     clock[0] = 10.6
@@ -902,7 +905,8 @@ def test_dynamic_roi_retries_until_visible_text_revision_is_confirmed(
     assert confirmed.text == "止まれ。"
     assert confirmed.revision == old.revision + 1
     assert confirmed.translated_text is None
-    assert confirmed.display_translation == "旧译文"
+    assert not confirmed.translation_suppressed
+    assert confirmed.display_translation is None
     controller.close()
 
 

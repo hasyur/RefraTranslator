@@ -232,6 +232,47 @@ def test_group_topology_change_requires_two_matching_scans() -> None:
     assert not stabilizer.has_pending
 
 
+def test_scrolling_membership_churn_never_resurrects_departed_lines() -> None:
+    stabilizer = TranslationGroupStabilizer(confirmations=2)
+    initial = build_translation_groups(
+        (
+            _line("line-a", "最初の行です。", (40, 40, 360, 80)),
+            _line("line-b", "次の行です。", (40, 100, 360, 140)),
+        ),
+        source_language="japan",
+    )
+    second = build_translation_groups(
+        (
+            _line("line-b", "次の行です。", (40, 40, 360, 80)),
+            _line("line-c", "新しい行です。", (40, 100, 360, 140)),
+        ),
+        source_language="japan",
+    )
+    third = build_translation_groups(
+        (
+            _line("line-c", "新しい行です。", (40, 40, 360, 80)),
+            _line("line-d", "最後の行です。", (40, 100, 360, 140)),
+        ),
+        source_language="japan",
+    )
+
+    assert {member for group in stabilizer.update(initial) for member in group.member_ids} == {
+        "line-a",
+        "line-b",
+    }
+    after_second = stabilizer.update(second)
+    after_third = stabilizer.update(third)
+
+    assert {member for group in after_second for member in group.member_ids} == {"line-b"}
+    assert after_third == ()
+    assert stabilizer.has_pending
+    assert {member for group in stabilizer.update(third) for member in group.member_ids} == {
+        "line-c",
+        "line-d",
+    }
+    assert not stabilizer.has_pending
+
+
 def test_coordinate_jitter_refreshes_bounds_without_changing_topology() -> None:
     stabilizer = TranslationGroupStabilizer(confirmations=2)
     first = build_translation_groups(

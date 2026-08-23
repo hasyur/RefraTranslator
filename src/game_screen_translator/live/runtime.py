@@ -1287,6 +1287,8 @@ class LiveController:
             track.source(self._tracker.zone_id)
             for track in visible
             if track.stable_emitted
+            and track.missing_since is None
+            and not track.translation_suppressed
             and track.translated_text is None
             and (track.track_id, track.revision) not in scheduled
             and (track.track_id, track.revision)
@@ -1836,7 +1838,12 @@ class LiveController:
         source_key = (source.track_id, source.revision)
         for track in visible:
             track_key = (track.track_id, track.revision)
-            if track_key == source_key and track_key not in assigned:
+            if (
+                track_key == source_key
+                and track_key not in assigned
+                and track.missing_since is None
+                and not track.translation_suppressed
+            ):
                 return track
 
         normalized = normalize_text(source.text)
@@ -1844,6 +1851,8 @@ class LiveController:
             track
             for track in visible
             if track.text == normalized
+            and track.missing_since is None
+            and not track.translation_suppressed
             and (track.track_id, track.revision) not in assigned
         ]
         if not candidates:

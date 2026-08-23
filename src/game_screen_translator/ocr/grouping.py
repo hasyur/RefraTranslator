@@ -255,8 +255,13 @@ class TranslationGroupStabilizer:
             self._candidate_count = 0
             return current
 
-        self._confirmed = _refresh_confirmed_groups(self._confirmed, current)
-        return self._confirmed
+        # Keep the confirmed topology for one more observation, but never
+        # resurrect members that are absent from the current atomic-line
+        # snapshot.  A continuously scrolling page changes membership every
+        # scan; mutating ``_confirmed`` here used to keep those departed lines
+        # alive indefinitely and prevented the ordinary disappearance path
+        # from ever running.
+        return _refresh_confirmed_groups(self._confirmed, current)
 
 
 def _single_group(member: TranslationGroupMember) -> TranslationGroup:
@@ -660,8 +665,10 @@ def _refresh_confirmed_groups(
     }
     refreshed: list[TranslationGroup] = []
     for group in confirmed:
+        if any(member.track_id not in current_members for member in group.members):
+            continue
         members = tuple(
-            current_members.get(member.track_id, member)
+            current_members[member.track_id]
             for member in group.members
         )
         refreshed.append(

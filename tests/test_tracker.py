@@ -76,7 +76,7 @@ def test_changed_text_reuses_track_but_increments_revision() -> None:
     assert tracker.visible_tracks[0].translated_text is None
 
 
-def test_single_changed_observation_keeps_visible_translation() -> None:
+def test_single_changed_observation_hides_translation_until_source_recovers() -> None:
     tracker = StableTextTracker(
         "zone",
         stable_observations=1,
@@ -93,16 +93,18 @@ def test_single_changed_observation_keeps_visible_translation() -> None:
     assert track.text == "古い"
     assert track.revision == 1
     assert track.translated_text == "旧译文"
-    assert track.display_translation == "旧译文"
+    assert track.translation_suppressed
+    assert track.display_translation is None
     assert tracker.has_pending_revisions
 
     restored = tracker.observe((_ocr("古い"),), 1.2)
     assert restored.stable_sources == ()
     assert not tracker.has_pending_revisions
+    assert not tracker.visible_tracks[0].translation_suppressed
     assert tracker.visible_tracks[0].display_translation == "旧译文"
 
 
-def test_confirmed_change_keeps_old_translation_until_new_one_is_ready() -> None:
+def test_confirmed_change_does_not_paint_old_translation_while_waiting() -> None:
     tracker = StableTextTracker(
         "zone",
         stable_observations=1,
@@ -122,17 +124,43 @@ def test_confirmed_change_keeps_old_translation_until_new_one_is_ready() -> None
     assert new.revision == 2
     assert waiting.text == "新しい"
     assert waiting.translated_text is None
-    assert waiting.retained_translation == "旧译文"
-    assert waiting.display_translation == "旧译文"
+    assert waiting.retained_translation is None
+    assert waiting.display_translation is None
 
     tracker.apply_translations((TranslationResult(old, "过期译文"),))
-    assert tracker.visible_tracks[0].display_translation == "旧译文"
+    assert tracker.visible_tracks[0].display_translation is None
 
     tracker.apply_translations((TranslationResult(new, "新译文"),))
     replaced = tracker.visible_tracks[0]
     assert replaced.translated_text == "新译文"
     assert replaced.retained_translation is None
     assert replaced.display_translation == "新译文"
+
+
+def test_same_text_coordinate_move_preserves_translation_without_revision() -> None:
+    tracker = StableTextTracker(
+        "zone",
+        stable_observations=1,
+        stable_seconds=0,
+    )
+    source = tracker.observe(
+        (_ocr("背景が動いても字幕は同じ。", (10, 20, 310, 60)),),
+        1.0,
+    ).stable_sources[0]
+    tracker.apply_translations((TranslationResult(source, "背景在动，但字幕相同。"),))
+
+    update = tracker.observe(
+        (_ocr("背景が動いても字幕は同じ。", (16, 24, 316, 64)),),
+        1.1,
+    )
+    moved = update.visible_tracks[0]
+
+    assert update.stable_sources == ()
+    assert moved.track_id == source.track_id
+    assert moved.revision == source.revision
+    assert moved.bounds == (16, 24, 316, 64)
+    assert not moved.translation_suppressed
+    assert moved.display_translation == "背景在动，但字幕相同。"
 
 
 def test_missing_ocr_keeps_translation_during_clear_grace_period() -> None:
@@ -153,6 +181,22 @@ def test_missing_ocr_keeps_translation_during_clear_grace_period() -> None:
     removed = tracker.expire_missing(2.11)
     assert len(removed.removed_track_ids) == 1
     assert tracker.visible_tracks == ()
+
+
+def test_missing_track_rejects_late_translation_result() -> None:
+    tracker = StableTextTracker(
+        "zone",
+        stable_observations=1,
+        stable_seconds=0,
+        clear_after_seconds=1.0,
+    )
+    source = tracker.observe((_ocr("もう画面にない。"),), 1.0).stable_sources[0]
+
+    tracker.observe((), 1.1)
+    tracker.apply_translations((TranslationResult(source, "已经离开画面。"),))
+
+    assert tracker.visible_tracks[0].missing_since == 1.1
+    assert tracker.visible_tracks[0].display_translation is None
 
 
 def test_old_translation_cannot_overwrite_new_revision() -> None:

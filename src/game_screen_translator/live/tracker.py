@@ -60,10 +60,13 @@ class TrackedText:
     missing_since: float | None = None
     retained_translation: str | None = None
     source_track_ids: tuple[str, ...] = ()
+    translation_suppressed: bool = False
 
     @property
     def display_translation(self) -> str | None:
-        """Return the current translation or the previous one held during replacement."""
+        """Return a translation only while it still describes current source text."""
+        if self.translation_suppressed:
+            return None
         if self.translated_text is not None:
             return self.translated_text
         return self.retained_translation
@@ -233,12 +236,18 @@ class StableTextTracker:
     def apply_translations(self, results: Iterable[TranslationResult]) -> tuple[TrackedText, ...]:
         for result in results:
             track = self._tracks.get(result.source.track_id)
-            if track is None or track.revision != result.source.revision:
+            if (
+                track is None
+                or track.revision != result.source.revision
+                or track.missing_since is not None
+                or track.translation_suppressed
+            ):
                 continue
             self._tracks[track.track_id] = replace(
                 track,
                 translated_text=result.translated_text,
                 retained_translation=None,
+                translation_suppressed=False,
             )
         return self.visible_tracks
 
@@ -272,8 +281,9 @@ class StableTextTracker:
                 observations=track.observations + 1,
                 source_track_ids=observation.source_track_ids,
                 missing_since=None,
+                translation_suppressed=False,
             )
-        if track.display_translation is not None:
+        if track.translated_text is not None or track.retained_translation is not None:
             return self._stage_revision(track, observation, text, now)
         self._revision_candidates.pop(track.track_id, None)
         return replace(
@@ -290,6 +300,7 @@ class StableTextTracker:
             stable_emitted=False,
             translated_text=None,
             retained_translation=None,
+            translation_suppressed=False,
         )
 
     def _stage_revision(
@@ -326,6 +337,10 @@ class StableTextTracker:
                 bounds=observation.bounds,
                 last_seen=now,
                 missing_since=None,
+                # Keep the old translation internally so a one-scan OCR error
+                # can recover without another LLM request, but stop painting it
+                # as soon as the recognized source no longer matches.
+                translation_suppressed=True,
             )
 
         del self._revision_candidates[track.track_id]
@@ -342,7 +357,8 @@ class StableTextTracker:
             missing_since=None,
             stable_emitted=False,
             translated_text=None,
-            retained_translation=track.display_translation,
+            retained_translation=None,
+            translation_suppressed=False,
         )
 
     def _best_match(self, observation: OcrText, candidates: set[str]) -> str | None:
