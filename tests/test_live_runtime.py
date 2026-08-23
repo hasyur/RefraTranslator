@@ -760,6 +760,79 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     controller.close()
 
 
+def test_dynamic_roi_empty_plan_recovers_with_a_full_scan(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=99,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            dynamic_roi_response_target_ms=500,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    control = FakeControl()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ColorBlockOcr(),
+        overlay=FakeOverlay(),
+        control=control,
+        app=app,
+    )
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.05
+    controller._tick()
+    original_scheduler = controller._roi_scheduler
+    original_planner = controller._roi_planner
+    assert original_scheduler is not None
+    assert original_planner is not None
+    monkeypatch.setattr(
+        original_planner,
+        "plan_proposal",
+        lambda *args, **kwargs: live_runtime.ContextualRoiPlan(
+            (),
+            0.0,
+            False,
+            "unchanged",
+        ),
+    )
+
+    capture.frame = _dynamic_roi_frame(changed=True)
+    clock[0] = 10.2
+    controller._tick()
+    assert controller._ocr_future is None
+    clock[0] = 10.3
+    controller._tick()
+
+    assert controller._ocr_future is None
+    assert controller._force_full_scan
+    assert controller._roi_scheduler is not original_scheduler
+    assert controller._roi_scheduler is not None
+    assert not controller._roi_scheduler.busy
+    assert not controller._roi_scheduler.primed
+    assert control.status == "动态 ROI 已自动恢复"
+    assert "整帧复查" in control.detail
+
+    clock[0] = 10.4
+    controller._tick()
+    assert controller._ocr_future is not None
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.45
+    controller._tick()
+    assert controller._roi_scheduler.primed
+    controller.close()
+
+
 def test_legacy_runtime_confirms_changed_visible_text_without_idle_timers(
     monkeypatch,
 ) -> None:

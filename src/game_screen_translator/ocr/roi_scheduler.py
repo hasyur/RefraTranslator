@@ -285,6 +285,15 @@ class LatestFrameRoiScheduler:
         self._validate_poll_time(now_s)
         if self._in_flight is not None or self._pending_since_s is None:
             return None
+        if (
+            self._pending_fallback_reason is None
+            and not self._pending_change_rois
+        ):
+            # A pending timestamp without executable regions is not work. If
+            # dispatched, it would occupy the single OCR slot forever because
+            # the contextual planner cannot build a crop for it.
+            self._clear_pending()
+            return None
 
         assert self._last_dispatch_at_s is not None
         rate_ready = (
@@ -440,12 +449,24 @@ class LatestFrameRoiScheduler:
                 self._pending_fallback_candidate_region_count = (
                     post_job_fallback_region_count
                 )
-            pending_times = tuple(
-                value
-                for value in (self._pending_since_s, post_job_pending_since)
-                if value is not None
-            )
-            self._pending_since_s = min(pending_times, default=job.observed_at_s)
+            if (
+                self._pending_fallback_reason is None
+                and not self._pending_change_rois
+            ):
+                self._clear_pending()
+            else:
+                pending_times = tuple(
+                    value
+                    for value in (
+                        self._pending_since_s,
+                        post_job_pending_since,
+                    )
+                    if value is not None
+                )
+                self._pending_since_s = min(
+                    pending_times,
+                    default=job.observed_at_s,
+                )
 
         return self.poll(completed_at_s)
 

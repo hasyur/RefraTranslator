@@ -358,6 +358,24 @@ def test_late_contextual_full_fallback_guides_only_the_next_local_budget() -> No
     assert third_job.predicted_scan_kind == "roi"
 
 
+def test_pending_timestamp_without_regions_is_cleared_not_dispatched() -> None:
+    scheduler = LatestFrameRoiScheduler(
+        _detector(),
+        min_ocr_interval_s=0.1,
+        settle_interval_s=0.0,
+        max_coalesce_s=0.1,
+        response_target_s=0.1,
+    )
+    scheduler.prime(_blank(), 0.0)
+    # Regression guard for a rejected/follow-up state observed in live.log:
+    # the timestamp alone must never occupy the one OCR in-flight slot.
+    scheduler._pending_since_s = 0.1
+
+    assert scheduler.poll(0.1) is None
+    assert not scheduler.has_pending
+    assert not scheduler.busy
+
+
 @pytest.mark.parametrize(
     ("scan_kind", "seconds", "message"),
     (

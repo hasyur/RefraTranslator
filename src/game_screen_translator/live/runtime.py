@@ -836,13 +836,18 @@ class LiveController:
             raise RuntimeError("动态 ROI 规划器未初始化")
         anchors = self._active_ocr_lines()
         frame_height, frame_width = job.frame.shape[:2]
-        plan = planner.plan_proposal(
-            job.proposal,
-            anchors,
-            frame_size=(frame_width, frame_height),
-        )
+        try:
+            plan = planner.plan_proposal(
+                job.proposal,
+                anchors,
+                frame_size=(frame_width, frame_height),
+            )
+        except Exception as exc:
+            self._recover_empty_roi_job(f"ROI 规划异常：{exc}")
+            return
         if not plan.regions:
-            raise RuntimeError("动态 ROI 调度产生了空 OCR 计划")
+            self._recover_empty_roi_job("动态 ROI 调度产生了空 OCR 计划")
+            return
         if self._debug:
             print(
                 "动态 ROI 响应预算："
@@ -881,6 +886,21 @@ class LiveController:
             job.frame,
             job.observed_at_s,
             rois=rois,
+        )
+
+    def _recover_empty_roi_job(self, reason: str) -> None:
+        """Release a pre-submit ROI dead end by rebuilding from a full scan."""
+        print(f"动态 ROI 已自动重置：{reason}", file=sys.stderr)
+        self._roi_scheduler = _create_roi_scheduler(self._config)
+        self._roi_planner = (
+            ContextualRoiPlanner()
+            if self._roi_scheduler is not None
+            else None
+        )
+        self._force_full_scan = True
+        self._control.set_status(
+            "动态 ROI 已自动恢复",
+            f"{reason}；正在安排一次整帧复查。",
         )
 
     def _run_ocr(
