@@ -64,10 +64,11 @@ capture_backend = "dxgi"
 # 实验性路径：首次整帧 OCR 后，以 change_poll_fps 热图定位变化。
 # 动态背景目前可能频繁触发整帧安全回退，默认保持关闭。
 dynamic_roi_enabled = false
-# 下列三项只用于动态 ROI；333 ms OCR 间隔约等于 3 Hz。
-dynamic_roi_settle_ms = 180
-dynamic_roi_ocr_interval_ms = 333
-dynamic_roi_max_coalesce_ms = 333
+# 动态 ROI 会分别学习局部/整帧 OCR 的提交后成本，并用剩余预算合并变化。
+# 这是期望目标，不包含 LLM 翻译；机器本身达不到时会立即提交 OCR。
+dynamic_roi_response_target_ms = 500
+# 旧版 dynamic_roi_settle_ms / dynamic_roi_ocr_interval_ms /
+# dynamic_roi_max_coalesce_ms 仍可加载，但新调度器不再使用。
 # 以下三项只用于关闭动态 ROI 时的旧全帧调度路径。
 # 每次 OCR 完成后的额外休息时间；0 优先避免短字幕被跳过。
 ocr_cooldown_ms = 0

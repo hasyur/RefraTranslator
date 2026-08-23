@@ -17,6 +17,10 @@ _EMPTY_RESULT_GRACE_SCANS = 1
 _EMPTY_RESULT_BACKOFF_STEPS = 3
 _EMPTY_RESULT_MAX_INTERVAL_S = 1.0
 _EMPTY_RESULT_MAX_INTERVAL_FACTOR = 2.5
+_DEFAULT_ROI_REMAINING_COST_S = 0.12
+_DEFAULT_FULL_REMAINING_COST_S = 0.65
+_ROI_COST_FROM_FULL_FACTOR = 0.3
+_COST_ESTIMATE_ALPHA = 0.25
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +37,9 @@ class ScheduledRoiScan:
     sampled_frame: SampledRoiFrame
     proposal: DynamicRoiProposal
     trigger_reason: str
+    predicted_scan_kind: str
+    predicted_remaining_s: float
+    response_wait_budget_s: float
 
 
 class LatestFrameRoiScheduler:
@@ -55,6 +62,7 @@ class LatestFrameRoiScheduler:
         min_ocr_interval_s: float = 1.0 / 3.0,
         settle_interval_s: float = 0.18,
         max_coalesce_s: float = 1.0 / 3.0,
+        response_target_s: float | None = None,
     ) -> None:
         for name, value in (
             ("min_ocr_interval_s", min_ocr_interval_s),
@@ -65,11 +73,16 @@ class LatestFrameRoiScheduler:
                 raise ValueError(f"{name} 必须是非负有限数")
         if min_ocr_interval_s == 0.0 and max_coalesce_s == 0.0:
             raise ValueError("OCR 间隔和合并窗口不能同时为 0")
+        if response_target_s is not None and (
+            not math.isfinite(response_target_s) or response_target_s <= 0.0
+        ):
+            raise ValueError("response_target_s 必须是正有限数或 None")
 
         self.detector = detector
         self.min_ocr_interval_s = min_ocr_interval_s
         self.settle_interval_s = settle_interval_s
         self.max_coalesce_s = max_coalesce_s
+        self.response_target_s = response_target_s
         self._max_adaptive_ocr_interval_s = max(
             min_ocr_interval_s,
             min(
@@ -82,6 +95,12 @@ class LatestFrameRoiScheduler:
         self._empty_result_count = 0
         self._productive_result_count = 0
         self._peak_adaptive_ocr_interval_s = min_ocr_interval_s
+        self._remaining_cost_estimates: dict[str, float | None] = {
+            "roi": None,
+            "full": None,
+        }
+        self._remaining_cost_sample_counts = {"roi": 0, "full": 0}
+        self._expect_contextual_full_frame = False
 
         self._accepted_sample: SampledRoiFrame | None = None
         self._accepted_at_s: float | None = None
@@ -148,6 +167,61 @@ class LatestFrameRoiScheduler:
     @property
     def productive_result_count(self) -> int:
         return self._productive_result_count
+
+    @property
+    def predicted_roi_remaining_s(self) -> float:
+        estimate = self._remaining_cost_estimates["roi"]
+        if estimate is not None:
+            return estimate
+        full_estimate = self._remaining_cost_estimates["full"]
+        if full_estimate is not None:
+            return max(
+                _DEFAULT_ROI_REMAINING_COST_S,
+                full_estimate * _ROI_COST_FROM_FULL_FACTOR,
+            )
+        return _DEFAULT_ROI_REMAINING_COST_S
+
+    @property
+    def predicted_full_remaining_s(self) -> float:
+        estimate = self._remaining_cost_estimates["full"]
+        return _DEFAULT_FULL_REMAINING_COST_S if estimate is None else estimate
+
+    @property
+    def remaining_cost_sample_counts(self) -> tuple[int, int]:
+        """Return learned local/full sample counts for diagnostics."""
+        return (
+            self._remaining_cost_sample_counts["roi"],
+            self._remaining_cost_sample_counts["full"],
+        )
+
+    def record_scan_cost(self, scan_kind: str, remaining_seconds: float) -> None:
+        """Learn post-dispatch cost separately for local and full OCR scans."""
+        if scan_kind not in self._remaining_cost_estimates:
+            raise ValueError("scan_kind 必须是 roi 或 full")
+        if not math.isfinite(remaining_seconds) or remaining_seconds < 0.0:
+            raise ValueError("remaining_seconds 必须是非负有限数")
+        previous = self._remaining_cost_estimates[scan_kind]
+        self._remaining_cost_estimates[scan_kind] = (
+            remaining_seconds
+            if previous is None
+            else previous
+            + _COST_ESTIMATE_ALPHA * (remaining_seconds - previous)
+        )
+        self._remaining_cost_sample_counts[scan_kind] += 1
+
+    def record_scan_outcome(
+        self,
+        job: ScheduledRoiScan,
+        actual_scan_kind: str,
+    ) -> None:
+        """Remember a late contextual fallback without replanning every tick."""
+        if actual_scan_kind not in self._remaining_cost_estimates:
+            raise ValueError("actual_scan_kind 必须是 roi 或 full")
+        if self._in_flight is None or self._in_flight.job_id != job.job_id:
+            raise ValueError("记录的不是当前 OCR job")
+        if job.proposal.fallback_full_frame:
+            return
+        self._expect_contextual_full_frame = actual_scan_kind == "full"
 
     def prime(self, frame: np.ndarray, now_s: float) -> None:
         """Set the frame whose OCR map has already been accepted."""
@@ -222,10 +296,21 @@ class LatestFrameRoiScheduler:
             now_s - self._last_motion_at_s + 1e-12
             >= self.settle_interval_s
         )
-        max_wait_reached = (
-            now_s - self._pending_since_s + 1e-12 >= self.max_coalesce_s
+        predicted_scan_kind, predicted_remaining_s, response_wait_budget_s = (
+            self._pending_response_budget()
         )
-        if not force and (not rate_ready or not (settled or max_wait_reached)):
+        # Stability and rate gates are soft. The response deadline covers the
+        # interval from the first observed change through the predicted text-
+        # map update, so it must win when the remaining budget is exhausted.
+        response_deadline_reached = (
+            now_s - self._pending_since_s + 1e-12
+            >= min(self.max_coalesce_s, response_wait_budget_s)
+        )
+        if (
+            not force
+            and not response_deadline_reached
+            and (not rate_ready or not settled)
+        ):
             return None
 
         proposal = self._pending_proposal()
@@ -239,6 +324,12 @@ class LatestFrameRoiScheduler:
         trigger_reason = (
             "forced"
             if force
+            else "response-deadline"
+            if (
+                self.response_target_s is not None
+                and response_wait_budget_s <= self.max_coalesce_s
+                and response_deadline_reached
+            )
             else "settled"
             if settled
             else "max-coalesce"
@@ -254,6 +345,9 @@ class LatestFrameRoiScheduler:
             self._latest_sample,
             proposal,
             trigger_reason,
+            predicted_scan_kind,
+            predicted_remaining_s,
+            response_wait_budget_s,
         )
         self._next_job_id += 1
         self._in_flight = job
@@ -432,6 +526,26 @@ class LatestFrameRoiScheduler:
             self._pending_change_rois,
             coverage,
             len(self._pending_change_rois),
+        )
+
+    def _pending_response_budget(self) -> tuple[str, float, float]:
+        proposal = self._pending_proposal()
+        predicted_scan_kind = (
+            "full"
+            if proposal.fallback_full_frame or self._expect_contextual_full_frame
+            else "roi"
+        )
+        predicted = (
+            self.predicted_full_remaining_s
+            if predicted_scan_kind == "full"
+            else self.predicted_roi_remaining_s
+        )
+        if self.response_target_s is None:
+            return predicted_scan_kind, predicted, self.max_coalesce_s
+        return (
+            predicted_scan_kind,
+            predicted,
+            max(0.0, self.response_target_s - predicted),
         )
 
     def _clear_pending(self) -> None:

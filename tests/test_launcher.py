@@ -91,11 +91,11 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.clear_after_spin.maximum() == 1000
     assert window.change_poll_spin.value() == 6
     assert window.change_poll_spin.maximum() == 120
-    assert window.roi_settle_spin.value() == 180
-    assert window.roi_ocr_interval_spin.value() == 333
-    assert window.roi_max_coalesce_spin.value() == 333
+    assert window.roi_response_target_spin.value() == 500
     assert window._service_form.isRowVisible(window.settle_rescan_spin)
-    assert not window._service_form.isRowVisible(window.roi_settle_spin)
+    assert not window._service_form.isRowVisible(
+        window.roi_response_target_spin
+    )
     assert window._current_region() == (100, 200, 800, 300)
     assert window._glossary_editor.pairs() == (("仕事", "委托"),)
     assert window._correction_editor.pairs() == (("待て。", "等等。"),)
@@ -180,9 +180,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     window.ocr_cooldown_spin.setValue(100)
     window.clear_after_spin.setValue(950)
     window.change_poll_spin.setValue(8)
-    window.roi_settle_spin.setValue(240)
-    window.roi_ocr_interval_spin.setValue(250)
-    window.roi_max_coalesce_spin.setValue(450)
+    window.roi_response_target_spin.setValue(650)
     window.dynamic_roi_checkbox.setChecked(True)
 
     window._start_live()
@@ -216,9 +214,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.live.dynamic_roi_enabled is True
     assert saved.live.change_poll_fps == 8
     assert saved.live.capture_fps == 16
-    assert saved.live.dynamic_roi_settle_ms == 240
-    assert saved.live.dynamic_roi_ocr_interval_ms == 250
-    assert saved.live.dynamic_roi_max_coalesce_ms == 450
+    assert saved.live.dynamic_roi_response_target_ms == 650
     window._live_monitor.stop()
     window.close()
     app.processEvents()
@@ -484,9 +480,9 @@ def test_launcher_dynamic_roi_switches_visible_scheduling_controls(
     assert window._service_form.isRowVisible(window.ocr_cooldown_spin)
     assert window._service_form.isRowVisible(window.change_poll_spin)
     assert window._service_form.isRowVisible(window.clear_after_spin)
-    assert not window._service_form.isRowVisible(window.roi_settle_spin)
-    assert not window._service_form.isRowVisible(window.roi_ocr_interval_spin)
-    assert not window._service_form.isRowVisible(window.roi_max_coalesce_spin)
+    assert not window._service_form.isRowVisible(
+        window.roi_response_target_spin
+    )
     change_poll_row, _ = window._service_form.getWidgetPosition(
         window.change_poll_spin
     )
@@ -494,9 +490,7 @@ def test_launcher_dynamic_roi_switches_visible_scheduling_controls(
         window.settle_rescan_spin,
         window.idle_rescan_spin,
         window.ocr_cooldown_spin,
-        window.roi_settle_spin,
-        window.roi_ocr_interval_spin,
-        window.roi_max_coalesce_spin,
+        window.roi_response_target_spin,
     ):
         control_row, _ = window._service_form.getWidgetPosition(
             mode_specific_control
@@ -510,24 +504,21 @@ def test_launcher_dynamic_roi_switches_visible_scheduling_controls(
     assert not window._service_form.isRowVisible(window.ocr_cooldown_spin)
     assert window._service_form.isRowVisible(window.change_poll_spin)
     assert window._service_form.isRowVisible(window.clear_after_spin)
-    assert window._service_form.isRowVisible(window.roi_settle_spin)
-    assert window._service_form.isRowVisible(window.roi_ocr_interval_spin)
-    assert window._service_form.isRowVisible(window.roi_max_coalesce_spin)
+    assert window._service_form.isRowVisible(
+        window.roi_response_target_spin
+    )
     window.change_poll_spin.setValue(10)
-    window.roi_settle_spin.setValue(220)
-    window.roi_ocr_interval_spin.setValue(200)
-    window.roi_max_coalesce_spin.setValue(500)
+    window.roi_response_target_spin.setValue(700)
     assert window._save_translation_settings(announce=False)
     saved = load_config(config_path)
     assert saved.live.dynamic_roi_enabled is True
     assert saved.live.change_poll_fps == 10
     assert saved.live.capture_fps == 20
-    assert saved.live.dynamic_roi_settle_ms == 220
-    assert saved.live.dynamic_roi_ocr_interval_ms == 200
-    assert saved.live.dynamic_roi_max_coalesce_ms == 500
+    assert saved.live.dynamic_roi_response_target_ms == 700
     assert "动态 ROI 开" in window.service_status_label.text()
     assert "捕获 20 FPS" in window.service_status_label.text()
     assert "热图 10 Hz" in window.service_status_label.text()
+    assert "响应目标 700 ms" in window.service_status_label.text()
 
     window.dynamic_roi_checkbox.setChecked(False)
     assert window._service_form.isRowVisible(window.settle_rescan_spin)
@@ -535,20 +526,20 @@ def test_launcher_dynamic_roi_switches_visible_scheduling_controls(
     assert window._service_form.isRowVisible(window.ocr_cooldown_spin)
     assert window._service_form.isRowVisible(window.change_poll_spin)
     assert window._service_form.isRowVisible(window.clear_after_spin)
-    assert not window._service_form.isRowVisible(window.roi_settle_spin)
-    assert not window._service_form.isRowVisible(window.roi_ocr_interval_spin)
-    assert not window._service_form.isRowVisible(window.roi_max_coalesce_spin)
+    assert not window._service_form.isRowVisible(
+        window.roi_response_target_spin
+    )
     window.close()
     app.processEvents()
 
     restored = LauncherWindow(config_path, probe_ocr_devices=False)
     assert restored.dynamic_roi_checkbox.isChecked()
     assert not restored._service_form.isRowVisible(restored.settle_rescan_spin)
-    assert restored._service_form.isRowVisible(restored.roi_settle_spin)
+    assert restored._service_form.isRowVisible(
+        restored.roi_response_target_spin
+    )
     assert restored.change_poll_spin.value() == 10
-    assert restored.roi_settle_spin.value() == 220
-    assert restored.roi_ocr_interval_spin.value() == 200
-    assert restored.roi_max_coalesce_spin.value() == 500
+    assert restored.roi_response_target_spin.value() == 700
     restored.close()
     app.processEvents()
 

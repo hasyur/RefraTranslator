@@ -673,6 +673,7 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
             stable_observations=99,
             dynamic_roi_enabled=True,
             change_poll_fps=5,
+            dynamic_roi_response_target_ms=500,
             dynamic_roi_settle_ms=100,
             dynamic_roi_ocr_interval_ms=250,
             dynamic_roi_max_coalesce_ms=450,
@@ -698,9 +699,10 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     controller._tick()
     assert controller._roi_scheduler is not None
     assert controller._roi_scheduler.primed
-    assert controller._roi_scheduler.settle_interval_s == 0.1
-    assert controller._roi_scheduler.min_ocr_interval_s == 0.25
-    assert controller._roi_scheduler.max_coalesce_s == 0.45
+    assert controller._roi_scheduler.settle_interval_s == 0.05
+    assert controller._roi_scheduler.min_ocr_interval_s == 0.1
+    assert controller._roi_scheduler.max_coalesce_s == 0.5
+    assert controller._roi_scheduler.response_target_s == 0.5
     assert controller._timer.interval() == 200
     assert [track.text for track in controller._tracker.visible_tracks] == [
         "待って。",
@@ -736,7 +738,14 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     assert controller._roi_full_fallback_count == 0
     assert controller._roi_scheduler.productive_result_count == 1
     assert controller._roi_scheduler.empty_result_count == 0
-    assert controller._roi_scheduler.effective_min_ocr_interval_s == 0.25
+    assert controller._roi_scheduler.effective_min_ocr_interval_s == 0.1
+    assert controller._roi_scheduler.remaining_cost_sample_counts == (1, 1)
+    assert controller._roi_scheduler.predicted_roi_remaining_s == pytest.approx(
+        0.1
+    )
+    assert controller._roi_scheduler.predicted_full_remaining_s == pytest.approx(
+        0.05
+    )
     latency = controller._latency_stats.latest_ocr_breakdown
     assert latency is not None
     assert latency.scan_kind == "roi"
@@ -984,8 +993,11 @@ def test_dynamic_roi_retries_until_visible_text_revision_is_confirmed(
     capture.frame = _dynamic_roi_frame(changed=True)
     clock[0] = 10.3
     controller._tick()
-    controller._ocr_future.result(timeout=2)
+    assert controller._ocr_future is None
     clock[0] = 10.35
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.4
     controller._tick()
 
     waiting = next(
@@ -1064,20 +1076,26 @@ def test_dynamic_roi_empty_results_back_off_without_losing_next_text(
     capture.frame = scene(background=50)
     clock[0] = 10.3
     controller._tick()
-    controller._ocr_future.result(timeout=2)
+    assert controller._ocr_future is None
     clock[0] = 10.35
     controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.4
+    controller._tick()
     assert scheduler.empty_result_count == 1
-    assert scheduler.effective_min_ocr_interval_s == 0.25
+    assert scheduler.effective_min_ocr_interval_s == 0.1
 
     capture.frame = scene(background=80)
     clock[0] = 10.6
     controller._tick()
-    controller._ocr_future.result(timeout=2)
+    assert controller._ocr_future is None
     clock[0] = 10.65
     controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.7
+    controller._tick()
     assert scheduler.empty_result_count == 2
-    assert scheduler.effective_min_ocr_interval_s == 0.375
+    assert scheduler.effective_min_ocr_interval_s == 0.15
 
     capture.frame = scene(background=80, changed_text=True)
     clock[0] = 10.9
@@ -1092,7 +1110,7 @@ def test_dynamic_roi_empty_results_back_off_without_losing_next_text(
 
     assert scheduler.productive_result_count == 1
     assert scheduler.empty_result_streak == 0
-    assert scheduler.effective_min_ocr_interval_s == 0.25
+    assert scheduler.effective_min_ocr_interval_s == 0.1
     assert [track.text for track in controller._tracker.visible_tracks] == [
         "止まれ。",
         "先へ進め。",

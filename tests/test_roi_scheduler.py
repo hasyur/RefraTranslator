@@ -244,3 +244,134 @@ def test_repeated_empty_results_back_off_and_real_target_restores_rate() -> None
     assert scheduler.productive_result_count == 1
     assert scheduler.empty_result_streak == 0
     assert scheduler.effective_min_ocr_interval_s == pytest.approx(0.4)
+
+
+def test_response_target_dispatches_before_unreachable_full_frame_budget() -> None:
+    base = _blank()
+    widespread = base.copy()
+    widespread[:, :160] = 255
+    scheduler = LatestFrameRoiScheduler(
+        _detector(),
+        min_ocr_interval_s=0.4,
+        settle_interval_s=0.3,
+        max_coalesce_s=0.5,
+        response_target_s=0.5,
+    )
+    scheduler.prime(base, 0.0)
+    scheduler.record_scan_cost("full", 0.8)
+
+    job = scheduler.observe(widespread, 0.1)
+
+    assert job is not None
+    assert job.proposal.fallback_full_frame
+    assert job.trigger_reason == "response-deadline"
+    assert job.predicted_scan_kind == "full"
+    assert job.predicted_remaining_s == pytest.approx(0.8)
+    assert job.response_wait_budget_s == 0.0
+
+
+def test_response_target_still_allows_a_settled_local_frame_to_run_early() -> None:
+    base = _blank()
+    changed = _paint(base, 120, 70)
+    scheduler = LatestFrameRoiScheduler(
+        _detector(),
+        min_ocr_interval_s=0.1,
+        settle_interval_s=0.05,
+        max_coalesce_s=0.5,
+        response_target_s=0.5,
+    )
+    scheduler.prime(base, 0.0)
+    scheduler.record_scan_cost("roi", 0.12)
+
+    assert scheduler.observe(changed, 0.1) is None
+    job = scheduler.observe(changed.copy(), 0.16)
+
+    assert job is not None
+    assert job.trigger_reason == "settled"
+    assert job.predicted_scan_kind == "roi"
+    assert job.predicted_remaining_s == pytest.approx(0.12)
+    assert job.response_wait_budget_s == pytest.approx(0.38)
+
+
+def test_response_cost_learning_is_separate_and_smoothed_by_scan_kind() -> None:
+    scheduler = LatestFrameRoiScheduler(
+        _detector(),
+        response_target_s=0.5,
+    )
+
+    scheduler.record_scan_cost("full", 1.0)
+    assert scheduler.predicted_full_remaining_s == pytest.approx(1.0)
+    assert scheduler.predicted_roi_remaining_s == pytest.approx(0.3)
+
+    scheduler.record_scan_cost("full", 0.6)
+    scheduler.record_scan_cost("roi", 0.2)
+    scheduler.record_scan_cost("roi", 0.4)
+
+    assert scheduler.predicted_full_remaining_s == pytest.approx(0.9)
+    assert scheduler.predicted_roi_remaining_s == pytest.approx(0.25)
+    assert scheduler.remaining_cost_sample_counts == (2, 2)
+
+
+def test_late_contextual_full_fallback_guides_only_the_next_local_budget() -> None:
+    base = _blank()
+    first = _paint(base, 40, 70)
+    second = _paint(first, 140, 70)
+    third = _paint(second, 240, 70)
+    scheduler = LatestFrameRoiScheduler(
+        _detector(),
+        min_ocr_interval_s=0.1,
+        settle_interval_s=0.05,
+        max_coalesce_s=0.5,
+        response_target_s=0.5,
+    )
+    scheduler.prime(base, 0.0)
+    scheduler.record_scan_cost("full", 0.8)
+
+    assert scheduler.observe(first, 0.1) is None
+    first_job = scheduler.observe(first.copy(), 0.16)
+    assert first_job is not None
+    assert first_job.predicted_scan_kind == "roi"
+    scheduler.record_scan_outcome(first_job, "full")
+    assert scheduler.complete(
+        first_job,
+        accepted=True,
+        completed_at_s=0.16,
+        target_count=1,
+    ) is None
+
+    second_job = scheduler.observe(second, 0.17)
+    assert second_job is not None
+    assert not second_job.proposal.fallback_full_frame
+    assert second_job.predicted_scan_kind == "full"
+    assert second_job.trigger_reason == "response-deadline"
+    scheduler.record_scan_outcome(second_job, "roi")
+    assert scheduler.complete(
+        second_job,
+        accepted=True,
+        completed_at_s=0.17,
+        target_count=1,
+    ) is None
+
+    assert scheduler.observe(third, 0.27) is None
+    third_job = scheduler.observe(third.copy(), 0.33)
+    assert third_job is not None
+    assert third_job.predicted_scan_kind == "roi"
+
+
+@pytest.mark.parametrize(
+    ("scan_kind", "seconds", "message"),
+    (
+        ("unknown", 0.1, "scan_kind"),
+        ("roi", -0.1, "remaining_seconds"),
+        ("full", float("nan"), "remaining_seconds"),
+    ),
+)
+def test_response_cost_learning_rejects_invalid_samples(
+    scan_kind: str,
+    seconds: float,
+    message: str,
+) -> None:
+    scheduler = LatestFrameRoiScheduler(_detector())
+
+    with pytest.raises(ValueError, match=message):
+        scheduler.record_scan_cost(scan_kind, seconds)

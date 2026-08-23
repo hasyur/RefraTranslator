@@ -147,6 +147,9 @@ class LiveConfig:
     settle_rescan_ms: int = 500
     idle_rescan_ms: int = 2000
     dynamic_roi_enabled: bool = False
+    dynamic_roi_response_target_ms: int = 500
+    # Load-compatible legacy tuning fields. The adaptive response target is
+    # the user-facing control; these values remain accepted for old configs.
     dynamic_roi_settle_ms: int = 180
     dynamic_roi_ocr_interval_ms: int = 333
     dynamic_roi_max_coalesce_ms: int = 333
@@ -190,6 +193,10 @@ class LiveConfig:
             raise ConfigError("live.idle_rescan_ms 必须在 0 到 60000 之间")
         if type(self.dynamic_roi_enabled) is not bool:
             raise ConfigError("live.dynamic_roi_enabled 必须是 true 或 false")
+        if not 100 <= self.dynamic_roi_response_target_ms <= 5_000:
+            raise ConfigError(
+                "live.dynamic_roi_response_target_ms 必须在 100 到 5000 之间"
+            )
         if not 0 <= self.dynamic_roi_settle_ms <= 10_000:
             raise ConfigError("live.dynamic_roi_settle_ms 必须在 0 到 10000 之间")
         if not 50 <= self.dynamic_roi_ocr_interval_ms <= 10_000:
@@ -283,7 +290,8 @@ _PREVIEW_VALUE_RE = re.compile(
 _LIVE_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
     r"capture_fps|change_poll_fps|ocr_cooldown_ms|settle_rescan_ms|idle_rescan_ms|clear_after_ms|"
-    r"dynamic_roi_enabled|dynamic_roi_settle_ms|dynamic_roi_ocr_interval_ms|"
+    r"dynamic_roi_enabled|dynamic_roi_response_target_ms|"
+    r"dynamic_roi_settle_ms|dynamic_roi_ocr_interval_ms|"
     r"dynamic_roi_max_coalesce_ms)"
     r"[ \t]*="
 )
@@ -312,6 +320,7 @@ def save_translation_selection(
         clear_after_ms=None,
         dynamic_roi_enabled=None,
         change_poll_fps=None,
+        dynamic_roi_response_target_ms=None,
         dynamic_roi_settle_ms=None,
         dynamic_roi_ocr_interval_ms=None,
         dynamic_roi_max_coalesce_ms=None,
@@ -335,6 +344,7 @@ def save_runtime_selection(
     clear_after_ms: int | None = None,
     dynamic_roi_enabled: bool | None = None,
     change_poll_fps: int | None = None,
+    dynamic_roi_response_target_ms: int | None = None,
     dynamic_roi_settle_ms: int | None = None,
     dynamic_roi_ocr_interval_ms: int | None = None,
     dynamic_roi_max_coalesce_ms: int | None = None,
@@ -356,6 +366,7 @@ def save_runtime_selection(
         clear_after_ms=clear_after_ms,
         dynamic_roi_enabled=dynamic_roi_enabled,
         change_poll_fps=change_poll_fps,
+        dynamic_roi_response_target_ms=dynamic_roi_response_target_ms,
         dynamic_roi_settle_ms=dynamic_roi_settle_ms,
         dynamic_roi_ocr_interval_ms=dynamic_roi_ocr_interval_ms,
         dynamic_roi_max_coalesce_ms=dynamic_roi_max_coalesce_ms,
@@ -379,6 +390,7 @@ def _save_selected_values(
     clear_after_ms: int | None,
     dynamic_roi_enabled: bool | None,
     change_poll_fps: int | None,
+    dynamic_roi_response_target_ms: int | None,
     dynamic_roi_settle_ms: int | None,
     dynamic_roi_ocr_interval_ms: int | None,
     dynamic_roi_max_coalesce_ms: int | None,
@@ -453,6 +465,11 @@ def _save_selected_values(
             current.live.change_poll_fps
             if change_poll_fps is None
             else change_poll_fps
+        ),
+        dynamic_roi_response_target_ms=(
+            current.live.dynamic_roi_response_target_ms
+            if dynamic_roi_response_target_ms is None
+            else dynamic_roi_response_target_ms
         ),
         dynamic_roi_settle_ms=(
             current.live.dynamic_roi_settle_ms
@@ -561,6 +578,7 @@ def _save_selected_values(
             clear_after_ms,
             dynamic_roi_enabled,
             change_poll_fps,
+            dynamic_roi_response_target_ms,
             dynamic_roi_settle_ms,
             dynamic_roi_ocr_interval_ms,
             dynamic_roi_max_coalesce_ms,
@@ -596,6 +614,11 @@ def _save_selected_values(
             change_poll_fps=(
                 candidate_live.change_poll_fps
                 if change_poll_fps is not None
+                else None
+            ),
+            dynamic_roi_response_target_ms=(
+                candidate_live.dynamic_roi_response_target_ms
+                if dynamic_roi_response_target_ms is not None
                 else None
             ),
             dynamic_roi_settle_ms=(
@@ -776,6 +799,7 @@ def _upsert_live_values(
     clear_after_ms: int | None,
     dynamic_roi_enabled: bool | None,
     change_poll_fps: int | None,
+    dynamic_roi_response_target_ms: int | None,
     dynamic_roi_settle_ms: int | None,
     dynamic_roi_ocr_interval_ms: int | None,
     dynamic_roi_max_coalesce_ms: int | None,
@@ -796,6 +820,10 @@ def _upsert_live_values(
             ("clear_after_ms", clear_after_ms),
             ("dynamic_roi_enabled", dynamic_roi_enabled),
             ("change_poll_fps", change_poll_fps),
+            (
+                "dynamic_roi_response_target_ms",
+                dynamic_roi_response_target_ms,
+            ),
             ("dynamic_roi_settle_ms", dynamic_roi_settle_ms),
             ("dynamic_roi_ocr_interval_ms", dynamic_roi_ocr_interval_ms),
             ("dynamic_roi_max_coalesce_ms", dynamic_roi_max_coalesce_ms),

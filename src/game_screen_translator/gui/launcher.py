@@ -848,6 +848,21 @@ class LauncherWindow(QMainWindow):
         )
         self._service_form.addRow("变化检测频率", self.change_poll_spin)
 
+        self.roi_response_target_spin = QSpinBox()
+        self.roi_response_target_spin.setRange(100, 5_000)
+        self.roi_response_target_spin.setValue(
+            self._config.live.dynamic_roi_response_target_ms
+        )
+        self.roi_response_target_spin.setSingleStep(50)
+        self.roi_response_target_spin.setAccelerated(True)
+        self.roi_response_target_spin.setSuffix(" ms")
+        self.roi_response_target_spin.setToolTip(
+            "从首次检测到一轮画面变化，到 OCR 更新文字状态的期望上限。"
+            "程序会分别学习局部 ROI 与整帧扫描成本，并从目标中扣除预计处理时间；"
+            "若机器无法达到目标，会立即提交而不会承诺不可能的耗时。"
+        )
+        self._service_form.addRow("画面响应目标", self.roi_response_target_spin)
+
         self.clear_after_spin = QSpinBox()
         self.clear_after_spin.setRange(50, 1_000)
         self.clear_after_spin.setValue(self._config.live.clear_after_ms)
@@ -895,39 +910,6 @@ class LauncherWindow(QMainWindow):
         )
         self._service_form.addRow("OCR 冷却", self.ocr_cooldown_spin)
 
-        self.roi_settle_spin = QSpinBox()
-        self.roi_settle_spin.setRange(0, 10_000)
-        self.roi_settle_spin.setValue(self._config.live.dynamic_roi_settle_ms)
-        self.roi_settle_spin.setSingleStep(20)
-        self.roi_settle_spin.setAccelerated(True)
-        self.roi_settle_spin.setSuffix(" ms")
-        self.roi_settle_spin.setSpecialValueText("立即")
-        self.roi_settle_spin.setToolTip(
-            "最后一次检测到局部变化后，画面持续稳定多久才允许提交最新 ROI。"
-        )
-        self._service_form.addRow("ROI 稳定等待", self.roi_settle_spin)
-
-        self.roi_ocr_interval_spin = QSpinBox()
-        self.roi_ocr_interval_spin.setRange(50, 10_000)
-        self.roi_ocr_interval_spin.setValue(self._config.live.dynamic_roi_ocr_interval_ms)
-        self.roi_ocr_interval_spin.setSingleStep(25)
-        self.roi_ocr_interval_spin.setAccelerated(True)
-        self.roi_ocr_interval_spin.setSuffix(" ms")
-        self.roi_ocr_interval_spin.setToolTip(
-            "两次 ROI OCR 提交之间的最短间隔。333 ms 约等于 3 Hz。"
-        )
-        self._service_form.addRow("ROI OCR 间隔", self.roi_ocr_interval_spin)
-
-        self.roi_max_coalesce_spin = QSpinBox()
-        self.roi_max_coalesce_spin.setRange(50, 10_000)
-        self.roi_max_coalesce_spin.setValue(self._config.live.dynamic_roi_max_coalesce_ms)
-        self.roi_max_coalesce_spin.setSingleStep(25)
-        self.roi_max_coalesce_spin.setAccelerated(True)
-        self.roi_max_coalesce_spin.setSuffix(" ms")
-        self.roi_max_coalesce_spin.setToolTip(
-            "连续变化最多合并多久；超时后会尝试处理最新状态。"
-        )
-        self._service_form.addRow("ROI 最大合并", self.roi_max_coalesce_spin)
         advanced_layout.addWidget(self.advanced_settings_content)
         self.advanced_settings_content.setVisible(False)
         self.advanced_settings_button.toggled.connect(
@@ -1280,9 +1262,9 @@ class LauncherWindow(QMainWindow):
             clear_after_ms=self.clear_after_spin.value(),
             dynamic_roi_enabled=self.dynamic_roi_checkbox.isChecked(),
             change_poll_fps=self.change_poll_spin.value(),
-            dynamic_roi_settle_ms=self.roi_settle_spin.value(),
-            dynamic_roi_ocr_interval_ms=self.roi_ocr_interval_spin.value(),
-            dynamic_roi_max_coalesce_ms=self.roi_max_coalesce_spin.value(),
+            dynamic_roi_response_target_ms=(
+                self.roi_response_target_spin.value()
+            ),
         )
 
     def _preview_overlay_opacity_candidate(self) -> float:
@@ -1300,12 +1282,10 @@ class LauncherWindow(QMainWindow):
             self.ocr_cooldown_spin,
         ):
             self._service_form.setRowVisible(control, not dynamic_roi_enabled)
-        for control in (
-            self.roi_settle_spin,
-            self.roi_ocr_interval_spin,
-            self.roi_max_coalesce_spin,
-        ):
-            self._service_form.setRowVisible(control, dynamic_roi_enabled)
+        self._service_form.setRowVisible(
+            self.roi_response_target_spin,
+            dynamic_roi_enabled,
+        )
 
     def _toggle_advanced_settings(self, expanded: bool) -> None:
         self.advanced_settings_content.setVisible(expanded)
@@ -1322,9 +1302,7 @@ class LauncherWindow(QMainWindow):
             return (
                 f"动态 ROI 开 · 捕获 {live.capture_fps} FPS · "
                 f"热图 {live.change_poll_fps} Hz · "
-                f"稳定 {live.dynamic_roi_settle_ms} ms · "
-                f"OCR 间隔 {live.dynamic_roi_ocr_interval_ms} ms · "
-                f"合并 {live.dynamic_roi_max_coalesce_ms} ms · "
+                f"响应目标 {live.dynamic_roi_response_target_ms} ms · "
                 f"消失宽限 {live.clear_after_ms} ms"
             )
         return (
@@ -1476,10 +1454,8 @@ class LauncherWindow(QMainWindow):
                 clear_after_ms=live.clear_after_ms,
                 dynamic_roi_enabled=live.dynamic_roi_enabled,
                 change_poll_fps=live.change_poll_fps,
-                dynamic_roi_settle_ms=live.dynamic_roi_settle_ms,
-                dynamic_roi_ocr_interval_ms=live.dynamic_roi_ocr_interval_ms,
-                dynamic_roi_max_coalesce_ms=(
-                    live.dynamic_roi_max_coalesce_ms
+                dynamic_roi_response_target_ms=(
+                    live.dynamic_roi_response_target_ms
                 ),
             )
         except (ConfigError, OSError, RuntimeError, ValueError) as exc:
@@ -1511,14 +1487,8 @@ class LauncherWindow(QMainWindow):
         self.ocr_cooldown_spin.setValue(self._config.live.ocr_cooldown_ms)
         self.clear_after_spin.setValue(self._config.live.clear_after_ms)
         self.change_poll_spin.setValue(self._config.live.change_poll_fps)
-        self.roi_settle_spin.setValue(
-            self._config.live.dynamic_roi_settle_ms
-        )
-        self.roi_ocr_interval_spin.setValue(
-            self._config.live.dynamic_roi_ocr_interval_ms
-        )
-        self.roi_max_coalesce_spin.setValue(
-            self._config.live.dynamic_roi_max_coalesce_ms
+        self.roi_response_target_spin.setValue(
+            self._config.live.dynamic_roi_response_target_ms
         )
         self.service_status_label.setText(
             f"当前：{self._config.translation.model} · "

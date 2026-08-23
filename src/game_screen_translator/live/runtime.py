@@ -94,6 +94,8 @@ _TRANSLATION_RETRY_BASE_SECONDS = 0.35
 _PENDING_TRANSLATION_BATCHES_PER_WORKER = 2
 _ROI_INITIAL_RETRY_SECONDS = 1.0
 _ROI_INTERNAL_EDGE_MARGIN = 12
+_ROI_INTERNAL_MIN_OCR_INTERVAL_S = 0.1
+_ROI_INTERNAL_SETTLE_INTERVAL_S = 0.05
 _COMPLETION_POLL_INTERVAL_MS = 25
 
 
@@ -114,11 +116,13 @@ def _bounds_distance_squared(first: Bounds | None, second: Bounds) -> float:
 def _create_roi_scheduler(config: AppConfig) -> LatestFrameRoiScheduler | None:
     if not config.live.dynamic_roi_enabled:
         return None
+    response_target_s = config.live.dynamic_roi_response_target_ms / 1000
     return LatestFrameRoiScheduler(
         FullScreenRoiDetector(),
-        min_ocr_interval_s=config.live.dynamic_roi_ocr_interval_ms / 1000,
-        settle_interval_s=config.live.dynamic_roi_settle_ms / 1000,
-        max_coalesce_s=config.live.dynamic_roi_max_coalesce_ms / 1000,
+        min_ocr_interval_s=_ROI_INTERNAL_MIN_OCR_INTERVAL_S,
+        settle_interval_s=_ROI_INTERNAL_SETTLE_INTERVAL_S,
+        max_coalesce_s=response_target_s,
+        response_target_s=response_target_s,
     )
 
 
@@ -510,10 +514,9 @@ class LiveController:
         )
         scheduling = (
             "实验性动态 ROI：热图 "
-            f"{self._config.live.change_poll_fps} Hz / 稳定 "
-            f"{self._config.live.dynamic_roi_settle_ms} ms / OCR 间隔 "
-            f"{self._config.live.dynamic_roi_ocr_interval_ms} ms / 最长合并 "
-            f"{self._config.live.dynamic_roi_max_coalesce_ms} ms / "
+            f"{self._config.live.change_poll_fps} Hz / 画面响应目标 "
+            f"{self._config.live.dynamic_roi_response_target_ms} ms / "
+            "按局部与整帧实测成本分配等待 / "
             f"连续空目标最高退避至 "
             f"{round(self._roi_scheduler.max_adaptive_ocr_interval_s * 1000)} ms"
             if self._roi_scheduler is not None
@@ -640,6 +643,17 @@ class LiveController:
                     f"{round(self._roi_scheduler.effective_min_ocr_interval_s * 1000)} ms/"
                     f"{round(self._roi_scheduler.peak_adaptive_ocr_interval_s * 1000)} ms"
                 )
+            roi_samples, full_samples = (
+                self._roi_scheduler.remaining_cost_sample_counts
+            )
+            print(
+                "动态 ROI 响应预算：目标 "
+                f"{self._config.live.dynamic_roi_response_target_ms} ms，"
+                "预测提交后成本 局部/整帧 "
+                f"{round(self._roi_scheduler.predicted_roi_remaining_s * 1000)} ms/"
+                f"{round(self._roi_scheduler.predicted_full_remaining_s * 1000)} ms"
+                f"（样本 {roi_samples}/{full_samples}）"
+            )
             if self._roi_fallback_reasons:
                 reasons = "、".join(
                     f"{reason} {count} 次"
@@ -829,6 +843,13 @@ class LiveController:
         )
         if not plan.regions:
             raise RuntimeError("动态 ROI 调度产生了空 OCR 计划")
+        if self._debug:
+            print(
+                "动态 ROI 响应预算："
+                f"{job.trigger_reason} / 预测 {job.predicted_scan_kind} 后续 "
+                f"{round(job.predicted_remaining_s * 1000)} ms / "
+                f"允许等待 {round(job.response_wait_budget_s * 1000)} ms"
+            )
         planned_rois = tuple(region.roi for region in plan.regions)
         rois: tuple[OcrRoi, ...] | None = (
             None
@@ -1140,8 +1161,32 @@ class LiveController:
                 print("稳定字幕：" + " | ".join(item.text for item in update.stable_sources))
             self._submit_translations(update.stable_sources)
 
-        follow_up = None
         scheduler = self._roi_scheduler
+        if scheduler is not None and ocr_latency_origin is not None:
+            estimate_recorded_at = time.monotonic()
+            if roi_job is not None:
+                scheduler.record_scan_outcome(
+                    roi_job,
+                    ocr_latency_origin.scan_kind,
+                )
+            scheduler.record_scan_cost(
+                ocr_latency_origin.scan_kind,
+                max(
+                    0.0,
+                    ocr_latency_origin.executor_submitted_at
+                    - ocr_latency_origin.scheduler_dispatched_at,
+                )
+                + max(
+                    0.0,
+                    task_result.started_at
+                    - ocr_latency_origin.executor_submitted_at,
+                )
+                + ocr_seconds
+                + max(0.0, now - task_result.completed_at)
+                + max(0.0, estimate_recorded_at - now),
+            )
+
+        follow_up = None
         if scheduler is not None:
             if roi_job is not None:
                 accepted = (
