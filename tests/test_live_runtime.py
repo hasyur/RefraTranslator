@@ -215,6 +215,103 @@ def test_live_controller_uses_configured_translation_concurrency() -> None:
     controller.close()
 
 
+def test_live_controller_collects_completed_work_on_independent_timer(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(change_poll_fps=5),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    collected: list[str] = []
+    monkeypatch.setattr(controller, "_collect_ocr", lambda: collected.append("ocr"))
+    monkeypatch.setattr(
+        controller,
+        "_collect_translations",
+        lambda: collected.append("translation"),
+    )
+
+    assert controller._timer.interval() == 200
+    assert controller._completion_timer.interval() == 25
+
+    controller._completion_timer.timeout.emit()
+
+    assert collected == ["ocr", "translation"]
+    controller.close()
+
+
+def test_completion_timer_collects_finished_ocr_without_change_tick() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(stable_observations=99),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+
+    controller._submit_ocr(np.zeros((120, 320, 3), dtype=np.uint8))
+    controller._ocr_future.result(timeout=2)
+    assert controller._ocr_scan_count == 0
+
+    controller._completion_timer.timeout.emit()
+
+    assert controller._ocr_future is None
+    assert controller._ocr_scan_count == 1
+    assert [track.text for track in controller._tracker.visible_tracks] == ["待って。"]
+    controller.close()
+
+
+def test_live_controller_starts_and_stops_both_runtime_timers() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        )
+    )
+    controller = LiveController(
+        config,
+        capture=MutableCapture(np.zeros((900, 1600, 3), dtype=np.uint8)),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+
+    controller.start()
+
+    assert controller._timer.isActive()
+    assert controller._completion_timer.isActive()
+
+    controller.close()
+
+    assert not controller._timer.isActive()
+    assert not controller._completion_timer.isActive()
+
+
 def test_ocr_filter_rejects_noise_before_tracking_and_translation() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(

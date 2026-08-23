@@ -94,6 +94,7 @@ _TRANSLATION_RETRY_BASE_SECONDS = 0.35
 _PENDING_TRANSLATION_BATCHES_PER_WORKER = 2
 _ROI_INITIAL_RETRY_SECONDS = 1.0
 _ROI_INTERNAL_EDGE_MARGIN = 12
+_COMPLETION_POLL_INTERVAL_MS = 25
 
 
 def _live_message(message: str) -> None:
@@ -474,6 +475,14 @@ class LiveController:
         self._timer = QTimer()
         self._timer.setInterval(max(10, round(1000 / config.live.change_poll_fps)))
         self._timer.timeout.connect(self._tick)
+        # OCR and translation completion used to be observed only by the
+        # change-detection timer.  At 6 Hz that added about half a tick of
+        # avoidable latency after native work had already finished.  Keep a
+        # cheap, independent completion poll so lowering the heatmap cadence
+        # does not also delay completed results.
+        self._completion_timer = QTimer()
+        self._completion_timer.setInterval(_COMPLETION_POLL_INTERVAL_MS)
+        self._completion_timer.timeout.connect(self._collect_completed_work)
         self._control.set_latency(self._latency_stats.render())
 
     def start(self) -> None:
@@ -526,6 +535,7 @@ class LiveController:
         set_paused = getattr(self._control, "set_paused", None)
         if callable(set_paused):
             set_paused(False)
+        self._completion_timer.start()
         self._timer.start()
 
     @property
@@ -595,6 +605,7 @@ class LiveController:
             return
         self._shutting_down = True
         self._timer.stop()
+        self._completion_timer.stop()
         self._capture.close()
         self._ocr_executor.shutdown(wait=True, cancel_futures=True)
         self._translation_executor.shutdown(wait=True, cancel_futures=True)
@@ -649,12 +660,12 @@ class LiveController:
     def _tick(self) -> None:
         if self._shutting_down:
             return
-        self._collect_ocr()
+        # Opportunistic fallback for tests and delayed Qt timer delivery.  In
+        # normal operation the independent completion timer gets here first.
+        self._collect_completed_work()
         if self._paused:
-            self._collect_translations()
             return
         self._expire_missing_tracks(time.monotonic())
-        self._collect_translations()
         self._queue_untranslated_visible_sources()
         self._dispatch_translation_work()
 
@@ -680,6 +691,12 @@ class LiveController:
             self._tick_legacy_ocr(frame, now)
 
         self._overlay.set_scene(frame, self._tracker.visible_tracks)
+
+    def _collect_completed_work(self) -> None:
+        if self._shutting_down:
+            return
+        self._collect_ocr()
+        self._collect_translations()
 
     def _tick_dynamic_roi(self, frame: np.ndarray, now: float) -> None:
         scheduler = self._roi_scheduler
@@ -1967,6 +1984,7 @@ class LiveController:
         print(message, file=sys.stderr)
         self._control.set_status("实时翻译已停止", message)
         self._timer.stop()
+        self._completion_timer.stop()
         self._capture.close()
 
 
