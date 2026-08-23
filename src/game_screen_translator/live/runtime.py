@@ -130,6 +130,16 @@ class _OcrTaskResult:
 
 
 @dataclass(frozen=True, slots=True)
+class _OcrLatencyOrigin:
+    scan_kind: str
+    scan_label: str
+    change_started_at: float
+    last_changed_at: float
+    scheduler_dispatched_at: float
+    executor_submitted_at: float
+
+
+@dataclass(frozen=True, slots=True)
 class _LayoutResult:
     observations: tuple[OcrText, ...]
     rejected: tuple[RejectedOcrText, ...]
@@ -225,8 +235,9 @@ class LiveControlWindow(QWidget):
         self._latency = QLabel("延迟统计：等待首个 OCR 样本……")
         self._latency.setWordWrap(True)
         self._latency.setToolTip(
-            "OCR 是单轮识别；稳定是首轮识别后等待入队；"
-            "排队是等待翻译线程；总计从画面变化触发 OCR 到译文可显示。"
+            "画面延迟按局部 ROI/整帧拆分：变化持续包含 Latest Wins 合并，"
+            "调度包含稳定与频率门，准备是 ROI 规划，线程是执行器排队，"
+            "接收/更新是 OCR 完成后的主线程处理。翻译总计从首次画面变化到译文可显示。"
         )
         self._filter = QLabel("文字过滤：等待首个 OCR 样本……")
         self._filter.setWordWrap(True)
@@ -401,6 +412,7 @@ class LiveController:
         self._active_roi_plan: ContextualRoiPlan | None = None
         self._active_roi_anchors: tuple[TrackedText, ...] = ()
         self._active_ocr_cost: OcrComputeEstimate | None = None
+        self._active_ocr_latency_origin: _OcrLatencyOrigin | None = None
         self._translation_futures: dict[
             Future[_TranslationWorkerResult], _TranslationSubmission
         ] = {}
@@ -421,6 +433,7 @@ class LiveController:
         self._latest_context_order_group = -1
         self._pending_ocr_frame: np.ndarray | None = None
         self._pending_ocr_triggered_at: float | None = None
+        self._pending_ocr_change_started_at: float | None = None
         self._latest_frame: np.ndarray | None = None
         self._source_latency_origins: dict[
             tuple[str, int], _SourceLatencyOrigin
@@ -538,6 +551,7 @@ class LiveController:
         self._layout_stabilizer.reset()
         self._pending_ocr_frame = None
         self._pending_ocr_triggered_at = None
+        self._pending_ocr_change_started_at = None
         self._settle_rescan_due = None
         self._settle_rescan_triggered_at = None
         self._pending_translations.clear()
@@ -565,6 +579,7 @@ class LiveController:
         )
         self._pending_ocr_frame = None
         self._pending_ocr_triggered_at = None
+        self._pending_ocr_change_started_at = None
         self._last_ocr_completed = 0.0
         self._next_ocr_allowed = 0.0
         self._settle_rescan_due = None
@@ -629,6 +644,7 @@ class LiveController:
             print(self._ocr_cost_stats.summary())
         if self._ocr_scan_count:
             print("延迟统计：" + self._latency_stats.render().replace("\n", "；"))
+            print(self._latency_stats.render_ocr_summary())
 
     def _tick(self) -> None:
         if self._shutting_down:
@@ -705,6 +721,15 @@ class LiveController:
         ) and now - self._last_ocr_completed >= self._config.live.stable_ms / 1000
 
         if changed or needs_stability_scan or settle_rescan_due or idle_rescan_due:
+            if self._pending_ocr_change_started_at is None:
+                self._pending_ocr_change_started_at = (
+                    now
+                    if changed
+                    else self._settle_rescan_triggered_at
+                    if settle_rescan_due
+                    and self._settle_rescan_triggered_at is not None
+                    else now
+                )
             self._pending_ocr_frame = frame
             if changed:
                 self._pending_ocr_triggered_at = now
@@ -724,17 +749,28 @@ class LiveController:
         ):
             pending = self._pending_ocr_frame
             triggered_at = self._pending_ocr_triggered_at
+            change_started_at = self._pending_ocr_change_started_at
             self._pending_ocr_frame = None
             self._pending_ocr_triggered_at = None
-            self._submit_ocr(pending, triggered_at=triggered_at)
+            self._pending_ocr_change_started_at = None
+            self._submit_ocr(
+                pending,
+                triggered_at=triggered_at,
+                change_started_at=change_started_at,
+                scan_label="整帧扫描",
+            )
 
     def _submit_ocr(
         self,
         frame: np.ndarray,
         *,
         triggered_at: float | None = None,
+        change_started_at: float | None = None,
+        scan_label: str = "整帧扫描",
     ) -> None:
+        scheduler_dispatched_at = time.monotonic()
         trigger = time.monotonic() if triggered_at is None else triggered_at
+        change_start = trigger if change_started_at is None else change_started_at
         self._active_ocr_frame = frame
         self._active_ocr_epoch = self._session_epoch
         self._active_roi_job = None
@@ -745,6 +781,15 @@ class LiveController:
             (frame_width, frame_height),
             detection_max_side=self._config.ocr.detection_max_side,
             executed_rois=None,
+        )
+        executor_submitted_at = time.monotonic()
+        self._active_ocr_latency_origin = _OcrLatencyOrigin(
+            "full",
+            scan_label,
+            min(change_start, trigger),
+            trigger,
+            max(trigger, scheduler_dispatched_at),
+            max(scheduler_dispatched_at, executor_submitted_at),
         )
         self._ocr_future = self._ocr_executor.submit(
             self._run_ocr,
@@ -783,6 +828,15 @@ class LiveController:
             detection_max_side=self._config.ocr.detection_max_side,
             executed_rois=rois,
             candidate_rois=plan.candidate_rois or planned_rois,
+        )
+        executor_submitted_at = time.monotonic()
+        self._active_ocr_latency_origin = _OcrLatencyOrigin(
+            "full" if plan.fallback_full_frame else "roi",
+            "整帧回退" if plan.fallback_full_frame else "局部 ROI",
+            min(job.change_started_at_s, job.observed_at_s),
+            job.last_changed_at_s,
+            max(job.observed_at_s, job.dispatched_at_s),
+            max(job.dispatched_at_s, executor_submitted_at),
         )
         self._ocr_future = self._ocr_executor.submit(
             self._run_ocr,
@@ -872,6 +926,7 @@ class LiveController:
         roi_plan = self._active_roi_plan
         roi_anchors = self._active_roi_anchors
         ocr_cost = self._active_ocr_cost
+        ocr_latency_origin = self._active_ocr_latency_origin
         self._ocr_future = None
         self._active_ocr_frame = None
         self._active_ocr_epoch = None
@@ -879,6 +934,7 @@ class LiveController:
         self._active_roi_plan = None
         self._active_roi_anchors = ()
         self._active_ocr_cost = None
+        self._active_ocr_latency_origin = None
         if active_epoch != self._session_epoch:
             try:
                 future.result()
@@ -1004,8 +1060,6 @@ class LiveController:
                 f"累计过滤 {self._filtered_text_count} 条"
             )
         ocr_seconds = max(0.0, task_result.completed_at - task_result.started_at)
-        self._latency_stats.record_ocr(ocr_seconds)
-        self._refresh_latency_display()
         self._ocr_scan_count += 1
         if self._debug:
             print(f"耗时：OCR {ocr_seconds:.3f}s")
@@ -1052,7 +1106,11 @@ class LiveController:
             current_keys.add(key)
             if key not in previous_keys or key not in self._source_latency_origins:
                 self._source_latency_origins[key] = _SourceLatencyOrigin(
-                    pipeline_started_at=task_result.triggered_at,
+                    pipeline_started_at=(
+                        ocr_latency_origin.change_started_at
+                        if ocr_latency_origin is not None
+                        else task_result.triggered_at
+                    ),
                     first_recognized_at=task_result.completed_at,
                 )
         self._source_latency_origins = {
@@ -1089,6 +1147,41 @@ class LiveController:
                 if active_frame is None:
                     raise RuntimeError("首次动态 ROI OCR 缺少基准帧")
                 scheduler.prime(active_frame, now)
+        processed_at = time.monotonic()
+        if ocr_latency_origin is not None:
+            self._latency_stats.record_ocr_pipeline(
+                scan_kind=ocr_latency_origin.scan_kind,
+                scan_label=ocr_latency_origin.scan_label,
+                change_activity_seconds=max(
+                    0.0,
+                    ocr_latency_origin.last_changed_at
+                    - ocr_latency_origin.change_started_at,
+                ),
+                scheduling_seconds=max(
+                    0.0,
+                    ocr_latency_origin.scheduler_dispatched_at
+                    - ocr_latency_origin.last_changed_at,
+                ),
+                preparation_seconds=max(
+                    0.0,
+                    ocr_latency_origin.executor_submitted_at
+                    - ocr_latency_origin.scheduler_dispatched_at,
+                ),
+                worker_queue_seconds=max(
+                    0.0,
+                    task_result.started_at
+                    - ocr_latency_origin.executor_submitted_at,
+                ),
+                ocr_seconds=ocr_seconds,
+                collection_seconds=max(0.0, now - task_result.completed_at),
+                processing_seconds=max(0.0, processed_at - now),
+            )
+            self._refresh_latency_display()
+            if self._debug:
+                print(self._latency_stats.render_latest_ocr())
+        else:
+            self._latency_stats.record_ocr(ocr_seconds)
+            self._refresh_latency_display()
         if follow_up is not None:
             self._submit_roi_ocr(follow_up)
 

@@ -59,6 +59,8 @@ def test_coalesces_10hz_observations_until_the_3hz_ocr_slot() -> None:
 
     assert job is not None
     assert job.trigger_reason == "settled"
+    assert job.change_started_at_s == 0.1
+    assert job.last_changed_at_s == 0.2
     assert job.observed_at_s == 0.4
     assert np.array_equal(job.frame, second)
     assert not job.proposal.fallback_full_frame

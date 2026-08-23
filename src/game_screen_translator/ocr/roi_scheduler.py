@@ -25,6 +25,8 @@ class ScheduledRoiScan:
 
     job_id: int
     generation: int
+    change_started_at_s: float
+    last_changed_at_s: float
     observed_at_s: float
     dispatched_at_s: float
     frame: np.ndarray
@@ -227,6 +229,10 @@ class LatestFrameRoiScheduler:
             return None
 
         proposal = self._pending_proposal()
+        change_started_at_s = self._pending_since_s
+        assert change_started_at_s is not None
+        assert self._last_motion_at_s is not None
+        last_changed_at_s = max(change_started_at_s, self._last_motion_at_s)
         assert self._latest_frame is not None
         assert self._latest_sample is not None
         assert self._latest_at_s is not None
@@ -240,6 +246,8 @@ class LatestFrameRoiScheduler:
         job = ScheduledRoiScan(
             self._next_job_id,
             self._generation,
+            change_started_at_s,
+            min(last_changed_at_s, now_s),
             self._latest_at_s,
             now_s,
             self._latest_frame,

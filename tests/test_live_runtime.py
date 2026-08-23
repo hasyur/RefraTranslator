@@ -6,6 +6,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
+import pytest
 from PySide6.QtWidgets import QApplication
 
 from game_screen_translator.config import (
@@ -639,6 +640,14 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     assert controller._roi_scheduler.productive_result_count == 1
     assert controller._roi_scheduler.empty_result_count == 0
     assert controller._roi_scheduler.effective_min_ocr_interval_s == 0.25
+    latency = controller._latency_stats.latest_ocr_breakdown
+    assert latency is not None
+    assert latency.scan_kind == "roi"
+    assert latency.scan_label == "局部 ROI"
+    assert latency.change_activity_seconds == pytest.approx(0.0)
+    assert latency.scheduling_seconds == pytest.approx(0.2)
+    assert latency.collection_seconds == pytest.approx(0.1)
+    assert latency.total_seconds == pytest.approx(0.3)
     assert "执行ROI 1 次" in control.cost_status
     assert "候选 ROI 1 次" in control.cost_status
     assert "整屏的" in control.cost_status
@@ -1077,6 +1086,8 @@ def test_live_latency_display_covers_ocr_queue_and_cached_translation(
     controller._collect_translations()
 
     assert "OCR" in control.latency
+    assert "画面最近" in control.latency
+    assert "整帧扫描" in control.latency
     assert "稳定" in control.latency
     assert "排队" in control.latency
     assert "LLM 缓存命中" in control.latency

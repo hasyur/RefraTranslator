@@ -1,6 +1,16 @@
 from __future__ import annotations
 
+import math
+from collections import deque
 from dataclasses import dataclass
+from statistics import fmean
+
+
+_OCR_SAMPLE_WINDOW = 256
+_OCR_SCAN_KIND_LABELS = {
+    "roi": "局部 ROI",
+    "full": "整帧",
+}
 
 
 def _duration_label(seconds: float) -> str:
@@ -18,6 +28,35 @@ class LatencySnapshot:
     total_seconds: float | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class OcrLatencyBreakdown:
+    """One successful OCR scan from first detected change to updated text state."""
+
+    scan_kind: str
+    scan_label: str
+    change_activity_seconds: float
+    scheduling_seconds: float
+    preparation_seconds: float
+    worker_queue_seconds: float
+    ocr_seconds: float
+    collection_seconds: float
+    processing_seconds: float
+
+    @property
+    def total_seconds(self) -> float:
+        return sum(
+            (
+                self.change_activity_seconds,
+                self.scheduling_seconds,
+                self.preparation_seconds,
+                self.worker_queue_seconds,
+                self.ocr_seconds,
+                self.collection_seconds,
+                self.processing_seconds,
+            )
+        )
+
+
 class LiveLatencyStats:
     """Keeps lightweight latest/peak timings for the live control window."""
 
@@ -26,6 +65,12 @@ class LiveLatencyStats:
         self._peaks = LatencySnapshot()
         self._latest_batch_size: int | None = None
         self._latest_was_cache_only = False
+        self._latest_ocr_breakdown: OcrLatencyBreakdown | None = None
+        self._ocr_samples = {
+            kind: deque(maxlen=_OCR_SAMPLE_WINDOW)
+            for kind in _OCR_SCAN_KIND_LABELS
+        }
+        self._ocr_sample_counts = {kind: 0 for kind in _OCR_SCAN_KIND_LABELS}
 
     @property
     def latest(self) -> LatencySnapshot:
@@ -34,6 +79,10 @@ class LiveLatencyStats:
     @property
     def peaks(self) -> LatencySnapshot:
         return self._peaks
+
+    @property
+    def latest_ocr_breakdown(self) -> OcrLatencyBreakdown | None:
+        return self._latest_ocr_breakdown
 
     def record_ocr(self, seconds: float) -> None:
         seconds = self._validated(seconds, "OCR")
@@ -51,6 +100,42 @@ class LiveLatencyStats:
             llm_seconds=self._peaks.llm_seconds,
             total_seconds=self._peaks.total_seconds,
         )
+
+    def record_ocr_pipeline(
+        self,
+        *,
+        scan_kind: str,
+        scan_label: str,
+        change_activity_seconds: float,
+        scheduling_seconds: float,
+        preparation_seconds: float,
+        worker_queue_seconds: float,
+        ocr_seconds: float,
+        collection_seconds: float,
+        processing_seconds: float,
+    ) -> OcrLatencyBreakdown:
+        if scan_kind not in _OCR_SCAN_KIND_LABELS:
+            raise ValueError("scan_kind 必须是 roi 或 full")
+        if not scan_label.strip():
+            raise ValueError("scan_label 不能为空")
+        breakdown = OcrLatencyBreakdown(
+            scan_kind=scan_kind,
+            scan_label=scan_label.strip(),
+            change_activity_seconds=self._validated(
+                change_activity_seconds, "画面持续变化"
+            ),
+            scheduling_seconds=self._validated(scheduling_seconds, "OCR 调度"),
+            preparation_seconds=self._validated(preparation_seconds, "OCR 准备"),
+            worker_queue_seconds=self._validated(worker_queue_seconds, "OCR 线程排队"),
+            ocr_seconds=self._validated(ocr_seconds, "OCR"),
+            collection_seconds=self._validated(collection_seconds, "OCR 结果接收"),
+            processing_seconds=self._validated(processing_seconds, "OCR 结果更新"),
+        )
+        self.record_ocr(breakdown.ocr_seconds)
+        self._latest_ocr_breakdown = breakdown
+        self._ocr_samples[scan_kind].append(breakdown)
+        self._ocr_sample_counts[scan_kind] += 1
+        return breakdown
 
     def record_translation(
         self,
@@ -123,9 +208,71 @@ class LiveLatencyStats:
         )
         peak_parts = self._peak_parts()
         rendered = f"最近{batch}：" + " · ".join(latest_parts)
+        if self._latest_ocr_breakdown is not None:
+            rendered += "\n" + self._render_latest_ocr_breakdown(
+                self._latest_ocr_breakdown
+            )
         if peak_parts:
             rendered += "\n峰值：" + " · ".join(peak_parts)
         return rendered
+
+    def render_ocr_summary(self) -> str:
+        """Render bounded per-kind percentiles and phase averages for logs."""
+
+        parts: list[str] = []
+        for scan_kind, default_label in _OCR_SCAN_KIND_LABELS.items():
+            samples = tuple(self._ocr_samples[scan_kind])
+            if not samples:
+                continue
+            total_count = self._ocr_sample_counts[scan_kind]
+            window_label = (
+                f"最近 {len(samples)} 个" if total_count > len(samples) else f"{len(samples)} 个"
+            )
+            totals = tuple(sample.total_seconds for sample in samples)
+            ocr_values = tuple(sample.ocr_seconds for sample in samples)
+            phase_averages = (
+                ("变化持续", fmean(sample.change_activity_seconds for sample in samples)),
+                ("调度", fmean(sample.scheduling_seconds for sample in samples)),
+                ("准备", fmean(sample.preparation_seconds for sample in samples)),
+                ("线程", fmean(sample.worker_queue_seconds for sample in samples)),
+                ("OCR", fmean(ocr_values)),
+                ("接收", fmean(sample.collection_seconds for sample in samples)),
+                ("更新", fmean(sample.processing_seconds for sample in samples)),
+            )
+            parts.append(
+                f"{default_label}累计 {total_count} 次（统计 {window_label}）："
+                f"总计 P50 {_duration_label(self._percentile(totals, 0.50))}/"
+                f"P95 {_duration_label(self._percentile(totals, 0.95))}，"
+                f"OCR P50 {_duration_label(self._percentile(ocr_values, 0.50))}/"
+                f"P95 {_duration_label(self._percentile(ocr_values, 0.95))}；"
+                "阶段均值 "
+                + " · ".join(
+                    f"{label} {_duration_label(seconds)}"
+                    for label, seconds in phase_averages
+                )
+            )
+        if not parts:
+            return "画面扫描延迟：尚无成功 OCR 样本"
+        return "画面扫描延迟：\n" + "\n".join(parts)
+
+    def render_latest_ocr(self) -> str:
+        if self._latest_ocr_breakdown is None:
+            return "画面扫描延迟：尚无成功 OCR 样本"
+        return self._render_latest_ocr_breakdown(self._latest_ocr_breakdown)
+
+    @staticmethod
+    def _render_latest_ocr_breakdown(breakdown: OcrLatencyBreakdown) -> str:
+        return (
+            f"画面最近［{breakdown.scan_label}］："
+            f"总计 {_duration_label(breakdown.total_seconds)} · "
+            f"变化持续 {_duration_label(breakdown.change_activity_seconds)} · "
+            f"调度 {_duration_label(breakdown.scheduling_seconds)} · "
+            f"准备 {_duration_label(breakdown.preparation_seconds)} · "
+            f"线程 {_duration_label(breakdown.worker_queue_seconds)} · "
+            f"OCR {_duration_label(breakdown.ocr_seconds)} · "
+            f"接收 {_duration_label(breakdown.collection_seconds)} · "
+            f"更新 {_duration_label(breakdown.processing_seconds)}"
+        )
 
     def _peak_parts(self) -> list[str]:
         labels = (
@@ -144,10 +291,16 @@ class LiveLatencyStats:
     @staticmethod
     def _validated(seconds: float, label: str) -> float:
         value = float(seconds)
-        if value < 0:
-            raise ValueError(f"{label}耗时不能为负数")
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"{label}耗时必须是非负有限数")
         return value
 
     @staticmethod
     def _maximum(current: float | None, candidate: float) -> float:
         return candidate if current is None else max(current, candidate)
+
+    @staticmethod
+    def _percentile(values: tuple[float, ...], quantile: float) -> float:
+        ordered = sorted(values)
+        index = max(0, math.ceil(len(ordered) * quantile) - 1)
+        return ordered[index]
