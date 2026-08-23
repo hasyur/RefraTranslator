@@ -242,7 +242,8 @@ def test_ocr_filter_rejects_noise_before_tracking_and_translation() -> None:
     assert controller._translation_futures == {}
     assert controller._ocr_text_count == 3
     assert controller._filtered_text_count == 2
-    assert "识别 3 条，保留 1 条，过滤 2 条" in control.filter_status
+    assert "本轮检测 3 框" in control.filter_status
+    assert "保留 1 条，过滤 2 条" in control.filter_status
     controller.close()
 
 
@@ -267,11 +268,13 @@ def test_layout_fragments_merge_before_language_filtering() -> None:
     )
 
     result = controller._run_ocr(np.zeros((400, 900, 3), dtype=np.uint8), 1.0)
+    controller._ocr_line_tracker.observe(result.observations, now=1.0)
+    layout = controller._build_translation_layout(controller._active_ocr_lines())
 
-    assert [item.text for item in result.observations] == ["希望はある"]
-    assert result.raw_count == 2
-    assert result.layout_count == 1
-    assert result.rejected == ()
+    assert [item.text for item in result.observations] == ["希望", "はある"]
+    assert [item.text for item in layout.observations] == ["希望はある"]
+    assert layout.candidate_count == 1
+    assert layout.rejected == ()
     controller.close()
 
 
@@ -296,11 +299,45 @@ def test_layout_fragments_remain_separate_when_text_merge_is_disabled() -> None:
     )
 
     result = controller._run_ocr(np.zeros((400, 900, 3), dtype=np.uint8), 1.0)
+    controller._ocr_line_tracker.observe(result.observations, now=1.0)
+    layout = controller._build_translation_layout(controller._active_ocr_lines())
 
     assert [item.text for item in result.observations] == ["希望", "はある"]
-    assert result.raw_count == 2
-    assert result.layout_count == 2
-    assert result.rejected == ()
+    assert [item.text for item in layout.observations] == ["希望", "はある"]
+    assert layout.candidate_count == 2
+    assert layout.rejected == ()
+    controller.close()
+
+
+def test_live_v2_keeps_atomic_lines_below_one_translation_group() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(stable_observations=99),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeSplitVerticalOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    controller._tick()
+
+    line_tracks = controller._active_ocr_lines()
+    assert [track.text for track in line_tracks] == ["希望", "はある"]
+    assert [track.text for track in controller._tracker.visible_tracks] == ["希望はある"]
+    assert controller._tracker.visible_tracks[0].source_track_ids == tuple(
+        track.track_id for track in line_tracks
+    )
     controller.close()
 
 
@@ -724,6 +761,8 @@ def test_pause_clears_overlay_and_resume_discards_stale_ocr(
     assert control.paused
     assert control.status == "实时翻译已暂停"
     assert controller._tracker.visible_tracks == ()
+    assert controller._ocr_line_tracker.visible_tracks == ()
+    assert not controller._layout_stabilizer.has_pending
     assert overlay.last_tracks == ()
 
     controller._tick()

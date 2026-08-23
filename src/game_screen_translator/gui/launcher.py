@@ -729,8 +729,9 @@ class LauncherWindow(QMainWindow):
         self.ocr_merge_checkbox = QCheckBox("合并连续文字")
         self.ocr_merge_checkbox.setChecked(self._config.ocr.text_merge_enabled)
         self.ocr_merge_checkbox.setToolTip(
-            "开启后会在文字过滤和翻译前，将连续换行句子及日文竖排碎片"
-            "整理成较完整的翻译块。仅在 OCR 检测质量不低于 50% 时可用。"
+            "开启后会保持 OCR 原始行独立跟踪，再将连续换行句子及日文竖排"
+            "碎片组成翻译块；分组变化需连续两轮一致。仅在 OCR 检测质量"
+            "不低于 50% 时可用。"
         )
         ocr_form.addRow("文字排版", self.ocr_merge_checkbox)
 

@@ -42,7 +42,10 @@ from game_screen_translator.ocr.cost import (
     estimate_ocr_compute_cost,
 )
 from game_screen_translator.ocr.dynamic_roi import FullScreenRoiDetector
-from game_screen_translator.ocr.layout import merge_ocr_text_blocks
+from game_screen_translator.ocr.grouping import (
+    TranslationGroupStabilizer,
+    build_translation_groups,
+)
 from game_screen_translator.ocr.paddle import PaddleOcrEngine
 from game_screen_translator.ocr.roi import OcrRoi, recognize_ocr_rois
 from game_screen_translator.ocr.roi_scheduler import (
@@ -121,12 +124,18 @@ def _create_roi_scheduler(config: AppConfig) -> LatestFrameRoiScheduler | None:
 @dataclass(frozen=True, slots=True)
 class _OcrTaskResult:
     observations: tuple[OcrText, ...]
-    rejected: tuple[RejectedOcrText, ...]
-    raw_count: int
-    layout_count: int
     triggered_at: float
     started_at: float
     completed_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class _LayoutResult:
+    observations: tuple[OcrText, ...]
+    rejected: tuple[RejectedOcrText, ...]
+    candidate_count: int
+    stable_count: int
+    pending: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,6 +374,13 @@ class LiveController:
             stable_seconds=config.live.stable_ms / 1000,
             clear_after_seconds=config.live.clear_after_ms / 1000,
         )
+        self._ocr_line_tracker = StableTextTracker(
+            "live-ocr-lines",
+            stable_observations=1,
+            stable_seconds=0,
+            clear_after_seconds=config.live.clear_after_ms / 1000,
+        )
+        self._layout_stabilizer = TranslationGroupStabilizer(confirmations=2)
         self._text_filter = OcrTextFilter(
             config.ocr.language,
             enabled=config.ocr.text_filter_enabled,
@@ -518,6 +534,8 @@ class LiveController:
     def _pause_pipeline(self) -> None:
         self._session_epoch += 1
         self._tracker.clear()
+        self._ocr_line_tracker.clear()
+        self._layout_stabilizer.reset()
         self._pending_ocr_frame = None
         self._pending_ocr_triggered_at = None
         self._settle_rescan_due = None
@@ -679,6 +697,7 @@ class LiveController:
         )
         needs_stability_scan = (
             self._tracker.has_pending_revisions
+            or self._layout_stabilizer.has_pending
             or any(
                 not track.stable_emitted or track.missing_since is not None
                 for track in self._tracker.visible_tracks
@@ -739,7 +758,7 @@ class LiveController:
         planner = self._roi_planner
         if planner is None:
             raise RuntimeError("动态 ROI 规划器未初始化")
-        anchors = self._tracker.visible_tracks
+        anchors = self._active_ocr_lines()
         frame_height, frame_width = job.frame.shape[:2]
         plan = planner.plan_proposal(
             job.proposal,
@@ -780,7 +799,7 @@ class LiveController:
         rois: Sequence[OcrRoi] | None = None,
     ) -> _OcrTaskResult:
         started_at = time.monotonic()
-        raw_observations = (
+        observations = (
             tuple(self._ocr.recognize_frame(frame))
             if rois is None
             else recognize_ocr_rois(
@@ -790,21 +809,57 @@ class LiveController:
                 edge_margin=_ROI_INTERNAL_EDGE_MARGIN,
             )
         )
-        layout_observations = (
-            merge_ocr_text_blocks(raw_observations)
-            if self._config.ocr.text_merge_enabled
-            else raw_observations
-        )
-        filtered = self._text_filter.apply(layout_observations)
         completed_at = time.monotonic()
         return _OcrTaskResult(
-            filtered.accepted,
-            filtered.rejected,
-            len(raw_observations),
-            len(layout_observations),
+            observations,
             triggered_at,
             started_at,
             completed_at,
+        )
+
+    def _active_ocr_lines(self) -> tuple[TrackedText, ...]:
+        return tuple(
+            track
+            for track in self._ocr_line_tracker.visible_tracks
+            if track.missing_since is None
+        )
+
+    def _build_translation_layout(
+        self,
+        lines: Sequence[TrackedText],
+    ) -> _LayoutResult:
+        candidate_groups = build_translation_groups(
+            lines,
+            source_language=self._config.ocr.language,
+            merge_enabled=self._config.ocr.text_merge_enabled,
+        )
+        candidate_observations = tuple(
+            group.observation for group in candidate_groups
+        )
+        filtered = self._text_filter.apply(candidate_observations)
+        accepted_observation_ids = {
+            id(observation) for observation in filtered.accepted
+        }
+        accepted_groups = tuple(
+            group
+            for group, observation in zip(
+                candidate_groups,
+                candidate_observations,
+                strict=True,
+            )
+            if id(observation) in accepted_observation_ids
+        )
+        if self._config.ocr.text_merge_enabled:
+            stable_groups = self._layout_stabilizer.update(accepted_groups)
+        else:
+            self._layout_stabilizer.reset()
+            stable_groups = accepted_groups
+        return _LayoutResult(
+            tuple(group.observation for group in stable_groups),
+            filtered.rejected,
+            len(candidate_groups),
+            len(stable_groups),
+            self._layout_stabilizer.has_pending,
         )
 
     def _collect_ocr(self) -> None:
@@ -876,19 +931,23 @@ class LiveController:
                 self._submit_roi_ocr(follow_up)
             return
 
-        observations = task_result.observations
+        raw_observations = task_result.observations
+        line_selection = self._text_filter.select_layout_candidates(
+            raw_observations,
+            merge_enabled=self._config.ocr.text_merge_enabled,
+        )
+        line_observations = line_selection.accepted
         contextual_update = None
         roi_target_count: int | None = None
         if roi_plan is not None:
             contextual_update = build_contextual_ocr_update(
                 roi_plan,
-                observations,
+                line_observations,
                 roi_anchors,
             )
             roi_target_count = sum(
                 len(group.targets) for group in contextual_update.context_groups
             )
-            tracker_observations = contextual_update.observations
             self._roi_scan_count += 1
             if roi_plan.fallback_full_frame:
                 self._roi_full_fallback_count += 1
@@ -906,27 +965,42 @@ class LiveController:
                     self._roi_fallback_peak_candidate_regions,
                     roi_plan.candidate_region_count,
                 )
+        if contextual_update is not None and not roi_plan.fallback_full_frame:
+            self._ocr_line_tracker.observe_partial(
+                contextual_update.observations,
+                now,
+                replace_track_ids=contextual_update.replace_track_ids,
+            )
         else:
-            tracker_observations = observations
-        self._ocr_text_count += task_result.raw_count
-        self._filtered_text_count += len(task_result.rejected)
+            self._ocr_line_tracker.observe(line_observations, now)
+
+        active_lines = self._active_ocr_lines()
+        layout_result = self._build_translation_layout(active_lines)
+        observations = layout_result.observations
+        tracker_observations = observations
+        rejected = line_selection.rejected + layout_result.rejected
+        raw_count = len(raw_observations)
+        self._ocr_text_count += raw_count
+        self._filtered_text_count += len(rejected)
         set_filter_status = getattr(self._control, "set_filter_status", None)
         if callable(set_filter_status):
-            reason_counts = Counter(item.reason for item in task_result.rejected)
+            reason_counts = Counter(item.reason for item in rejected)
             reason_detail = "、".join(
                 f"{reason} {count}" for reason, count in reason_counts.items()
             )
             reason_suffix = f"（{reason_detail}）" if reason_detail else ""
-            if task_result.layout_count == task_result.raw_count:
-                scan_summary = f"本轮识别 {task_result.raw_count} 条"
-            else:
-                scan_summary = (
-                    f"本轮检测 {task_result.raw_count} 框，"
-                    f"版面整理为 {task_result.layout_count} 块"
-                )
+            pending_suffix = (
+                f"，分组确认中/沿用 {layout_result.stable_count} 组"
+                if layout_result.pending
+                else ""
+            )
+            scan_summary = (
+                f"本轮检测 {raw_count} 框，当前 {len(active_lines)} 行/"
+                f"候选 {layout_result.candidate_count} 组{pending_suffix}"
+            )
             set_filter_status(
                 f"文字过滤：{scan_summary}，保留 {len(observations)} 条，"
-                f"过滤 {len(task_result.rejected)} 条{reason_suffix} · "
+                f"过滤 {len(rejected)} 条{reason_suffix} · "
                 f"累计过滤 {self._filtered_text_count} 条"
             )
         ocr_seconds = max(0.0, task_result.completed_at - task_result.started_at)
@@ -935,21 +1009,20 @@ class LiveController:
         self._ocr_scan_count += 1
         if self._debug:
             print(f"耗时：OCR {ocr_seconds:.3f}s")
-            layout_detail = (
-                ""
-                if task_result.layout_count == task_result.raw_count
-                else f"，版面整理 {task_result.layout_count} 块"
-            )
             print(
-                f"OCR 过滤：识别 {task_result.raw_count} 条{layout_detail}，"
-                f"保留 {len(observations)} 条，过滤 {len(task_result.rejected)} 条"
+                f"OCR 过滤：本轮识别 {raw_count} 框，当前 {len(active_lines)} 行，"
+                f"版面候选 {layout_result.candidate_count} 组/"
+                f"稳定 {layout_result.stable_count} 组，"
+                f"保留 {len(observations)} 条，过滤 {len(rejected)} 条"
             )
-            if task_result.rejected:
+            if layout_result.pending:
+                print("版面 V2：新分组关系等待下一轮 OCR 确认")
+            if rejected:
                 print(
                     "已过滤："
                     + " | ".join(
                         f"{item.observation.text}（{item.reason}）"
-                        for item in task_result.rejected
+                        for item in rejected
                     )
                 )
             if observations:
@@ -964,20 +1037,15 @@ class LiveController:
                     f"候选覆盖 {roi_plan.candidate_coverage_fraction:.1%} / "
                     f"候选区域 {roi_plan.candidate_region_count} / "
                     f"影响 {roi_plan.affected_track_count} 条 / "
-                    f"更新 {len(tracker_observations)} 条 / "
+                    f"更新 {len(contextual_update.observations)} 条 / "
                     f"target {roi_target_count} 条"
                 )
         previous_keys = {
             (track.track_id, track.revision) for track in self._tracker.visible_tracks
         }
-        if contextual_update is not None and not roi_plan.fallback_full_frame:
-            update = self._tracker.observe_partial(
-                tracker_observations,
-                now,
-                replace_track_ids=contextual_update.replace_track_ids,
-            )
-        else:
-            update = self._tracker.observe(tracker_observations, now)
+        # Atomic OCR lines outside a local ROI remain in the line tracker, so
+        # this is a complete translation-layout snapshot after every scan.
+        update = self._tracker.observe(tracker_observations, now)
         current_keys: set[tuple[str, int]] = set()
         for track in update.visible_tracks:
             key = (track.track_id, track.revision)
@@ -1001,7 +1069,10 @@ class LiveController:
         scheduler = self._roi_scheduler
         if scheduler is not None:
             if roi_job is not None:
-                accepted = not self._tracker.has_pending_revisions
+                accepted = (
+                    not self._tracker.has_pending_revisions
+                    and not self._layout_stabilizer.has_pending
+                )
                 follow_up = scheduler.complete(
                     roi_job,
                     accepted=accepted,
@@ -1497,6 +1568,7 @@ class LiveController:
         return min(candidates)
 
     def _expire_missing_tracks(self, now: float) -> None:
+        self._ocr_line_tracker.expire_missing(now)
         expired = self._tracker.expire_missing(now)
         if not expired.removed_track_ids:
             return

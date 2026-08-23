@@ -59,3 +59,34 @@ def test_filter_can_be_disabled_without_changing_observations() -> None:
 
     assert outcome.accepted == observations
     assert outcome.rejected == ()
+
+
+def test_layout_candidate_filter_retains_recoverable_fragments_only() -> None:
+    observations = (
+        _observation("希望"),
+        _observation("はある"),
+        _observation("A"),
+        _observation("⚙"),
+        _observation("12:34"),
+    )
+
+    outcome = OcrTextFilter("japan").select_layout_candidates(
+        observations,
+        merge_enabled=True,
+    )
+
+    assert [item.text for item in outcome.accepted] == ["希望", "はある", "A"]
+    assert [(item.observation.text, item.reason) for item in outcome.rejected] == [
+        ("⚙", "图标/符号"),
+        ("12:34", "纯数字"),
+    ]
+
+
+def test_layout_candidate_filter_is_strict_when_merging_is_disabled() -> None:
+    outcome = OcrTextFilter("japan").select_layout_candidates(
+        (_observation("希望"), _observation("A")),
+        merge_enabled=False,
+    )
+
+    assert outcome.accepted == ()
+    assert outcome.reason_counts == {"纯汉字/中文": 1, "按键/短标签": 1}

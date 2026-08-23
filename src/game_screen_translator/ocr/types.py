@@ -11,6 +11,7 @@ class OcrText:
     text: str
     confidence: float
     polygon: tuple[Point, ...]
+    source_track_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.text.strip():
@@ -19,6 +20,10 @@ class OcrText:
             raise ValueError("OCR 置信度必须在 0 到 1 之间")
         if len(self.polygon) < 4:
             raise ValueError("OCR polygon 至少需要四个点")
+        if any(not track_id.strip() for track_id in self.source_track_ids):
+            raise ValueError("OCR source_track_ids 不能为空字符串")
+        if len(set(self.source_track_ids)) != len(self.source_track_ids):
+            raise ValueError("OCR source_track_ids 不能重复")
 
     @property
     def bounds(self) -> tuple[int, int, int, int]:

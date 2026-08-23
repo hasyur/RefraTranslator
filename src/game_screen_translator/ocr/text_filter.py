@@ -98,6 +98,40 @@ class OcrTextFilter:
                 rejected.append(RejectedOcrText(observation, reason))
         return OcrFilterOutcome(tuple(accepted), tuple(rejected))
 
+    def select_layout_candidates(
+        self,
+        observations: Iterable[OcrText],
+        *,
+        merge_enabled: bool,
+    ) -> OcrFilterOutcome:
+        """Drop definite noise while retaining fragments that may form valid text.
+
+        Japanese Han-only fragments and very short Latin fragments can be
+        invalid as standalone translation units but valid after neighboring OCR
+        lines are grouped. Icons, numbers, status codes, and wrong-script text
+        cannot be repaired by layout grouping and should not become persistent
+        line-tracker/ROI anchors.
+        """
+
+        if not self.enabled:
+            return OcrFilterOutcome(tuple(observations), ())
+        accepted: list[OcrText] = []
+        rejected: list[RejectedOcrText] = []
+        for observation in observations:
+            reason = self._rejection_reason(observation.text)
+            recoverable_fragment = merge_enabled and (
+                (
+                    reason == "纯汉字/中文"
+                    and self.source_language in _JAPANESE_LANGUAGES
+                )
+                or reason == "按键/短标签"
+            )
+            if reason is None or recoverable_fragment:
+                accepted.append(observation)
+            else:
+                rejected.append(RejectedOcrText(observation, reason))
+        return OcrFilterOutcome(tuple(accepted), tuple(rejected))
+
     def _rejection_reason(self, raw_text: str) -> str | None:
         text = unicodedata.normalize("NFKC", raw_text).strip()
         if not text:

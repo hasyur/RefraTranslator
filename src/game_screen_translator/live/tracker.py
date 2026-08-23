@@ -59,6 +59,7 @@ class TrackedText:
     translated_text: str | None = None
     missing_since: float | None = None
     retained_translation: str | None = None
+    source_track_ids: tuple[str, ...] = ()
 
     @property
     def display_translation(self) -> str | None:
@@ -86,6 +87,7 @@ class _RevisionCandidate:
     first_seen: float
     last_seen: float
     observations: int
+    source_track_ids: tuple[str, ...]
 
 
 class StableTextTracker:
@@ -168,8 +170,16 @@ class StableTextTracker:
     ) -> TrackerUpdate:
         unmatched_tracks = set(replace_track_ids)
         stable_sources: list[SourceText] = []
+        ordered_observations = tuple(
+            sorted(observations, key=lambda item: (item.bounds[1], item.bounds[0]))
+        )
+        current_source_sets = tuple(
+            frozenset(observation.source_track_ids)
+            for observation in ordered_observations
+            if observation.source_track_ids
+        )
 
-        for observation in sorted(observations, key=lambda item: (item.bounds[1], item.bounds[0])):
+        for observation in ordered_observations:
             track_id = self._best_match(observation, unmatched_tracks)
             if track_id is None:
                 track = self._new_track(observation, now)
@@ -186,6 +196,14 @@ class StableTextTracker:
         for track_id in tuple(unmatched_tracks):
             self._revision_candidates.pop(track_id, None)
             track = self._tracks[track_id]
+            source_ids = frozenset(track.source_track_ids)
+            if source_ids and any(source_ids & current for current in current_source_sets):
+                # A confirmed layout split/merge supersedes this virtual group.
+                # Its old full-group translation must not be stretched over one
+                # of the new member rows during the ordinary disappearance grace.
+                removed.append(track_id)
+                del self._tracks[track_id]
+                continue
             missing_since = (
                 track.last_seen if track.missing_since is None else track.missing_since
             )
@@ -239,6 +257,7 @@ class StableTextTracker:
             first_seen=now,
             last_seen=now,
             observations=1,
+            source_track_ids=observation.source_track_ids,
         )
 
     def _update_track(self, track: TrackedText, observation: OcrText, now: float) -> TrackedText:
@@ -251,6 +270,7 @@ class StableTextTracker:
                 bounds=observation.bounds,
                 last_seen=now,
                 observations=track.observations + 1,
+                source_track_ids=observation.source_track_ids,
                 missing_since=None,
             )
         if track.display_translation is not None:
@@ -265,6 +285,7 @@ class StableTextTracker:
             first_seen=now,
             last_seen=now,
             observations=1,
+            source_track_ids=observation.source_track_ids,
             missing_since=None,
             stable_emitted=False,
             translated_text=None,
@@ -287,6 +308,7 @@ class StableTextTracker:
                 now,
                 now,
                 1,
+                observation.source_track_ids,
             )
         else:
             candidate = replace(
@@ -316,6 +338,7 @@ class StableTextTracker:
             first_seen=candidate.first_seen,
             last_seen=candidate.last_seen,
             observations=candidate.observations,
+            source_track_ids=candidate.source_track_ids,
             missing_since=None,
             stable_emitted=False,
             translated_text=None,
@@ -324,10 +347,29 @@ class StableTextTracker:
 
     def _best_match(self, observation: OcrText, candidates: set[str]) -> str | None:
         text = normalize_text(observation.text)
+        if observation.source_track_ids:
+            exact_source_match = next(
+                (
+                    track_id
+                    for track_id in candidates
+                    if self._tracks[track_id].source_track_ids
+                    == observation.source_track_ids
+                ),
+                None,
+            )
+            if exact_source_match is not None:
+                return exact_source_match
+        observation_sources = frozenset(observation.source_track_ids)
         best_id: str | None = None
         best_score = 0.0
         for track_id in candidates:
             track = self._tracks[track_id]
+            if (
+                observation_sources
+                and track.source_track_ids
+                and observation_sources & frozenset(track.source_track_ids)
+            ):
+                continue
             iou = _intersection_over_union(track.bounds, observation.bounds)
             distance = _center_distance_ratio(track.bounds, observation.bounds)
             similarity = SequenceMatcher(None, track.text, text, autojunk=False).ratio()

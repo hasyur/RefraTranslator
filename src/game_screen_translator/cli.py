@@ -207,7 +207,10 @@ async def _preview(
     raw_observations = engine.recognize(image_path)
     if not raw_observations:
         raise RuntimeError("截图中没有识别出满足置信度阈值的文字")
-    layout_observations = merge_ocr_text_blocks(raw_observations)
+    layout_observations = merge_ocr_text_blocks(
+        raw_observations,
+        source_language=config.ocr.language,
+    )
     filtered = OcrTextFilter(
         config.ocr.language,
         enabled=config.ocr.text_filter_enabled,

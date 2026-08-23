@@ -266,3 +266,64 @@ def test_partial_empty_observation_marks_only_scanned_track_missing() -> None:
     after = {track.text: track for track in update.visible_tracks}
     assert after["消える。"].missing_since == 1.2
     assert after["残る。"].missing_since is None
+
+
+def test_confirmed_layout_split_does_not_reuse_full_group_translation() -> None:
+    tracker = StableTextTracker(
+        "zone",
+        stable_observations=1,
+        stable_seconds=0,
+        clear_after_seconds=0.9,
+    )
+    merged = OcrText(
+        "長い一行\n短い二行目。",
+        0.99,
+        ((10, 20), (310, 20), (310, 100), (10, 100)),
+        ("ocr-a", "ocr-b"),
+    )
+    source = tracker.observe((merged,), 1.0).stable_sources[0]
+    tracker.apply_translations((TranslationResult(source, "旧合并译文"),))
+
+    split = tracker.observe(
+        (
+            OcrText(
+                "长い一行",
+                0.99,
+                ((10, 20), (310, 20), (310, 55), (10, 55)),
+                ("ocr-a",),
+            ),
+            OcrText(
+                "短い二行目。",
+                0.99,
+                ((10, 65), (220, 65), (220, 100), (10, 100)),
+                ("ocr-b",),
+            ),
+        ),
+        1.1,
+    )
+
+    assert source.track_id in split.removed_track_ids
+    assert len(split.visible_tracks) == 2
+    assert all(track.display_translation is None for track in split.visible_tracks)
+
+
+def test_same_layout_membership_reuses_track_across_coordinate_jitter() -> None:
+    tracker = StableTextTracker("zone", stable_observations=1, stable_seconds=0)
+    first = OcrText(
+        "同じ字幕。",
+        0.99,
+        ((10, 20), (210, 20), (210, 60), (10, 60)),
+        ("ocr-a",),
+    )
+    source = tracker.observe((first,), 1.0).stable_sources[0]
+    jittered = OcrText(
+        "同じ字幕。",
+        0.99,
+        ((14, 23), (214, 23), (214, 63), (14, 63)),
+        ("ocr-a",),
+    )
+
+    tracker.observe((jittered,), 1.1)
+
+    assert tracker.visible_tracks[0].track_id == source.track_id
+    assert tracker.visible_tracks[0].bounds == (14, 23, 214, 63)
