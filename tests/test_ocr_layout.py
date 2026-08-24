@@ -120,6 +120,58 @@ def test_keeps_short_stacked_menu_entries_independent() -> None:
     assert merge_ocr_text_blocks(observations) == observations
 
 
+def test_keeps_two_long_menu_entries_independent() -> None:
+    diagnostics = []
+    groups = build_translation_groups(
+        (
+            _line("line-a", "はじめからつづける", (20, 20, 380, 60)),
+            _line("line-b", "環境設定", (20, 66, 180, 106)),
+        ),
+        source_language="japan",
+        diagnostics=diagnostics,
+    )
+
+    assert [group.text for group in groups] == [
+        "はじめからつづける",
+        "環境設定",
+    ]
+    assert len(diagnostics) == 1
+    assert diagnostics[0].merged is False
+    assert diagnostics[0].score is None
+    assert diagnostics[0].reason == "两行更像独立的紧凑标签"
+
+
+def test_upper_width_alone_does_not_merge_two_english_menu_entries() -> None:
+    groups = build_translation_groups(
+        (
+            _line("line-a", "CONTINUE ADVENTURE", (20, 20, 660, 60)),
+            _line("line-b", "OPTIONS", (20, 66, 300, 106)),
+        ),
+        source_language="english",
+    )
+
+    assert [group.text for group in groups] == [
+        "CONTINUE ADVENTURE",
+        "OPTIONS",
+    ]
+
+
+def test_menu_hotkey_suffix_is_not_treated_as_sentence_completion() -> None:
+    diagnostics = []
+    groups = build_translation_groups(
+        (
+            _line("line-a", "CONTINUE [A]", (20, 20, 380, 60)),
+            _line("line-b", "OPTIONS [B]", (20, 66, 340, 106)),
+        ),
+        source_language="english",
+        diagnostics=diagnostics,
+    )
+
+    assert [group.text for group in groups] == ["CONTINUE [A]", "OPTIONS [B]"]
+    assert len(diagnostics) == 1
+    assert diagnostics[0].reason == "两行更像独立的紧凑标签"
+
+
 def test_merges_long_row_with_very_short_wrapped_tail() -> None:
     groups = build_translation_groups(
         (
@@ -132,6 +184,33 @@ def test_merges_long_row_with_very_short_wrapped_tail() -> None:
     assert len(groups) == 1
     assert groups[0].member_ids == ("line-a", "line-b")
     assert groups[0].text == "この世界にはまだ知られていない秘密が\nある。"
+
+
+def test_merges_two_visually_long_prose_rows_without_terminal_punctuation() -> None:
+    diagnostics = []
+    groups = build_translation_groups(
+        (
+            _line(
+                "line-a",
+                "遠い街から来た旅人たちは古い記録を読みながら",
+                (40, 40, 760, 80),
+            ),
+            _line(
+                "line-b",
+                "失われた答えを探して静かな道を歩き続ける",
+                (40, 86, 720, 126),
+            ),
+        ),
+        source_language="japan",
+        diagnostics=diagnostics,
+    )
+
+    assert len(groups) == 1
+    assert groups[0].member_ids == ("line-a", "line-b")
+    assert len(diagnostics) == 1
+    assert diagnostics[0].merged is True
+    assert diagnostics[0].score is not None
+    assert "长行正文" in diagnostics[0].evidence
 
 
 def test_merges_dense_multiline_prose_before_the_final_punctuation() -> None:

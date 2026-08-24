@@ -16,7 +16,8 @@ _ENGLISH_LANGUAGES = {"en", "english"}
 _KOREAN_LANGUAGES = {"ko", "korean"}
 _CHINESE_LANGUAGES = {"ch", "chinese", "zh", "zh-cn", "zh-tw"}
 _HARD_SENTENCE_ENDINGS = ("。", "！", "？", "!", "?", "」", "』")
-_SENTENCE_ENDINGS = _HARD_SENTENCE_ENDINGS + ("…", ")", "]")
+_SENTENCE_ENDINGS = _HARD_SENTENCE_ENDINGS + ("…",)
+_CLOSING_BRACKETS = (")", "]", "）", "】")
 _CONTINUATION_ENDINGS = (
     "、",
     ",",
@@ -31,6 +32,12 @@ _CONTINUATION_ENDINGS = (
     "「",
     "『",
 )
+_HORIZONTAL_MERGE_MIN_SCORE = 0.68
+_HORIZONTAL_MERGE_MIN_MARGIN = 0.06
+_COMPACT_LABEL_MAX_VISUAL_SPAN = 12.0
+_DENSE_PROSE_MIN_VISUAL_SPAN = 10.0
+_MENU_SHORT_MAX_VISUAL_SPAN = 12.0
+_MENU_REGULAR_MAX_VISUAL_SPAN = 18.0
 
 
 class OcrLineLike(Protocol):
@@ -103,6 +110,27 @@ class TranslationGroup:
 
 
 @dataclass(frozen=True, slots=True)
+class HorizontalMergeDiagnostic:
+    """Explain why two visual rows were merged or kept independent."""
+
+    upper_member_ids: tuple[str, ...]
+    lower_member_ids: tuple[str, ...]
+    upper_text: str
+    lower_text: str
+    score: float | None
+    merged: bool
+    reason: str
+    evidence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _HorizontalPairEvaluation:
+    score: float | None
+    reason: str
+    evidence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class _TextRow:
     members: tuple[TranslationGroupMember, ...]
 
@@ -124,6 +152,7 @@ def build_translation_groups(
     *,
     source_language: str,
     merge_enabled: bool = True,
+    diagnostics: list[HorizontalMergeDiagnostic] | None = None,
 ) -> tuple[TranslationGroup, ...]:
     """Build conservative translation groups without destroying OCR-line identity.
 
@@ -174,7 +203,12 @@ def build_translation_groups(
 
     rows = _horizontal_rows(tuple(sorted(remaining)), members)
     menu_rows = _menu_like_rows(rows)
-    edges = _mutual_horizontal_edges(rows, language, menu_rows)
+    edges = _mutual_horizontal_edges(
+        rows,
+        language,
+        menu_rows,
+        diagnostics=diagnostics,
+    )
     incoming = {lower: upper for upper, lower in edges.items()}
     consumed_rows: set[int] = set()
     for start in range(len(rows)):
@@ -412,20 +446,55 @@ def _mutual_horizontal_edges(
     rows: Sequence[_TextRow],
     language: str,
     menu_rows: set[int],
+    *,
+    diagnostics: list[HorizontalMergeDiagnostic] | None = None,
 ) -> dict[int, int]:
     candidates: list[tuple[int, int, float]] = []
+    evaluations: list[tuple[int, int, _HorizontalPairEvaluation]] = []
     for upper_index, upper in enumerate(rows):
-        if upper_index in menu_rows:
-            continue
         for lower_index in range(upper_index + 1, len(rows)):
-            if lower_index in menu_rows:
+            lower = rows[lower_index]
+            if upper_index in menu_rows or lower_index in menu_rows:
+                if diagnostics is not None and lower_index == upper_index + 1:
+                    diagnostics.append(
+                        _horizontal_diagnostic(
+                            upper,
+                            lower,
+                            score=None,
+                            merged=False,
+                            reason="规则短标签栈保持独立",
+                        )
+                    )
                 continue
-            score = _horizontal_pair_score(upper, rows[lower_index], language)
-            if score is None:
+            evaluation = _horizontal_pair_evaluation(upper, lower, language)
+            if evaluation.score is None:
+                if diagnostics is not None and lower_index == upper_index + 1:
+                    diagnostics.append(
+                        _horizontal_diagnostic(
+                            upper,
+                            lower,
+                            score=None,
+                            merged=False,
+                            reason=evaluation.reason,
+                            evidence=evaluation.evidence,
+                        )
+                    )
                 continue
             if _has_intervening_row(upper_index, lower_index, rows):
+                if diagnostics is not None:
+                    diagnostics.append(
+                        _horizontal_diagnostic(
+                            upper,
+                            lower,
+                            score=evaluation.score,
+                            merged=False,
+                            reason="两行之间存在其他文字行",
+                            evidence=evaluation.evidence,
+                        )
+                    )
                 continue
-            candidates.append((upper_index, lower_index, score))
+            candidates.append((upper_index, lower_index, evaluation.score))
+            evaluations.append((upper_index, lower_index, evaluation))
 
     outgoing: dict[int, list[tuple[float, int]]] = {}
     incoming: dict[int, list[tuple[float, int]]] = {}
@@ -438,10 +507,15 @@ def _mutual_horizontal_edges(
         choices.sort(reverse=True)
 
     edges: dict[int, int] = {}
+    candidate_reasons = {
+        (upper, lower): "不是上行的最佳候选"
+        for upper, lower, _score in candidates
+    }
     for upper, choices in outgoing.items():
         best_score, lower = choices[0]
         incoming_choices = incoming.get(lower, ())
         if not incoming_choices or incoming_choices[0][1] != upper:
+            candidate_reasons[(upper, lower)] = "不是下行的互选最佳候选"
             continue
         outgoing_margin = (
             best_score - choices[1][0] if len(choices) > 1 else 1.0
@@ -451,8 +525,31 @@ def _mutual_horizontal_edges(
             if len(incoming_choices) > 1
             else 1.0
         )
-        if best_score >= 0.68 and outgoing_margin >= 0.06 and incoming_margin >= 0.06:
-            edges[upper] = lower
+        if best_score < _HORIZONTAL_MERGE_MIN_SCORE:
+            candidate_reasons[(upper, lower)] = "合并分低于阈值"
+            continue
+        if outgoing_margin < _HORIZONTAL_MERGE_MIN_MARGIN:
+            candidate_reasons[(upper, lower)] = "上行候选差距不足"
+            continue
+        if incoming_margin < _HORIZONTAL_MERGE_MIN_MARGIN:
+            candidate_reasons[(upper, lower)] = "下行候选差距不足"
+            continue
+        edges[upper] = lower
+        candidate_reasons[(upper, lower)] = "分数与互选边际均通过"
+
+    if diagnostics is not None:
+        for upper_index, lower_index, evaluation in evaluations:
+            merged = edges.get(upper_index) == lower_index
+            diagnostics.append(
+                _horizontal_diagnostic(
+                    rows[upper_index],
+                    rows[lower_index],
+                    score=evaluation.score,
+                    merged=merged,
+                    reason=candidate_reasons[(upper_index, lower_index)],
+                    evidence=evaluation.evidence,
+                )
+            )
     return edges
 
 
@@ -461,32 +558,41 @@ def _horizontal_pair_score(
     lower: _TextRow,
     language: str,
 ) -> float | None:
+    return _horizontal_pair_evaluation(upper, lower, language).score
+
+
+def _horizontal_pair_evaluation(
+    upper: _TextRow,
+    lower: _TextRow,
+    language: str,
+) -> _HorizontalPairEvaluation:
     if not _has_letter(upper.text) or not _has_letter(lower.text):
-        return None
-    if upper.text.rstrip().endswith(_HARD_SENTENCE_ENDINGS):
-        return None
+        return _HorizontalPairEvaluation(None, "缺少可合并的文字字符")
+    if _has_hard_sentence_ending(upper.text):
+        return _HorizontalPairEvaluation(None, "上一行已有明确句末")
     if not _scripts_compatible(upper.text, lower.text, language):
-        return None
+        return _HorizontalPairEvaluation(None, "上下行文字系统不兼容")
 
     upper_bounds = upper.bounds
     lower_bounds = lower.bounds
     if lower_bounds[1] <= upper_bounds[1]:
-        return None
+        return _HorizontalPairEvaluation(None, "下行不在上行下方")
     upper_height = _height(upper_bounds)
     lower_height = _height(lower_bounds)
     line_height = max(upper_height, lower_height)
     height_ratio = min(upper_height, lower_height) / line_height
     if height_ratio < 0.72:
-        return None
+        return _HorizontalPairEvaluation(None, "上下行字号差异过大")
     gap = _vertical_gap(upper_bounds, lower_bounds)
     if gap > line_height * 0.85:
-        return None
+        return _HorizontalPairEvaluation(None, "上下行间距过大")
 
     upper_width = _width(upper_bounds)
     lower_width = _width(lower_bounds)
-    upper_length = len(upper.text.strip())
-    if upper_width < line_height * 3.5 and upper_length < 8:
-        return None
+    upper_visual_span = upper_width / max(1.0, line_height)
+    lower_visual_span = lower_width / max(1.0, line_height)
+    if upper_visual_span < 3.5:
+        return _HorizontalPairEvaluation(None, "上一行视觉长度过短")
 
     left_distance = abs(upper_bounds[0] - lower_bounds[0])
     center_distance = abs(_center_x(upper_bounds) - _center_x(lower_bounds))
@@ -494,7 +600,7 @@ def _horizontal_pair_score(
     center_quality = max(0.0, 1.0 - center_distance / max(1.0, line_height * 1.25))
     alignment_quality = max(left_quality, center_quality)
     if alignment_quality <= 0:
-        return None
+        return _HorizontalPairEvaluation(None, "上下行未形成左对齐或居中关系")
 
     overlap = _axis_overlap(
         upper_bounds[0],
@@ -504,18 +610,53 @@ def _horizontal_pair_score(
     )
     overlap_ratio = overlap / max(1, min(upper_width, lower_width))
     if overlap_ratio < 0.35 and left_quality < 0.35:
-        return None
+        return _HorizontalPairEvaluation(None, "上下行水平重叠不足")
 
     upper_continues = upper.text.rstrip().endswith(_CONTINUATION_ENDINGS)
-    lower_completes = lower.text.rstrip().endswith(_SENTENCE_ENDINGS)
+    lower_completes = _has_sentence_ending(lower.text)
     upper_is_longer = upper_width >= lower_width * 1.10
-    dense_prose = upper_length >= 14 and len(lower.text.strip()) >= 14
-    if not (upper_continues or lower_completes or upper_is_longer or dense_prose):
-        return None
+    dense_prose = (
+        upper_visual_span >= _DENSE_PROSE_MIN_VISUAL_SPAN
+        and lower_visual_span >= _DENSE_PROSE_MIN_VISUAL_SPAN
+    )
+    if _looks_like_compact_label_pair(
+        upper,
+        lower,
+        upper_visual_span=upper_visual_span,
+        lower_visual_span=lower_visual_span,
+        height_ratio=height_ratio,
+        gap=gap,
+        line_height=line_height,
+        alignment_quality=alignment_quality,
+    ):
+        return _HorizontalPairEvaluation(None, "两行更像独立的紧凑标签")
+    evidence: list[str] = []
+    if upper_continues:
+        evidence.append("上一行续接标点")
+    if lower_completes:
+        evidence.append("下一行句末")
+    if dense_prose:
+        evidence.append("长行正文")
+    if upper_is_longer:
+        evidence.append("上一行较宽")
+    if not (upper_continues or lower_completes or dense_prose):
+        return _HorizontalPairEvaluation(
+            None,
+            "缺少续接标点、下一行句末或长正文证据",
+            tuple(evidence),
+        )
     if lower_width > upper_width * 1.25 and not upper_continues:
-        return None
-    if upper_length + len(lower.text.strip()) < 10 and not lower_completes:
-        return None
+        return _HorizontalPairEvaluation(
+            None,
+            "下一行明显宽于上一行",
+            tuple(evidence),
+        )
+    if upper_visual_span + lower_visual_span < 5.0 and not lower_completes:
+        return _HorizontalPairEvaluation(
+            None,
+            "组合视觉长度过短",
+            tuple(evidence),
+        )
 
     gap_quality = max(0.0, 1.0 - gap / max(1.0, line_height * 0.85))
     overlap_quality = min(1.0, overlap_ratio)
@@ -523,9 +664,17 @@ def _horizontal_pair_score(
         width_quality = min(1.0, (upper_width / max(1, lower_width) - 1.0) / 0.35)
     else:
         width_quality = 0.35 if upper_continues or dense_prose else 0.15
-    ending_quality = 1.0 if upper_continues or lower_completes else 0.55
-    length_quality = min(1.0, (upper_length + len(lower.text.strip())) / 20)
-    return (
+    if upper_continues:
+        ending_quality = 1.0
+    elif lower_completes:
+        ending_quality = 0.85
+    else:
+        ending_quality = 0.55
+    length_quality = min(
+        1.0,
+        (upper_visual_span + lower_visual_span) / 20,
+    )
+    score = (
         gap_quality * 0.23
         + height_ratio * 0.20
         + alignment_quality * 0.20
@@ -533,6 +682,59 @@ def _horizontal_pair_score(
         + width_quality * 0.10
         + ending_quality * 0.07
         + length_quality * 0.06
+    )
+    return _HorizontalPairEvaluation(
+        score,
+        "候选续行",
+        tuple(evidence),
+    )
+
+
+def _looks_like_compact_label_pair(
+    upper: _TextRow,
+    lower: _TextRow,
+    *,
+    upper_visual_span: float,
+    lower_visual_span: float,
+    height_ratio: float,
+    gap: int,
+    line_height: int,
+    alignment_quality: float,
+) -> bool:
+    if (
+        _has_sentence_ending(upper.text)
+        or _has_sentence_ending(lower.text)
+        or upper.text.rstrip().endswith(_CONTINUATION_ENDINGS)
+        or lower.text.rstrip().endswith(_CONTINUATION_ENDINGS)
+    ):
+        return False
+    return (
+        max(upper_visual_span, lower_visual_span)
+        <= _COMPACT_LABEL_MAX_VISUAL_SPAN
+        and height_ratio >= 0.80
+        and gap <= line_height * 0.55
+        and alignment_quality >= 0.65
+    )
+
+
+def _horizontal_diagnostic(
+    upper: _TextRow,
+    lower: _TextRow,
+    *,
+    score: float | None,
+    merged: bool,
+    reason: str,
+    evidence: tuple[str, ...] = (),
+) -> HorizontalMergeDiagnostic:
+    return HorizontalMergeDiagnostic(
+        tuple(member.track_id for member in upper.members),
+        tuple(member.track_id for member in lower.members),
+        upper.text,
+        lower.text,
+        score,
+        merged,
+        reason,
+        evidence,
     )
 
 
@@ -578,13 +780,25 @@ def _menu_like_rows(rows: Sequence[_TextRow]) -> set[int]:
         if len(run) < 3:
             continue
         texts = tuple(rows[index].text.strip() for index in run)
-        if any(text.endswith(_SENTENCE_ENDINGS + _CONTINUATION_ENDINGS) for text in texts):
+        if any(
+            _has_sentence_ending(text)
+            or text.endswith(_CONTINUATION_ENDINGS)
+            for text in texts
+        ):
             continue
         widths = tuple(_width(rows[index].bounds) for index in run)
-        short_labels = all(len(text) <= 14 for text in texts)
+        visual_spans = tuple(
+            _width(rows[index].bounds) / max(1, _height(rows[index].bounds))
+            for index in run
+        )
+        short_labels = all(
+            span <= _MENU_SHORT_MAX_VISUAL_SPAN
+            for span in visual_spans
+        )
         regular_widths = max(widths) / max(1, min(widths)) <= 1.55
         compact_regular_labels = regular_widths and all(
-            len(text) <= 18 for text in texts
+            span <= _MENU_REGULAR_MAX_VISUAL_SPAN
+            for span in visual_spans
         )
         if short_labels or compact_regular_labels:
             menu_rows.update(run)
@@ -734,6 +948,21 @@ def _needs_space(left: str, right: str) -> bool:
 
 def _has_letter(text: str) -> bool:
     return any(unicodedata.category(character).startswith("L") for character in text)
+
+
+def _has_hard_sentence_ending(text: str) -> bool:
+    return _without_closing_brackets(text).endswith(_HARD_SENTENCE_ENDINGS)
+
+
+def _has_sentence_ending(text: str) -> bool:
+    return _without_closing_brackets(text).endswith(_SENTENCE_ENDINGS)
+
+
+def _without_closing_brackets(text: str) -> str:
+    stripped = text.rstrip()
+    while stripped.endswith(_CLOSING_BRACKETS):
+        stripped = stripped[:-1].rstrip()
+    return stripped
 
 
 def _union_bounds(bounds: Sequence[Bounds]) -> Bounds:

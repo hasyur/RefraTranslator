@@ -43,6 +43,7 @@ from game_screen_translator.ocr.cost import (
 )
 from game_screen_translator.ocr.dynamic_roi import FullScreenRoiDetector
 from game_screen_translator.ocr.grouping import (
+    HorizontalMergeDiagnostic,
     TranslationGroupStabilizer,
     build_translation_groups,
 )
@@ -151,6 +152,7 @@ class _LayoutResult:
     candidate_count: int
     stable_count: int
     pending: bool
+    grouping_diagnostics: tuple[HorizontalMergeDiagnostic, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -940,10 +942,14 @@ class LiveController:
         self,
         lines: Sequence[TrackedText],
     ) -> _LayoutResult:
+        grouping_diagnostics: list[HorizontalMergeDiagnostic] | None = (
+            [] if self._debug else None
+        )
         candidate_groups = build_translation_groups(
             lines,
             source_language=self._config.ocr.language,
             merge_enabled=self._config.ocr.text_merge_enabled,
+            diagnostics=grouping_diagnostics,
         )
         candidate_observations = tuple(
             group.observation for group in candidate_groups
@@ -972,6 +978,7 @@ class LiveController:
             len(candidate_groups),
             len(stable_groups),
             self._layout_stabilizer.has_pending,
+            tuple(grouping_diagnostics or ()),
         )
 
     def _collect_ocr(self) -> None:
@@ -1129,6 +1136,19 @@ class LiveController:
             )
             if layout_result.pending:
                 print("版面 V2：新分组关系等待下一轮 OCR 确认")
+            for diagnostic in layout_result.grouping_diagnostics:
+                score = "-" if diagnostic.score is None else f"{diagnostic.score:.3f}"
+                evidence = (
+                    f" / 证据 {','.join(diagnostic.evidence)}"
+                    if diagnostic.evidence
+                    else ""
+                )
+                action = "候选合并" if diagnostic.merged else "候选分开"
+                print(
+                    f"版面判断：{action} {diagnostic.upper_text!r} -> "
+                    f"{diagnostic.lower_text!r} / 分数 {score} / "
+                    f"{diagnostic.reason}{evidence}"
+                )
             if rejected:
                 print(
                     "已过滤："
