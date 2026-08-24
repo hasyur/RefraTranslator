@@ -31,6 +31,12 @@ from game_screen_translator.live.tracker import (
     TrackedText,
     normalize_text,
 )
+from game_screen_translator.ocr.arbitration import (
+    LayoutArbitrationKey,
+    LayoutArbitrationRequest,
+    build_layout_arbitration_prompt,
+    parse_layout_arbitration_response,
+)
 from game_screen_translator.ocr.contextual_roi import (
     ContextualRoiPlan,
     ContextualRoiPlanner,
@@ -43,8 +49,11 @@ from game_screen_translator.ocr.cost import (
 )
 from game_screen_translator.ocr.dynamic_roi import FullScreenRoiDetector
 from game_screen_translator.ocr.grouping import (
+    HorizontalMergeAmbiguity,
     HorizontalMergeDiagnostic,
+    HorizontalPartition,
     TranslationGroupStabilizer,
+    apply_horizontal_arbitration,
     build_translation_groups,
 )
 from game_screen_translator.ocr.paddle import PaddleOcrEngine
@@ -98,6 +107,8 @@ _ROI_INTERNAL_EDGE_MARGIN = 12
 _ROI_INTERNAL_MIN_OCR_INTERVAL_S = 0.1
 _ROI_INTERNAL_SETTLE_INTERVAL_S = 0.05
 _COMPLETION_POLL_INTERVAL_MS = 25
+_LAYOUT_ARBITRATION_MAX_OUTPUT_TOKENS = 256
+_LAYOUT_ARBITRATION_CACHE_LIMIT = 128
 
 
 def _live_message(message: str) -> None:
@@ -153,6 +164,8 @@ class _LayoutResult:
     stable_count: int
     pending: bool
     grouping_diagnostics: tuple[HorizontalMergeDiagnostic, ...] = ()
+    arbitration_pending_member_ids: tuple[str, ...] = ()
+    arbitration_pending_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +204,23 @@ class _PendingTranslationRetry:
 @dataclass(frozen=True, slots=True)
 class _TranslationWorkerResult:
     cached_outcome: CachedTranslationOutcome
+    started_at: float
+    completed_at: float
+    llm_seconds: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class _LayoutArbitrationSubmission:
+    request: LayoutArbitrationRequest
+    queued_at: float
+    pipeline_started_at: float
+    first_recognized_at: float
+    session_epoch: int
+
+
+@dataclass(frozen=True, slots=True)
+class _LayoutArbitrationWorkerResult:
+    partition: HorizontalPartition | None
     started_at: float
     completed_at: float
     llm_seconds: float | None
@@ -423,6 +453,15 @@ class LiveController:
         self._translation_futures: dict[
             Future[_TranslationWorkerResult], _TranslationSubmission
         ] = {}
+        self._layout_arbitration_futures: dict[
+            Future[_LayoutArbitrationWorkerResult], _LayoutArbitrationSubmission
+        ] = {}
+        self._pending_layout_arbitrations: list[_LayoutArbitrationSubmission] = []
+        self._layout_arbitration_cache: dict[
+            LayoutArbitrationKey, HorizontalPartition
+        ] = {}
+        self._active_layout_arbitration_keys: set[LayoutArbitrationKey] = set()
+        self._layout_arbitration_blocked_member_ids: set[str] = set()
         self._pending_translations: list[_TranslationSubmission] = []
         self._max_pending_translation_batches = max(
             1,
@@ -478,6 +517,10 @@ class LiveController:
         self._translation_exhausted_keys: set[tuple[str, int]] = set()
         self._cancelled_stale_count = 0
         self._reattached_result_count = 0
+        self._layout_arbitration_request_count = 0
+        self._layout_arbitration_change_count = 0
+        self._layout_arbitration_fallback_count = 0
+        self._layout_arbitration_stale_count = 0
         self._timer = QTimer()
         self._timer.setInterval(max(10, round(1000 / config.live.change_poll_fps)))
         self._timer.timeout.connect(self._tick)
@@ -525,6 +568,10 @@ class LiveController:
             else f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
             f"静态复查 {self._config.live.idle_rescan_ms / 1000:g} 秒"
         )
+        arbitration_enabled = (
+            self._config.ocr.text_merge_enabled
+            and self._config.ocr.text_merge_llm_arbitration_enabled
+        )
         self._running_detail = (
             f"捕获：{self._capture.active_backend} {region} @ "
             f"{self._config.live.capture_fps} FPS · "
@@ -534,6 +581,8 @@ class LiveController:
             f"{'开' if self._config.ocr.text_filter_enabled else '关'} / 最长边 "
             f"{self._config.ocr.detection_max_side} / 合并"
             f"{'开' if self._config.ocr.text_merge_enabled else '关'} · "
+            f"歧义仲裁"
+            f"{'开' if arbitration_enabled else '关'} · "
             f"{profile_label}{region_hint}"
         )
         self._control.set_status("实时翻译运行中", self._running_detail)
@@ -573,9 +622,15 @@ class LiveController:
         self._translation_retries.clear()
         self._completed_translations.clear()
         self._early_context.clear()
+        self._pending_layout_arbitrations.clear()
+        self._layout_arbitration_cache.clear()
+        self._active_layout_arbitration_keys.clear()
+        self._layout_arbitration_blocked_member_ids.clear()
         self._translation_exhausted_keys.clear()
         self._source_latency_origins.clear()
         for future in self._translation_futures:
+            future.cancel()
+        for future in self._layout_arbitration_futures:
             future.cancel()
         if self._ocr_future is not None:
             self._ocr_future.cancel()
@@ -625,7 +680,11 @@ class LiveController:
             f"排队峰值 {self._translation_queue_peak} 批，"
             f"丢弃过期译文 {self._stale_result_count} 条，"
             f"取消过期排队 {self._cancelled_stale_count} 条，"
-            f"接回晚到译文 {self._reattached_result_count} 条"
+            f"接回晚到译文 {self._reattached_result_count} 条，"
+            f"分组仲裁 {self._layout_arbitration_request_count} 次/"
+            f"改判 {self._layout_arbitration_change_count} 次/"
+            f"回退 {self._layout_arbitration_fallback_count} 次/"
+            f"过期 {self._layout_arbitration_stale_count} 次"
         )
         if self._roi_scheduler is not None:
             print(
@@ -712,6 +771,7 @@ class LiveController:
         if self._shutting_down:
             return
         self._collect_ocr()
+        self._collect_layout_arbitrations()
         self._collect_translations()
 
     def _tick_dynamic_roi(self, frame: np.ndarray, now: float) -> None:
@@ -941,16 +1001,62 @@ class LiveController:
     def _build_translation_layout(
         self,
         lines: Sequence[TrackedText],
+        *,
+        accept_arbitrated: bool = False,
     ) -> _LayoutResult:
         grouping_diagnostics: list[HorizontalMergeDiagnostic] | None = (
             [] if self._debug else None
+        )
+        arbitration_enabled = (
+            self._config.ocr.text_merge_enabled
+            and self._config.ocr.text_merge_llm_arbitration_enabled
+        )
+        grouping_ambiguities: list[HorizontalMergeAmbiguity] | None = (
+            [] if arbitration_enabled else None
         )
         candidate_groups = build_translation_groups(
             lines,
             source_language=self._config.ocr.language,
             merge_enabled=self._config.ocr.text_merge_enabled,
             diagnostics=grouping_diagnostics,
+            ambiguities=grouping_ambiguities,
         )
+        unresolved_requests: list[LayoutArbitrationRequest] = []
+        active_requests: dict[LayoutArbitrationKey, LayoutArbitrationRequest] = {}
+        for ambiguity in grouping_ambiguities or ():
+            request = LayoutArbitrationRequest.from_ambiguity(
+                ambiguity,
+                lines,
+                source_language=self._config.ocr.language,
+            )
+            active_requests[request.key] = request
+            partition = self._layout_arbitration_cache.get(request.key)
+            if partition is None:
+                unresolved_requests.append(request)
+                continue
+            try:
+                candidate_groups = apply_horizontal_arbitration(
+                    candidate_groups,
+                    ambiguity,
+                    partition,
+                )
+            except ValueError:
+                # Geometry can change without changing OCR text revisions.  A
+                # cached partition that no longer fits the closed block is not
+                # reusable and must be arbitrated again.
+                self._layout_arbitration_cache.pop(request.key, None)
+                unresolved_requests.append(request)
+
+        self._active_layout_arbitration_keys = set(active_requests)
+        self._prune_layout_arbitration_work()
+        for request in unresolved_requests:
+            self._queue_layout_arbitration(request)
+        blocked_member_ids = {
+            member_id
+            for request in unresolved_requests
+            for member_id in request.member_ids
+        }
+        self._layout_arbitration_blocked_member_ids = blocked_member_ids
         candidate_observations = tuple(
             group.observation for group in candidate_groups
         )
@@ -968,7 +1074,11 @@ class LiveController:
             if id(observation) in accepted_observation_ids
         )
         if self._config.ocr.text_merge_enabled:
-            stable_groups = self._layout_stabilizer.update(accepted_groups)
+            stable_groups = (
+                self._layout_stabilizer.accept(accepted_groups)
+                if accept_arbitrated
+                else self._layout_stabilizer.update(accepted_groups)
+            )
         else:
             self._layout_stabilizer.reset()
             stable_groups = accepted_groups
@@ -979,6 +1089,8 @@ class LiveController:
             len(stable_groups),
             self._layout_stabilizer.has_pending,
             tuple(grouping_diagnostics or ()),
+            tuple(sorted(blocked_member_ids)),
+            len(unresolved_requests),
         )
 
     def _collect_ocr(self) -> None:
@@ -1098,7 +1210,6 @@ class LiveController:
         active_lines = self._active_ocr_lines()
         layout_result = self._build_translation_layout(active_lines)
         observations = layout_result.observations
-        tracker_observations = observations
         rejected = line_selection.rejected + layout_result.rejected
         raw_count = len(raw_observations)
         self._ocr_text_count += raw_count
@@ -1115,9 +1226,15 @@ class LiveController:
                 if layout_result.pending
                 else ""
             )
+            arbitration_suffix = (
+                f"，LLM 分组仲裁排队 {layout_result.arbitration_pending_count} 块"
+                if layout_result.arbitration_pending_count
+                else ""
+            )
             scan_summary = (
                 f"本轮检测 {raw_count} 框，当前 {len(active_lines)} 行/"
-                f"候选 {layout_result.candidate_count} 组{pending_suffix}"
+                f"候选 {layout_result.candidate_count} 组"
+                f"{pending_suffix}{arbitration_suffix}"
             )
             set_filter_status(
                 f"文字过滤：{scan_summary}，保留 {len(observations)} 条，"
@@ -1136,6 +1253,12 @@ class LiveController:
             )
             if layout_result.pending:
                 print("版面 V2：新分组关系等待下一轮 OCR 确认")
+            if layout_result.arbitration_pending_count:
+                print(
+                    "版面仲裁："
+                    f"{layout_result.arbitration_pending_count} 个歧义块排队，"
+                    "相关翻译暂缓"
+                )
             for diagnostic in layout_result.grouping_diagnostics:
                 score = "-" if diagnostic.score is None else f"{diagnostic.score:.3f}"
                 evidence = (
@@ -1172,34 +1295,20 @@ class LiveController:
                     f"更新 {len(contextual_update.observations)} 条 / "
                     f"target {roi_target_count} 条"
                 )
-        previous_keys = {
-            (track.track_id, track.revision) for track in self._tracker.visible_tracks
-        }
         # Atomic OCR lines outside a local ROI remain in the line tracker, so
         # this is a complete translation-layout snapshot after every scan.
-        update = self._tracker.observe(tracker_observations, now)
-        current_keys: set[tuple[str, int]] = set()
-        for track in update.visible_tracks:
-            key = (track.track_id, track.revision)
-            current_keys.add(key)
-            if key not in previous_keys or key not in self._source_latency_origins:
-                self._source_latency_origins[key] = _SourceLatencyOrigin(
-                    pipeline_started_at=(
-                        ocr_latency_origin.change_started_at
-                        if ocr_latency_origin is not None
-                        else task_result.triggered_at
-                    ),
-                    first_recognized_at=task_result.completed_at,
-                )
-        self._source_latency_origins = {
-            key: origin
-            for key, origin in self._source_latency_origins.items()
-            if key in current_keys
-        }
-        if update.stable_sources:
-            if self._debug:
-                print("稳定字幕：" + " | ".join(item.text for item in update.stable_sources))
-            self._submit_translations(update.stable_sources)
+        self._observe_translation_layout(
+            layout_result,
+            now,
+            default_origin=_SourceLatencyOrigin(
+                pipeline_started_at=(
+                    ocr_latency_origin.change_started_at
+                    if ocr_latency_origin is not None
+                    else task_result.triggered_at
+                ),
+                first_recognized_at=task_result.completed_at,
+            ),
+        )
 
         scheduler = self._roi_scheduler
         if scheduler is not None and ocr_latency_origin is not None:
@@ -1287,6 +1396,205 @@ class LiveController:
         if follow_up is not None:
             self._submit_roi_ocr(follow_up)
 
+    def _observe_translation_layout(
+        self,
+        layout_result: _LayoutResult,
+        now: float,
+        *,
+        default_origin: _SourceLatencyOrigin,
+    ) -> None:
+        previous_keys = {
+            (track.track_id, track.revision) for track in self._tracker.visible_tracks
+        }
+        update = self._tracker.observe(layout_result.observations, now)
+        current_keys: set[tuple[str, int]] = set()
+        visible_by_key: dict[tuple[str, int], TrackedText] = {}
+        for track in update.visible_tracks:
+            key = (track.track_id, track.revision)
+            current_keys.add(key)
+            visible_by_key[key] = track
+            if key not in previous_keys or key not in self._source_latency_origins:
+                self._source_latency_origins[key] = default_origin
+        self._source_latency_origins = {
+            key: origin
+            for key, origin in self._source_latency_origins.items()
+            if key in current_keys
+        }
+        translatable_sources = tuple(
+            source
+            for source in update.stable_sources
+            if not self._track_waits_for_layout_arbitration(
+                visible_by_key[(source.track_id, source.revision)]
+            )
+        )
+        if update.stable_sources and self._debug:
+            print("稳定字幕：" + " | ".join(item.text for item in update.stable_sources))
+            waiting_count = len(update.stable_sources) - len(translatable_sources)
+            if waiting_count:
+                print(f"版面仲裁：暂缓翻译 {waiting_count} 条规则分组")
+        if translatable_sources:
+            self._submit_translations(translatable_sources)
+        self._dispatch_translation_work()
+
+    def _queue_layout_arbitration(self, request: LayoutArbitrationRequest) -> None:
+        key = request.key
+        if key in self._layout_arbitration_cache:
+            return
+        if any(item.request.key == key for item in self._pending_layout_arbitrations):
+            return
+        if any(item.request.key == key for item in self._layout_arbitration_futures.values()):
+            return
+        now = time.monotonic()
+        self._pending_layout_arbitrations.append(
+            _LayoutArbitrationSubmission(
+                request,
+                now,
+                now,
+                now,
+                self._session_epoch,
+            )
+        )
+
+    def _prune_layout_arbitration_work(self) -> None:
+        active = self._active_layout_arbitration_keys
+        self._pending_layout_arbitrations = [
+            submission
+            for submission in self._pending_layout_arbitrations
+            if submission.session_epoch == self._session_epoch
+            and submission.request.key in active
+        ]
+        for future, submission in tuple(self._layout_arbitration_futures.items()):
+            if (
+                submission.session_epoch == self._session_epoch
+                and submission.request.key in active
+            ):
+                continue
+            if future.done() or future.running() or not future.cancel():
+                continue
+            self._layout_arbitration_futures.pop(future, None)
+            self._layout_arbitration_stale_count += 1
+
+    def _remember_layout_arbitration(
+        self,
+        key: LayoutArbitrationKey,
+        partition: HorizontalPartition,
+    ) -> None:
+        self._layout_arbitration_cache.pop(key, None)
+        self._layout_arbitration_cache[key] = partition
+        while len(self._layout_arbitration_cache) > _LAYOUT_ARBITRATION_CACHE_LIMIT:
+            oldest_key = next(iter(self._layout_arbitration_cache))
+            self._layout_arbitration_cache.pop(oldest_key)
+
+    def _collect_layout_arbitrations(self) -> None:
+        completed_current: list[_LayoutArbitrationSubmission] = []
+        active_lines = self._active_ocr_lines()
+        for future in tuple(self._layout_arbitration_futures):
+            if not future.done():
+                continue
+            submission = self._layout_arbitration_futures.pop(future)
+            request = submission.request
+            current = (
+                submission.session_epoch == self._session_epoch
+                and request.key in self._active_layout_arbitration_keys
+                and request.is_current(active_lines)
+            )
+            try:
+                worker_result = future.result()
+            except Exception as exc:
+                if not current:
+                    self._layout_arbitration_stale_count += 1
+                    continue
+                partition = request.ambiguity.rule_partition
+                self._layout_arbitration_fallback_count += 1
+                print(f"版面仲裁失败，沿用规则结果：{exc}", file=sys.stderr)
+            else:
+                if not current:
+                    self._layout_arbitration_stale_count += 1
+                    continue
+                partition = worker_result.partition
+                if partition is None:
+                    partition = request.ambiguity.rule_partition
+                    self._layout_arbitration_fallback_count += 1
+                elif partition != request.ambiguity.rule_partition:
+                    self._layout_arbitration_change_count += 1
+                if self._debug:
+                    llm_label = (
+                        f"{worker_result.llm_seconds:.3f}s"
+                        if worker_result.llm_seconds is not None
+                        else "-"
+                    )
+                    queue_seconds = max(
+                        0.0,
+                        worker_result.started_at - submission.queued_at,
+                    )
+                    total_seconds = max(
+                        0.0,
+                        worker_result.completed_at - submission.queued_at,
+                    )
+                    print(
+                        f"版面仲裁：{request.ambiguity.kinds} / "
+                        f"规则 {request.ambiguity.rule_partition} -> {partition} / "
+                        f"排队 {queue_seconds:.3f}s / LLM {llm_label} / "
+                        f"总计 {total_seconds:.3f}s"
+                    )
+            self._remember_layout_arbitration(request.key, partition)
+            completed_current.append(submission)
+
+        if not completed_current:
+            self._dispatch_translation_work()
+            return
+        # The revision and active-key checks above ensure this rebuild cannot
+        # apply a decision to a newer OCR snapshot.  LLM arbitration itself is
+        # the extra confirmation, so do not add another two-scan topology wait.
+        layout_result = self._build_translation_layout(
+            active_lines,
+            accept_arbitrated=True,
+        )
+        self._observe_translation_layout(
+            layout_result,
+            time.monotonic(),
+            default_origin=_SourceLatencyOrigin(
+                min(item.pipeline_started_at for item in completed_current),
+                min(item.first_recognized_at for item in completed_current),
+            ),
+        )
+        # If the arbiter kept (or fell back to) the rule topology, those tracks
+        # were already stable before the request and will not emit stable_sources
+        # a second time.  Queue them explicitly now that the block is unblocked.
+        self._queue_untranslated_visible_sources()
+        self._dispatch_translation_work()
+        if self._latest_frame is not None:
+            self._overlay.set_scene(self._latest_frame, self._tracker.visible_tracks)
+
+    def _arbitrate_layout_blocking_timed(
+        self,
+        request: LayoutArbitrationRequest,
+    ) -> _LayoutArbitrationWorkerResult:
+        started_at = time.monotonic()
+
+        async def arbitrate() -> tuple[HorizontalPartition | None, float | None]:
+            arbitration_config = replace(
+                self._config.translation,
+                temperature=0.0,
+                top_p=1.0,
+                max_output_tokens=_LAYOUT_ARBITRATION_MAX_OUTPUT_TOKENS,
+            )
+            async with OpenAICompatibleTransport(arbitration_config) as transport:
+                content = await transport.complete(
+                    build_layout_arbitration_prompt(request)
+                )
+                partition = parse_layout_arbitration_response(content, request)
+                durations = transport.completion_durations
+                return partition, (sum(durations) if durations else None)
+
+        partition, llm_seconds = asyncio.run(arbitrate())
+        return _LayoutArbitrationWorkerResult(
+            partition,
+            started_at,
+            time.monotonic(),
+            llm_seconds,
+        )
+
     def _submit_translations(self, sources: Sequence[SourceText]) -> None:
         if not sources:
             return
@@ -1332,7 +1640,7 @@ class LiveController:
         admission_limit = self._max_pending_translation_batches + max(
             0,
             self._config.translation.max_concurrency
-            - len(self._translation_futures),
+            - self._active_llm_work_count(),
         )
         for batch_index, offset in enumerate(range(0, len(queued_sources), batch_size)):
             if len(self._pending_translations) >= admission_limit:
@@ -1484,6 +1792,7 @@ class LiveController:
             if track.stable_emitted
             and track.missing_since is None
             and not track.translation_suppressed
+            and not self._track_waits_for_layout_arbitration(track)
             and track.translated_text is None
             and (track.track_id, track.revision) not in scheduled
             and (track.track_id, track.revision)
@@ -1493,12 +1802,39 @@ class LiveController:
             self._submit_translations(deferred)
 
     def _dispatch_translation_work(self) -> None:
+        self._dispatch_pending_layout_arbitrations()
         self._dispatch_ready_translation_retries()
         self._dispatch_pending_translations()
 
+    def _active_llm_work_count(self) -> int:
+        return len(self._layout_arbitration_futures) + len(self._translation_futures)
+
+    def _dispatch_pending_layout_arbitrations(self) -> None:
+        concurrency = self._config.translation.max_concurrency
+        self._prune_layout_arbitration_work()
+        while (
+            self._pending_layout_arbitrations
+            and self._active_llm_work_count() < concurrency
+        ):
+            submission = self._pending_layout_arbitrations.pop(0)
+            if (
+                submission.session_epoch != self._session_epoch
+                or submission.request.key not in self._active_layout_arbitration_keys
+            ):
+                continue
+            future = self._translation_executor.submit(
+                self._arbitrate_layout_blocking_timed,
+                submission.request,
+            )
+            self._layout_arbitration_futures[future] = submission
+            self._layout_arbitration_request_count += 1
+
     def _dispatch_pending_translations(self) -> None:
         concurrency = self._config.translation.max_concurrency
-        while self._pending_translations and len(self._translation_futures) < concurrency:
+        while (
+            self._pending_translations
+            and self._active_llm_work_count() < concurrency
+        ):
             submission = self._pending_translations.pop(0)
             batch, source_bounds = self._rebind_visible_sources(
                 submission.batch,
@@ -1910,7 +2246,7 @@ class LiveController:
     def _dispatch_ready_translation_retries(self) -> None:
         now = time.monotonic()
         concurrency = self._config.translation.max_concurrency
-        while len(self._translation_futures) < concurrency:
+        while self._active_llm_work_count() < concurrency:
             retry_index = next(
                 (
                     index
@@ -2023,8 +2359,8 @@ class LiveController:
             accepted.append((accepted_result, origin))
         return tuple(accepted), reattached
 
-    @staticmethod
     def _matching_visible_track(
+        self,
         source: SourceText,
         source_bounds: Bounds | None,
         visible: Sequence[TrackedText],
@@ -2038,6 +2374,7 @@ class LiveController:
                 and track_key not in assigned
                 and track.missing_since is None
                 and not track.translation_suppressed
+                and not self._track_waits_for_layout_arbitration(track)
             ):
                 return track
 
@@ -2048,6 +2385,7 @@ class LiveController:
             if track.text == normalized
             and track.missing_since is None
             and not track.translation_suppressed
+            and not self._track_waits_for_layout_arbitration(track)
             and (track.track_id, track.revision) not in assigned
         ]
         if not candidates:
@@ -2060,6 +2398,12 @@ class LiveController:
                 track.bounds[1],
                 track.bounds[0],
             ),
+        )
+
+    def _track_waits_for_layout_arbitration(self, track: TrackedText) -> bool:
+        return bool(
+            self._layout_arbitration_blocked_member_ids
+            & set(track.source_track_ids)
         )
 
     def _refresh_latency_display(self) -> None:

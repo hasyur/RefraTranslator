@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from game_screen_translator.ocr.grouping import (
     TranslationGroupStabilizer,
+    apply_horizontal_arbitration,
     build_translation_groups,
 )
 from game_screen_translator.ocr.layout import merge_ocr_text_blocks
@@ -214,6 +215,7 @@ def test_merges_two_visually_long_prose_rows_without_terminal_punctuation() -> N
 
 
 def test_merges_dense_multiline_prose_before_the_final_punctuation() -> None:
+    ambiguities = []
     groups = build_translation_groups(
         (
             _line(
@@ -233,10 +235,86 @@ def test_merges_dense_multiline_prose_before_the_final_punctuation() -> None:
             ),
         ),
         source_language="japan",
+        ambiguities=ambiguities,
     )
 
     assert len(groups) == 1
     assert groups[0].member_ids == ("line-a", "line-b", "line-c")
+    assert ambiguities == []
+
+
+def test_reports_partial_chain_and_menu_sentence_conflict_as_one_block() -> None:
+    ambiguities = []
+    groups = build_translation_groups(
+        (
+            _line("line-a", "静かな夜に僕たちは", (40, 40, 400, 80)),
+            _line("line-b", "古い約束の意味を探し", (40, 86, 400, 126)),
+            _line("line-c", "歩き続けていた。", (40, 132, 360, 172)),
+        ),
+        source_language="japan",
+        ambiguities=ambiguities,
+    )
+
+    assert [group.member_ids for group in groups] == [
+        ("line-a",),
+        ("line-b", "line-c"),
+    ]
+    assert len(ambiguities) == 1
+    ambiguity = ambiguities[0]
+    assert ambiguity.kinds == ("partial_chain", "menu_sentence_conflict")
+    assert ambiguity.rule_partition == ((0,), (1, 2))
+    assert ambiguity.allowed_edges == ((0, 1), (1, 2))
+
+    resolved = apply_horizontal_arbitration(groups, ambiguity, ((0, 1, 2),))
+
+    assert [group.member_ids for group in resolved] == [
+        ("line-a", "line-b", "line-c"),
+    ]
+
+
+def test_reports_nearly_tied_branch_candidates_for_arbitration() -> None:
+    ambiguities = []
+    groups = build_translation_groups(
+        (
+            _line(
+                "upper",
+                "遠い街から来た旅人たちは記録を読む",
+                (0, 20, 300, 60),
+            ),
+            _line("lower-a", "一つの答え。", (0, 66, 20, 106)),
+            _line("lower-b", "別の答え。", (51, 66, 251, 106)),
+        ),
+        source_language="japan",
+        ambiguities=ambiguities,
+    )
+
+    assert [group.member_ids for group in groups] == [
+        ("upper", "lower-a"),
+        ("lower-b",),
+    ]
+    assert len(ambiguities) == 1
+    assert ambiguities[0].kinds == ("candidate_margin",)
+    assert ambiguities[0].allowed_edges == ((0, 1), (0, 2))
+
+
+def test_obvious_menu_stack_does_not_request_llm_arbitration() -> None:
+    ambiguities = []
+    groups = build_translation_groups(
+        (
+            _line("line-a", "はじめから", (40, 40, 320, 80)),
+            _line("line-b", "つづきから", (40, 86, 320, 126)),
+            _line("line-c", "設定", (40, 132, 260, 172)),
+        ),
+        source_language="japan",
+        ambiguities=ambiguities,
+    )
+
+    assert [group.member_ids for group in groups] == [
+        ("line-a",),
+        ("line-b",),
+        ("line-c",),
+    ]
+    assert ambiguities == []
 
 
 def test_keeps_three_or_more_stacked_menu_entries_independent() -> None:

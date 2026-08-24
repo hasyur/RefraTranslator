@@ -10,6 +10,12 @@ from game_screen_translator.ocr.types import OcrText
 
 Bounds = tuple[int, int, int, int]
 Orientation = Literal["single", "horizontal", "vertical"]
+HorizontalAmbiguityKind = Literal[
+    "partial_chain",
+    "candidate_margin",
+    "menu_sentence_conflict",
+]
+HorizontalPartition = tuple[tuple[int, ...], ...]
 
 _JAPANESE_LANGUAGES = {"ja", "japan", "japanese"}
 _ENGLISH_LANGUAGES = {"en", "english"}
@@ -124,6 +130,47 @@ class HorizontalMergeDiagnostic:
 
 
 @dataclass(frozen=True, slots=True)
+class HorizontalMergeAmbiguity:
+    """A bounded horizontal row block whose rule topology needs arbitration."""
+
+    row_member_ids: tuple[tuple[str, ...], ...]
+    row_texts: tuple[str, ...]
+    row_bounds: tuple[Bounds, ...]
+    kinds: tuple[HorizontalAmbiguityKind, ...]
+    rule_partition: HorizontalPartition
+    allowed_edges: tuple[tuple[int, int], ...]
+
+    def __post_init__(self) -> None:
+        row_count = len(self.row_member_ids)
+        if row_count < 2:
+            raise ValueError("歧义文字块至少需要两行")
+        if len(self.row_texts) != row_count or len(self.row_bounds) != row_count:
+            raise ValueError("歧义文字块的行信息数量不一致")
+        member_ids = tuple(
+            member_id
+            for row_member_ids in self.row_member_ids
+            for member_id in row_member_ids
+        )
+        if not member_ids or len(set(member_ids)) != len(member_ids):
+            raise ValueError("歧义文字块成员为空或重复")
+        if not self.kinds or len(set(self.kinds)) != len(self.kinds):
+            raise ValueError("歧义文字块必须包含唯一的触发类型")
+        validate_horizontal_partition(
+            self.rule_partition,
+            row_count=row_count,
+            allowed_edges=self.allowed_edges,
+        )
+
+    @property
+    def member_ids(self) -> tuple[str, ...]:
+        return tuple(
+            member_id
+            for row_member_ids in self.row_member_ids
+            for member_id in row_member_ids
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class _HorizontalPairEvaluation:
     score: float | None
     reason: str
@@ -153,6 +200,7 @@ def build_translation_groups(
     source_language: str,
     merge_enabled: bool = True,
     diagnostics: list[HorizontalMergeDiagnostic] | None = None,
+    ambiguities: list[HorizontalMergeAmbiguity] | None = None,
 ) -> tuple[TranslationGroup, ...]:
     """Build conservative translation groups without destroying OCR-line identity.
 
@@ -203,12 +251,25 @@ def build_translation_groups(
 
     rows = _horizontal_rows(tuple(sorted(remaining)), members)
     menu_rows = _menu_like_rows(rows)
+    margin_ambiguities: list[tuple[int, ...]] | None = (
+        [] if ambiguities is not None else None
+    )
     edges = _mutual_horizontal_edges(
         rows,
         language,
         menu_rows,
         diagnostics=diagnostics,
+        margin_ambiguities=margin_ambiguities,
     )
+    if ambiguities is not None:
+        ambiguities.extend(
+            _horizontal_merge_ambiguities(
+                rows,
+                language,
+                edges,
+                tuple(margin_ambiguities or ()),
+            )
+        )
     incoming = {lower: upper for upper, lower in edges.items()}
     consumed_rows: set[int] = set()
     for start in range(len(rows)):
@@ -253,6 +314,15 @@ class TranslationGroupStabilizer:
         self._confirmed = None
         self._candidate_key = None
         self._candidate_count = 0
+
+    def accept(self, groups: Sequence[TranslationGroup]) -> tuple[TranslationGroup, ...]:
+        """Accept an externally arbitrated topology without another scan delay."""
+
+        current = tuple(groups)
+        self._confirmed = current
+        self._candidate_key = None
+        self._candidate_count = 0
+        return current
 
     def update(
         self,
@@ -448,8 +518,10 @@ def _mutual_horizontal_edges(
     menu_rows: set[int],
     *,
     diagnostics: list[HorizontalMergeDiagnostic] | None = None,
+    margin_ambiguities: list[tuple[int, ...]] | None = None,
 ) -> dict[int, int]:
     candidates: list[tuple[int, int, float]] = []
+    scored_candidates: list[tuple[int, int, float]] = []
     evaluations: list[tuple[int, int, _HorizontalPairEvaluation]] = []
     for upper_index, upper in enumerate(rows):
         for lower_index in range(upper_index + 1, len(rows)):
@@ -480,6 +552,7 @@ def _mutual_horizontal_edges(
                         )
                     )
                 continue
+            scored_candidates.append((upper_index, lower_index, evaluation.score))
             if _has_intervening_row(upper_index, lower_index, rows):
                 if diagnostics is not None:
                     diagnostics.append(
@@ -495,6 +568,33 @@ def _mutual_horizontal_edges(
                 continue
             candidates.append((upper_index, lower_index, evaluation.score))
             evaluations.append((upper_index, lower_index, evaluation))
+
+    if margin_ambiguities is not None:
+        scored_outgoing: dict[int, list[tuple[float, int]]] = {}
+        scored_incoming: dict[int, list[tuple[float, int]]] = {}
+        for upper, lower, score in scored_candidates:
+            scored_outgoing.setdefault(upper, []).append((score, lower))
+            scored_incoming.setdefault(lower, []).append((score, upper))
+        for upper, choices in scored_outgoing.items():
+            choices.sort(reverse=True)
+            if (
+                len(choices) > 1
+                and choices[0][0] >= _HORIZONTAL_MERGE_MIN_SCORE
+                and choices[0][0] - choices[1][0] < _HORIZONTAL_MERGE_MIN_MARGIN
+            ):
+                margin_ambiguities.append(
+                    tuple(sorted({upper, choices[0][1], choices[1][1]}))
+                )
+        for lower, choices in scored_incoming.items():
+            choices.sort(reverse=True)
+            if (
+                len(choices) > 1
+                and choices[0][0] >= _HORIZONTAL_MERGE_MIN_SCORE
+                and choices[0][0] - choices[1][0] < _HORIZONTAL_MERGE_MIN_MARGIN
+            ):
+                margin_ambiguities.append(
+                    tuple(sorted({lower, choices[0][1], choices[1][1]}))
+                )
 
     outgoing: dict[int, list[tuple[float, int]]] = {}
     incoming: dict[int, list[tuple[float, int]]] = {}
@@ -530,9 +630,17 @@ def _mutual_horizontal_edges(
             continue
         if outgoing_margin < _HORIZONTAL_MERGE_MIN_MARGIN:
             candidate_reasons[(upper, lower)] = "上行候选差距不足"
+            if margin_ambiguities is not None:
+                margin_ambiguities.append(
+                    tuple(sorted({upper, lower, choices[1][1]}))
+                )
             continue
         if incoming_margin < _HORIZONTAL_MERGE_MIN_MARGIN:
             candidate_reasons[(upper, lower)] = "下行候选差距不足"
+            if margin_ambiguities is not None:
+                margin_ambiguities.append(
+                    tuple(sorted({upper, lower, incoming_choices[1][1]}))
+                )
             continue
         edges[upper] = lower
         candidate_reasons[(upper, lower)] = "分数与互选边际均通过"
@@ -757,10 +865,12 @@ def _has_intervening_row(
     return False
 
 
-def _menu_like_rows(rows: Sequence[_TextRow]) -> set[int]:
-    """Conservatively isolate regular stacks of short UI labels."""
+def _regular_label_geometry_runs(
+    rows: Sequence[_TextRow],
+) -> tuple[tuple[int, ...], ...]:
+    """Return regular 3+ row stacks without interpreting their punctuation."""
 
-    menu_rows: set[int] = set()
+    runs: list[tuple[int, ...]] = []
     for start in range(len(rows)):
         run = [start]
         for index in range(start + 1, len(rows)):
@@ -779,13 +889,6 @@ def _menu_like_rows(rows: Sequence[_TextRow]) -> set[int]:
             run.append(index)
         if len(run) < 3:
             continue
-        texts = tuple(rows[index].text.strip() for index in run)
-        if any(
-            _has_sentence_ending(text)
-            or text.endswith(_CONTINUATION_ENDINGS)
-            for text in texts
-        ):
-            continue
         widths = tuple(_width(rows[index].bounds) for index in run)
         visual_spans = tuple(
             _width(rows[index].bounds) / max(1, _height(rows[index].bounds))
@@ -801,8 +904,327 @@ def _menu_like_rows(rows: Sequence[_TextRow]) -> set[int]:
             for span in visual_spans
         )
         if short_labels or compact_regular_labels:
-            menu_rows.update(run)
+            candidate = tuple(run)
+            if candidate not in runs:
+                runs.append(candidate)
+    return tuple(runs)
+
+
+def _menu_like_rows(rows: Sequence[_TextRow]) -> set[int]:
+    """Conservatively isolate regular stacks of short UI labels."""
+
+    menu_rows: set[int] = set()
+    for run in _regular_label_geometry_runs(rows):
+        texts = tuple(rows[index].text.strip() for index in run)
+        if any(
+            _has_sentence_ending(text)
+            or text.endswith(_CONTINUATION_ENDINGS)
+            for text in texts
+        ):
+            continue
+        menu_rows.update(run)
     return menu_rows
+
+
+def _horizontal_geometry_edge(
+    rows: Sequence[_TextRow],
+    upper_index: int,
+    lower_index: int,
+    language: str,
+    *,
+    allow_intervening: bool = False,
+) -> bool:
+    """Return whether an arbiter may join two rows across rule-only evidence gates."""
+
+    upper = rows[upper_index]
+    lower = rows[lower_index]
+    if not _has_letter(upper.text) or not _has_letter(lower.text):
+        return False
+    if _has_hard_sentence_ending(upper.text):
+        return False
+    if not _scripts_compatible(upper.text, lower.text, language):
+        return False
+    upper_bounds = upper.bounds
+    lower_bounds = lower.bounds
+    if lower_bounds[1] <= upper_bounds[1]:
+        return False
+    line_height = max(_height(upper_bounds), _height(lower_bounds))
+    height_ratio = min(_height(upper_bounds), _height(lower_bounds)) / line_height
+    if height_ratio < 0.72:
+        return False
+    if _vertical_gap(upper_bounds, lower_bounds) > line_height * 0.85:
+        return False
+    if _width(upper_bounds) / max(1.0, line_height) < 3.5:
+        return False
+    left_distance = abs(upper_bounds[0] - lower_bounds[0])
+    center_distance = abs(_center_x(upper_bounds) - _center_x(lower_bounds))
+    left_quality = max(0.0, 1.0 - left_distance / max(1.0, line_height * 1.25))
+    center_quality = max(
+        0.0,
+        1.0 - center_distance / max(1.0, line_height * 1.25),
+    )
+    if max(left_quality, center_quality) <= 0:
+        return False
+    overlap = _axis_overlap(
+        upper_bounds[0],
+        upper_bounds[2],
+        lower_bounds[0],
+        lower_bounds[2],
+    )
+    overlap_ratio = overlap / max(1, min(_width(upper_bounds), _width(lower_bounds)))
+    if overlap_ratio < 0.35 and left_quality < 0.35:
+        return False
+    return allow_intervening or not _has_intervening_row(
+        upper_index,
+        lower_index,
+        rows,
+    )
+
+
+def _coherent_horizontal_runs(
+    rows: Sequence[_TextRow],
+    language: str,
+) -> tuple[tuple[int, ...], ...]:
+    runs: list[tuple[int, ...]] = []
+    start = 0
+    for upper_index in range(max(0, len(rows) - 1)):
+        if _horizontal_geometry_edge(rows, upper_index, upper_index + 1, language):
+            continue
+        if upper_index + 1 - start >= 2:
+            runs.append(tuple(range(start, upper_index + 1)))
+        start = upper_index + 1
+    if len(rows) - start >= 2:
+        runs.append(tuple(range(start, len(rows))))
+    return tuple(runs)
+
+
+def _horizontal_merge_ambiguities(
+    rows: Sequence[_TextRow],
+    language: str,
+    edges: dict[int, int],
+    margin_ambiguities: Sequence[tuple[int, ...]],
+) -> tuple[HorizontalMergeAmbiguity, ...]:
+    triggers: list[tuple[set[int], HorizontalAmbiguityKind]] = []
+
+    for run in _coherent_horizontal_runs(rows, language):
+        if len(run) < 3:
+            continue
+        linked = tuple(edges.get(upper) == lower for upper, lower in zip(run, run[1:]))
+        if any(linked) and not all(linked):
+            triggers.append((set(run), "partial_chain"))
+
+    for competing_rows in margin_ambiguities:
+        if len(competing_rows) >= 3:
+            triggers.append((set(competing_rows), "candidate_margin"))
+
+    for run in _regular_label_geometry_runs(rows):
+        sentence_conflict = any(
+            not _has_hard_sentence_ending(rows[upper].text)
+            and (
+                rows[upper].text.rstrip().endswith(_CONTINUATION_ENDINGS)
+                or _has_sentence_ending(rows[lower].text)
+            )
+            and _horizontal_geometry_edge(rows, upper, lower, language)
+            for upper, lower in zip(run, run[1:])
+        )
+        fully_linked = all(
+            edges.get(upper) == lower for upper, lower in zip(run, run[1:])
+        )
+        if sentence_conflict and not fully_linked:
+            triggers.append((set(run), "menu_sentence_conflict"))
+
+    if not triggers:
+        return ()
+
+    # A current rule chain must never be split between two independent requests.
+    expanded: list[tuple[set[int], set[HorizontalAmbiguityKind]]] = []
+    for indices, kind in triggers:
+        changed = True
+        while changed:
+            changed = False
+            for upper, lower in edges.items():
+                if (upper in indices or lower in indices) and not {upper, lower} <= indices:
+                    indices.update((upper, lower))
+                    changed = True
+        expanded.append((indices, {kind}))
+
+    merged: list[tuple[set[int], set[HorizontalAmbiguityKind]]] = []
+    for indices, kinds in expanded:
+        overlap_indices = [
+            index
+            for index, (existing, _existing_kinds) in enumerate(merged)
+            if existing & indices
+        ]
+        if not overlap_indices:
+            merged.append((set(indices), set(kinds)))
+            continue
+        combined_indices = set(indices)
+        combined_kinds = set(kinds)
+        for index in reversed(overlap_indices):
+            existing, existing_kinds = merged.pop(index)
+            combined_indices.update(existing)
+            combined_kinds.update(existing_kinds)
+        merged.append((combined_indices, combined_kinds))
+
+    kind_order: tuple[HorizontalAmbiguityKind, ...] = (
+        "partial_chain",
+        "candidate_margin",
+        "menu_sentence_conflict",
+    )
+    result: list[HorizontalMergeAmbiguity] = []
+    for global_indices, kinds in merged:
+        ordered_indices = tuple(sorted(global_indices))
+        if len(ordered_indices) < 2:
+            continue
+        local_index = {
+            global_index: index for index, global_index in enumerate(ordered_indices)
+        }
+        allowed_edges = tuple(
+            sorted(
+                (local_index[upper], local_index[lower])
+                for upper in ordered_indices
+                for lower in ordered_indices
+                if upper < lower
+                and _horizontal_geometry_edge(
+                    rows,
+                    upper,
+                    lower,
+                    language,
+                    allow_intervening="candidate_margin" in kinds,
+                )
+            )
+        )
+        rule_partition = _partition_from_edges(
+            ordered_indices,
+            edges,
+            local_index,
+        )
+        result.append(
+            HorizontalMergeAmbiguity(
+                tuple(
+                    tuple(member.track_id for member in rows[index].members)
+                    for index in ordered_indices
+                ),
+                tuple(rows[index].text for index in ordered_indices),
+                tuple(rows[index].bounds for index in ordered_indices),
+                tuple(kind for kind in kind_order if kind in kinds),
+                rule_partition,
+                allowed_edges,
+            )
+        )
+    return tuple(
+        sorted(
+            result,
+            key=lambda item: (item.row_bounds[0][1], item.row_bounds[0][0]),
+        )
+    )
+
+
+def _partition_from_edges(
+    ordered_indices: Sequence[int],
+    edges: dict[int, int],
+    local_index: dict[int, int],
+) -> HorizontalPartition:
+    included = set(ordered_indices)
+    incoming = {
+        lower
+        for upper, lower in edges.items()
+        if upper in included and lower in included
+    }
+    consumed: set[int] = set()
+    groups: list[tuple[int, ...]] = []
+    for start in ordered_indices:
+        if start in incoming or start in consumed:
+            continue
+        chain = [start]
+        while chain[-1] in edges and edges[chain[-1]] in included:
+            lower = edges[chain[-1]]
+            if lower in chain:
+                break
+            chain.append(lower)
+        consumed.update(chain)
+        groups.append(tuple(local_index[index] for index in chain))
+    for index in ordered_indices:
+        if index not in consumed:
+            groups.append((local_index[index],))
+    return tuple(sorted(groups, key=lambda group: group[0]))
+
+
+def validate_horizontal_partition(
+    partition: Sequence[Sequence[int]],
+    *,
+    row_count: int,
+    allowed_edges: Sequence[tuple[int, int]],
+) -> HorizontalPartition:
+    """Validate an exact, ordered partition over a bounded ambiguity block."""
+
+    if row_count < 1 or not partition:
+        raise ValueError("分段结果不能为空")
+    normalized = tuple(tuple(group) for group in partition)
+    if any(not group for group in normalized):
+        raise ValueError("分段结果中存在空组")
+    flattened = tuple(index for group in normalized for index in group)
+    if any(
+        type(index) is not int or index < 0 or index >= row_count
+        for index in flattened
+    ):
+        raise ValueError("分段结果包含越界行号")
+    if len(flattened) != row_count or set(flattened) != set(range(row_count)):
+        raise ValueError("分段结果必须不重不漏地覆盖全部行")
+    if any(tuple(sorted(group)) != group for group in normalized):
+        raise ValueError("每个分组内的行号必须按画面顺序递增")
+    if tuple(sorted(normalized, key=lambda group: group[0])) != normalized:
+        raise ValueError("分组必须按画面顺序排列")
+    allowed = set(allowed_edges)
+    for group in normalized:
+        for upper, lower in zip(group, group[1:]):
+            if (upper, lower) not in allowed:
+                raise ValueError("分段结果跨越了不允许合并的明确边界")
+    return normalized
+
+
+def apply_horizontal_arbitration(
+    groups: Sequence[TranslationGroup],
+    ambiguity: HorizontalMergeAmbiguity,
+    partition: Sequence[Sequence[int]],
+) -> tuple[TranslationGroup, ...]:
+    """Replace only one ambiguity block while preserving all atomic OCR identities."""
+
+    normalized = validate_horizontal_partition(
+        partition,
+        row_count=len(ambiguity.row_member_ids),
+        allowed_edges=ambiguity.allowed_edges,
+    )
+    affected = set(ambiguity.member_ids)
+    members_by_id = {
+        member.track_id: member
+        for group in groups
+        for member in group.members
+    }
+    if not affected <= members_by_id.keys():
+        raise ValueError("仲裁文字块已经不属于当前分组快照")
+    remaining: list[TranslationGroup] = []
+    for group in groups:
+        group_ids = set(group.member_ids)
+        overlap = group_ids & affected
+        if overlap and not group_ids <= affected:
+            raise ValueError("仲裁文字块切断了现有规则分组")
+        if not overlap:
+            remaining.append(group)
+    rows = tuple(
+        _TextRow(tuple(members_by_id[member_id] for member_id in member_ids))
+        for member_ids in ambiguity.row_member_ids
+    )
+    resolved = [
+        _horizontal_group(tuple(rows[index] for index in row_group))
+        for row_group in normalized
+    ]
+    return tuple(
+        sorted(
+            (*remaining, *resolved),
+            key=lambda group: (group.bounds[1], group.bounds[0]),
+        )
+    )
 
 
 def _horizontal_group(rows: Sequence[_TextRow]) -> TranslationGroup:

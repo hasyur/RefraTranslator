@@ -77,6 +77,7 @@ class OcrConfig:
     detection_max_side: int = 1280
     text_filter_enabled: bool = True
     text_merge_enabled: bool = True
+    text_merge_llm_arbitration_enabled: bool = True
     translate_latin: bool = True
     translate_han_only: bool = False
 
@@ -100,6 +101,10 @@ class OcrConfig:
         for key, value in (
             ("text_filter_enabled", self.text_filter_enabled),
             ("text_merge_enabled", self.text_merge_enabled),
+            (
+                "text_merge_llm_arbitration_enabled",
+                self.text_merge_llm_arbitration_enabled,
+            ),
             ("translate_latin", self.translate_latin),
             ("translate_han_only", self.translate_han_only),
         ):

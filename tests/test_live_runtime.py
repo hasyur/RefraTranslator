@@ -159,6 +159,26 @@ class FakeControl:
         self.paused = paused
 
 
+def _ambiguous_atomic_observations() -> tuple[OcrText, ...]:
+    return (
+        OcrText(
+            "静かな夜に僕たちは",
+            0.99,
+            ((40, 40), (400, 40), (400, 80), (40, 80)),
+        ),
+        OcrText(
+            "古い約束の意味を探し",
+            0.99,
+            ((40, 86), (400, 86), (400, 126), (40, 126)),
+        ),
+        OcrText(
+            "歩き続けていた。",
+            0.99,
+            ((40, 132), (360, 132), (360, 172), (40, 172)),
+        ),
+    )
+
+
 def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
@@ -404,6 +424,286 @@ def test_layout_fragments_remain_separate_when_text_merge_is_disabled() -> None:
     assert [item.text for item in layout.observations] == ["希望", "はある"]
     assert layout.candidate_count == 2
     assert layout.rejected == ()
+    controller.close()
+
+
+def test_ambiguous_layout_uses_shared_llm_slot_before_translation(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+            max_concurrency=1,
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    monkeypatch.setattr(
+        controller,
+        "_arbitrate_layout_blocking_timed",
+        lambda request: live_runtime._LayoutArbitrationWorkerResult(
+            ((0, 1, 2),),
+            1.0,
+            1.1,
+            0.1,
+        ),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_translate_blocking_timed",
+        lambda batch, context: _successful_worker_result(batch),
+    )
+    controller._ocr_line_tracker.observe(_ambiguous_atomic_observations(), now=1.0)
+    layout = controller._build_translation_layout(controller._active_ocr_lines())
+
+    assert layout.arbitration_pending_count == 1
+    assert layout.arbitration_pending_member_ids
+    controller._observe_translation_layout(
+        layout,
+        1.0,
+        default_origin=live_runtime._SourceLatencyOrigin(1.0, 1.0),
+    )
+
+    assert len(controller._layout_arbitration_futures) == 1
+    assert controller._translation_futures == {}
+    next(iter(controller._layout_arbitration_futures)).result(timeout=2)
+
+    controller._collect_layout_arbitrations()
+
+    assert [track.text for track in controller._tracker.visible_tracks] == [
+        "静かな夜に僕たちは\n古い約束の意味を探し\n歩き続けていた。"
+    ]
+    assert controller._layout_arbitration_change_count == 1
+    assert controller._layout_arbitration_blocked_member_ids == set()
+    assert len(controller._translation_futures) == 1
+    next(iter(controller._translation_futures)).result(timeout=2)
+    controller._collect_translations()
+    assert controller._tracker.visible_tracks[0].translated_text is not None
+    controller.close()
+
+
+def test_layout_arbitration_failure_caches_rule_fallback(
+    monkeypatch,
+    capsys,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+            max_concurrency=1,
+        ),
+        live=LiveConfig(stable_observations=1),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+
+    def fail(_request):
+        raise RuntimeError("classifier unavailable")
+
+    monkeypatch.setattr(controller, "_arbitrate_layout_blocking_timed", fail)
+    monkeypatch.setattr(
+        controller,
+        "_translate_blocking_timed",
+        lambda batch, context: _successful_worker_result(batch),
+    )
+    controller._ocr_line_tracker.observe(_ambiguous_atomic_observations(), now=1.0)
+    layout = controller._build_translation_layout(controller._active_ocr_lines())
+    controller._observe_translation_layout(
+        layout,
+        1.0,
+        default_origin=live_runtime._SourceLatencyOrigin(1.0, 1.0),
+    )
+    submission = next(iter(controller._layout_arbitration_futures.values()))
+    next(iter(controller._layout_arbitration_futures)).exception(timeout=2)
+
+    controller._collect_layout_arbitrations()
+
+    assert controller._layout_arbitration_cache[submission.request.key] == (
+        (0,),
+        (1, 2),
+    )
+    assert controller._layout_arbitration_fallback_count == 1
+    assert controller._layout_arbitration_blocked_member_ids == set()
+    assert len(controller._translation_futures) == 1
+    assert "版面仲裁失败，沿用规则结果" in capsys.readouterr().err
+    controller.close()
+
+
+def test_stale_layout_arbitration_result_is_discarded(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+            max_concurrency=1,
+        ),
+        live=LiveConfig(stable_observations=99),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    started = threading.Event()
+    release = threading.Event()
+
+    def arbitrate(_request):
+        started.set()
+        release.wait(timeout=5)
+        return live_runtime._LayoutArbitrationWorkerResult(
+            ((0, 1, 2),),
+            1.0,
+            1.1,
+            0.1,
+        )
+
+    monkeypatch.setattr(controller, "_arbitrate_layout_blocking_timed", arbitrate)
+    controller._ocr_line_tracker.observe(_ambiguous_atomic_observations(), now=1.0)
+    controller._build_translation_layout(controller._active_ocr_lines())
+    controller._dispatch_translation_work()
+    future = next(iter(controller._layout_arbitration_futures))
+    old_key = next(iter(controller._layout_arbitration_futures.values())).request.key
+
+    try:
+        assert started.wait(timeout=2)
+        controller._ocr_line_tracker.observe(
+            (
+                OcrText(
+                    "一つ目の文章。",
+                    0.99,
+                    ((40, 40), (400, 40), (400, 80), (40, 80)),
+                ),
+                OcrText(
+                    "二つ目の文章。",
+                    0.99,
+                    ((40, 86), (400, 86), (400, 126), (40, 126)),
+                ),
+                OcrText(
+                    "三つ目の文章。",
+                    0.99,
+                    ((40, 132), (360, 132), (360, 172), (40, 172)),
+                ),
+            ),
+            now=2.0,
+        )
+        controller._build_translation_layout(controller._active_ocr_lines())
+        assert controller._active_layout_arbitration_keys == set()
+        release.set()
+        future.result(timeout=2)
+
+        controller._collect_layout_arbitrations()
+
+        assert old_key not in controller._layout_arbitration_cache
+        assert controller._layout_arbitration_stale_count == 1
+    finally:
+        release.set()
+        controller.close()
+
+
+def test_layout_arbitration_worker_uses_deterministic_short_request(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+            temperature=0.8,
+            top_p=0.6,
+            max_output_tokens=2048,
+        )
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    seen_configs = []
+
+    class FakeTransport:
+        def __init__(self, transport_config):
+            seen_configs.append(transport_config)
+            self.completion_durations = (0.02,)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def complete(self, prompt):
+            assert "allowed_joins" in prompt
+            return '{"groups":[[1,2,3]]}'
+
+    monkeypatch.setattr(live_runtime, "OpenAICompatibleTransport", FakeTransport)
+    controller._ocr_line_tracker.observe(_ambiguous_atomic_observations(), now=1.0)
+    controller._build_translation_layout(controller._active_ocr_lines())
+    request = controller._pending_layout_arbitrations[0].request
+
+    result = controller._arbitrate_layout_blocking_timed(request)
+
+    assert result.partition == ((0, 1, 2),)
+    assert result.llm_seconds == 0.02
+    assert seen_configs[0].model == config.translation.model
+    assert seen_configs[0].base_url == config.translation.base_url
+    assert seen_configs[0].temperature == 0
+    assert seen_configs[0].top_p == 1
+    assert seen_configs[0].max_output_tokens == 256
+    controller.close()
+
+
+def test_layout_arbitration_can_be_disabled_without_disabling_rule_merge() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        ocr=OcrConfig(text_merge_llm_arbitration_enabled=False),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    controller._ocr_line_tracker.observe(_ambiguous_atomic_observations(), now=1.0)
+
+    layout = controller._build_translation_layout(controller._active_ocr_lines())
+
+    assert [item.text for item in layout.observations] == [
+        "静かな夜に僕たちは",
+        "古い約束の意味を探し\n歩き続けていた。",
+    ]
+    assert layout.arbitration_pending_count == 0
+    assert controller._pending_layout_arbitrations == []
     controller.close()
 
 

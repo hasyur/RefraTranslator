@@ -45,6 +45,7 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.ocr.detection_max_side == 1280
     assert config.ocr.text_filter_enabled is True
     assert config.ocr.text_merge_enabled is True
+    assert config.ocr.text_merge_llm_arbitration_enabled is True
     assert config.ocr.translate_latin is True
     assert config.ocr.translate_han_only is False
     assert config.preview.overlay_opacity == DEFAULT_DARK_OVERLAY_OPACITY
@@ -158,6 +159,16 @@ def test_load_config_rejects_non_boolean_text_merge_option(tmp_path: Path) -> No
     _write(path, "\n[ocr]\ntext_merge_enabled='yes'\n")
 
     with pytest.raises(ConfigError, match="text_merge_enabled"):
+        load_config(path)
+
+
+def test_load_config_rejects_non_boolean_text_merge_arbitration_option(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, "\n[ocr]\ntext_merge_llm_arbitration_enabled='yes'\n")
+
+    with pytest.raises(ConfigError, match="text_merge_llm_arbitration_enabled"):
         load_config(path)
 
 
