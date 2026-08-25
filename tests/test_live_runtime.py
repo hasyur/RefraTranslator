@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 from concurrent.futures import Future
@@ -127,10 +128,14 @@ class FakeOverlay:
     def __init__(self) -> None:
         self.scenes = 0
         self.last_tracks = ()
+        self.roi_debug_snapshots = []
 
     def set_scene(self, frame, tracks) -> None:
         self.scenes += 1
         self.last_tracks = tuple(tracks)
+
+    def set_roi_debug_snapshot(self, snapshot) -> None:
+        self.roi_debug_snapshots.append(snapshot)
 
 
 class FakeBrowserOverlay:
@@ -1010,6 +1015,7 @@ def _dynamic_roi_frame(*, changed: bool = False) -> np.ndarray:
 
 def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     monkeypatch,
+    capsys,
 ) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
@@ -1030,14 +1036,16 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     )
     capture = MutableCapture(_dynamic_roi_frame())
     ocr = ColorBlockOcr()
+    overlay = FakeOverlay()
     control = FakeControl()
     controller = LiveController(
         config,
         capture=capture,
         ocr=ocr,
-        overlay=FakeOverlay(),
+        overlay=overlay,
         control=control,
         app=app,
+        debug=True,
     )
     clock = [10.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
@@ -1070,6 +1078,27 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     assert not controller._active_roi_plan.fallback_full_frame
     assert controller._active_roi_plan.candidate_coverage_fraction > 0.0
     assert controller._active_roi_plan.candidate_region_count == 1
+    assert len(overlay.roi_debug_snapshots) == 1
+    debug_snapshot = overlay.roi_debug_snapshots[0]
+    assert debug_snapshot.job_id == 1
+    assert debug_snapshot.change_rois
+    assert debug_snapshot.candidate_rois
+    assert debug_snapshot.executed_rois == tuple(
+        region.roi for region in controller._active_roi_plan.regions
+    )
+    assert not debug_snapshot.fallback_full_frame
+    roi_plan_line = next(
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("[ROI_PLAN] ")
+    )
+    roi_plan_log = json.loads(roi_plan_line.removeprefix("[ROI_PLAN] "))
+    assert roi_plan_log["job_id"] == 1
+    assert roi_plan_log["scan_kind"] == "local"
+    assert roi_plan_log["rect_format"] == "left,top,width,height"
+    assert roi_plan_log["change_rois"]
+    assert roi_plan_log["candidate_rois"]
+    assert roi_plan_log["executed_rois"]
     controller._ocr_future.result(timeout=2)
 
     clock[0] = 10.5
@@ -1106,6 +1135,73 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     assert "执行ROI 1 次" in control.cost_status
     assert "候选 ROI 1 次" in control.cost_status
     assert "整屏的" in control.cost_status
+    controller.close()
+
+
+def test_dynamic_roi_debug_reports_full_frame_fallback(
+    monkeypatch,
+    capsys,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=99,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            dynamic_roi_response_target_ms=500,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    overlay = FakeOverlay()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ColorBlockOcr(),
+        overlay=overlay,
+        control=FakeControl(),
+        app=app,
+        debug=True,
+    )
+    clock = [20.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 20.05
+    controller._tick()
+
+    changed = _dynamic_roi_frame()
+    changed[:, :600] = 255
+    capture.frame = changed
+    clock[0] = 20.2
+    controller._tick()
+    clock[0] = 20.3
+    controller._tick()
+
+    assert controller._ocr_future is not None
+    assert controller._active_roi_plan is not None
+    assert controller._active_roi_plan.fallback_full_frame
+    snapshot = overlay.roi_debug_snapshots[-1]
+    assert snapshot.fallback_full_frame
+    assert snapshot.reason == "widespread-change"
+    assert snapshot.change_rois
+    assert snapshot.candidate_rois
+    assert snapshot.executed_rois == ((0, 0, 1600, 900),)
+    roi_plan_line = next(
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("[ROI_PLAN] ")
+    )
+    roi_plan_log = json.loads(roi_plan_line.removeprefix("[ROI_PLAN] "))
+    assert roi_plan_log["scan_kind"] == "full"
+    assert roi_plan_log["planner_reason"] == "widespread-change"
+    assert roi_plan_log["executed_rois"] == [[0, 0, 1600, 900]]
+    controller._ocr_future.result(timeout=2)
     controller.close()
 
 

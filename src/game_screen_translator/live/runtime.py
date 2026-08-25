@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import json
 import os
 import sys
 import time
@@ -67,6 +68,7 @@ from game_screen_translator.ocr.types import OcrText
 from game_screen_translator.overlay.browser import BrowserOverlayServer
 from game_screen_translator.overlay.window import (
     OverlayStyle,
+    RoiDebugSnapshot,
     TranslationOverlay,
     exclude_window_from_capture,
 )
@@ -932,6 +934,13 @@ class LiveController:
             if plan.fallback_full_frame
             else planned_rois
         )
+        if self._debug:
+            self._publish_roi_debug(
+                job,
+                plan,
+                planned_rois,
+                frame_size=(frame_width, frame_height),
+            )
         self._active_ocr_frame = job.frame
         self._active_ocr_epoch = self._session_epoch
         self._active_roi_job = job
@@ -957,6 +966,82 @@ class LiveController:
             job.frame,
             job.observed_at_s,
             rois=rois,
+        )
+
+    def _publish_roi_debug(
+        self,
+        job: ScheduledRoiScan,
+        plan: ContextualRoiPlan,
+        executed_rois: tuple[OcrRoi, ...],
+        *,
+        frame_size: tuple[int, int],
+    ) -> None:
+        proposal = job.proposal
+        change_rois = proposal.change_rois or proposal.rois
+        detector_candidates: tuple[OcrRoi, ...] = ()
+        if self._roi_scheduler is not None:
+            detector_candidates = (
+                self._roi_scheduler.detector.candidate_rois_for_changes(
+                    change_rois,
+                    frame_size=frame_size,
+                )
+            )
+        if not detector_candidates and not proposal.fallback_full_frame:
+            detector_candidates = proposal.rois
+        candidate_rois = (
+            plan.candidate_rois
+            if plan.fallback_full_frame and not proposal.fallback_full_frame
+            else detector_candidates or plan.candidate_rois
+        )
+        snapshot = RoiDebugSnapshot(
+            job.job_id,
+            frame_size,
+            change_rois,
+            candidate_rois,
+            executed_rois,
+            plan.fallback_full_frame,
+            plan.reason,
+        )
+        self._overlay.set_roi_debug_snapshot(snapshot)
+        selected_candidate_coverage = (
+            proposal.candidate_coverage_fraction
+            if proposal.fallback_full_frame
+            else plan.candidate_coverage_fraction
+        )
+        payload = {
+            "job_id": job.job_id,
+            "generation": job.generation,
+            "scan_kind": "full" if plan.fallback_full_frame else "local",
+            "trigger_reason": job.trigger_reason,
+            "detector_reason": proposal.reason,
+            "planner_reason": plan.reason,
+            "rect_format": "left,top,width,height",
+            "frame_size": frame_size,
+            "change_rois": change_rois,
+            "candidate_rois": candidate_rois,
+            "detector_candidate_rois": detector_candidates,
+            "contextual_candidate_rois": plan.candidate_rois,
+            "executed_rois": executed_rois,
+            "changed_fraction": round(proposal.changed_fraction, 6),
+            "candidate_coverage_fraction": round(
+                selected_candidate_coverage,
+                6,
+            ),
+            "detector_candidate_coverage_fraction": round(
+                proposal.candidate_coverage_fraction,
+                6,
+            ),
+            "contextual_candidate_coverage_fraction": round(
+                plan.candidate_coverage_fraction,
+                6,
+            ),
+            "candidate_region_count": len(candidate_rois),
+            "affected_track_count": plan.affected_track_count,
+        }
+        print(
+            "[ROI_PLAN] "
+            + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            flush=True,
         )
 
     def _recover_empty_roi_job(self, reason: str) -> None:

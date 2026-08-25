@@ -9,12 +9,120 @@ from PySide6.QtWidgets import QApplication
 
 from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.live.tracker import TrackedText
-from game_screen_translator.overlay.window import OverlayStyle, TranslationOverlay
+from game_screen_translator.overlay.window import (
+    OverlayStyle,
+    RoiDebugSnapshot,
+    TranslationOverlay,
+)
 
 
 def _is_nearly_white(image: QImage, x: int, y: int) -> bool:
     color = image.pixelColor(x, y)
     return min(color.red(), color.green(), color.blue()) >= 245
+
+
+def _render_overlay(overlay: TranslationOverlay) -> QImage:
+    target = QImage(overlay.width(), overlay.height(), QImage.Format.Format_ARGB32)
+    target.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(target)
+    overlay.render(painter, QPoint())
+    painter.end()
+    return target
+
+
+def _has_debug_color(
+    image: QImage,
+    points,
+    *,
+    color_name: str,
+) -> bool:
+    for x, y in points:
+        color = image.pixelColor(x, y)
+        red, green, blue, alpha = color.getRgb()
+        matches = {
+            "green": green >= 180 and green > red and green > blue,
+            "yellow": red >= 180 and green >= 160 and blue < 120,
+            "cyan": green >= 160 and blue >= 180 and red < 120,
+            "red": red >= 180 and red > green and red > blue,
+        }
+        if alpha > 0 and matches[color_name]:
+            return True
+    return False
+
+
+def test_debug_overlay_renders_scaled_roi_regions_without_translation_tracks() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 320, 120),
+        style=OverlayStyle(),
+        debug_border=True,
+    )
+    snapshot = RoiDebugSnapshot(
+        7,
+        (640, 240),
+        ((20, 40, 80, 40),),
+        ((120, 80, 80, 40),),
+        ((280, 120, 80, 40),),
+        False,
+        "contextual-local-change",
+    )
+
+    overlay.set_roi_debug_snapshot(snapshot)
+    target = _render_overlay(overlay)
+
+    assert overlay._roi_debug_timer.isActive()
+    assert _has_debug_color(
+        target,
+        ((10, y) for y in range(20, 40)),
+        color_name="green",
+    )
+    assert _has_debug_color(
+        target,
+        ((60, y) for y in range(40, 60)),
+        color_name="yellow",
+    )
+    assert _has_debug_color(
+        target,
+        ((140, y) for y in range(60, 80)),
+        color_name="cyan",
+    )
+
+    overlay._clear_roi_debug_snapshot()
+    assert overlay._roi_debug_snapshot is None
+    overlay.close()
+    app.processEvents()
+
+
+def test_debug_overlay_uses_red_for_full_frame_fallback() -> None:
+    app = QApplication.instance() or QApplication([])
+    overlay = TranslationOverlay(
+        geometry=(0, 0, 320, 120),
+        style=OverlayStyle(),
+        debug_border=True,
+    )
+    overlay.set_roi_debug_snapshot(
+        RoiDebugSnapshot(
+            8,
+            (640, 240),
+            (),
+            (),
+            ((0, 0, 640, 240),),
+            True,
+            "roi-coverage-too-large",
+        )
+    )
+
+    target = _render_overlay(overlay)
+
+    perimeter = (
+        *((x, 0) for x in range(320)),
+        *((x, 119) for x in range(320)),
+        *((0, y) for y in range(120)),
+        *((319, y) for y in range(120)),
+    )
+    assert _has_debug_color(target, perimeter, color_name="red")
+    overlay.close()
+    app.processEvents()
 
 
 def test_overlay_renders_only_translated_track_region() -> None:

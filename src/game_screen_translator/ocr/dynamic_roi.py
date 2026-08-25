@@ -143,13 +143,10 @@ class FullScreenRoiDetector:
             for box in tile_boxes
         )
         change_rois = self._merge_rois(change_candidates)
-        candidates = tuple(
-            self._expand_change_roi(
-                roi, frame_width=frame_width, frame_height=frame_height
-            )
-            for roi in change_rois
+        rois = self.candidate_rois_for_changes(
+            change_rois,
+            frame_size=(frame_width, frame_height),
         )
-        rois = self._merge_rois(candidates)
         coverage = sum(width * height for _, _, width, height in rois) / (
             frame_width * frame_height
         )
@@ -199,6 +196,26 @@ class FullScreenRoiDetector:
             coverage,
             candidate_region_count,
         )
+
+    def candidate_rois_for_changes(
+        self,
+        change_rois: tuple[OcrRoi, ...],
+        *,
+        frame_size: tuple[int, int],
+    ) -> tuple[OcrRoi, ...]:
+        """Expand and merge change seeds using the detector's ROI policy."""
+        frame_width, frame_height = frame_size
+        if frame_width < 1 or frame_height < 1:
+            raise ValueError("frame_size 必须为正数")
+        candidates = tuple(
+            self._expand_change_roi(
+                roi,
+                frame_width=frame_width,
+                frame_height=frame_height,
+            )
+            for roi in change_rois
+        )
+        return self._merge_rois(candidates)
 
     @staticmethod
     def _validate_frames(baseline: np.ndarray, current: np.ndarray) -> None:

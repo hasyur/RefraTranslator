@@ -52,6 +52,13 @@ def test_local_text_like_change_proposes_clipped_context_roi() -> None:
     assert seed_height <= height
     assert proposal.candidate_coverage_fraction == proposal.coverage_fraction
     assert proposal.candidate_region_count == 1
+    assert (
+        _detector().candidate_rois_for_changes(
+            proposal.change_rois,
+            frame_size=(320, 180),
+        )
+        == proposal.rois
+    )
 
 
 def test_default_change_limit_falls_back_for_moderate_structural_change() -> None:

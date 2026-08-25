@@ -40,6 +40,25 @@ class OverlayStyle:
 
 
 @dataclass(frozen=True, slots=True)
+class RoiDebugSnapshot:
+    """One dispatched dynamic-ROI decision shown on the excluded overlay."""
+
+    job_id: int
+    frame_size: tuple[int, int]
+    change_rois: tuple[tuple[int, int, int, int], ...]
+    candidate_rois: tuple[tuple[int, int, int, int], ...]
+    executed_rois: tuple[tuple[int, int, int, int], ...]
+    fallback_full_frame: bool
+    reason: str
+
+    def __post_init__(self) -> None:
+        if self.job_id < 1:
+            raise ValueError("job_id 必须大于 0")
+        if self.frame_size[0] < 1 or self.frame_size[1] < 1:
+            raise ValueError("frame_size 必须为正数")
+
+
+@dataclass(frozen=True, slots=True)
 class _CachedBackground:
     source_bounds: tuple[int, int, int, int]
     track_last_seen: float
@@ -48,7 +67,7 @@ class _CachedBackground:
 
 def _load_qt():
     try:
-        from PySide6.QtCore import QPoint, QRect, Qt
+        from PySide6.QtCore import QPoint, QRect, QTimer, Qt
         from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetrics, QImage, QPainter, QPen, QPixmap
         from PySide6.QtWidgets import QApplication, QWidget
     except ImportError as exc:
@@ -56,6 +75,7 @@ def _load_qt():
     return {
         "QPoint": QPoint,
         "QRect": QRect,
+        "QTimer": QTimer,
         "Qt": Qt,
         "QColor": QColor,
         "QFont": QFont,
@@ -137,6 +157,10 @@ class TranslationOverlay(QWidget):
         self._frame: np.ndarray | None = None
         self._background_pixmaps: dict[tuple[str, int], _CachedBackground] = {}
         self._font_family = self._install_font(style.font_path)
+        self._roi_debug_snapshot: RoiDebugSnapshot | None = None
+        self._roi_debug_timer = QT["QTimer"](self)
+        self._roi_debug_timer.setSingleShot(True)
+        self._roi_debug_timer.timeout.connect(self._clear_roi_debug_snapshot)
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt callback name
         super().showEvent(event)
@@ -230,8 +254,28 @@ class TranslationOverlay(QWidget):
             )
         self.update()
 
+    def set_roi_debug_snapshot(
+        self,
+        snapshot: RoiDebugSnapshot,
+        *,
+        duration_ms: int = 800,
+    ) -> None:
+        """Display one ROI decision briefly without feeding it back to capture."""
+        if not self._debug_border:
+            return
+        if duration_ms < 1:
+            raise ValueError("duration_ms 必须大于 0")
+        self._roi_debug_snapshot = snapshot
+        self._roi_debug_timer.start(duration_ms)
+        self.update()
+
+    def _clear_roi_debug_snapshot(self) -> None:
+        self._roi_debug_snapshot = None
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt callback name
-        if not self._tracks:
+        debug_snapshot = self._roi_debug_snapshot
+        if not self._tracks and debug_snapshot is None:
             return
         painter = QT["QPainter"](self)
         painter.setRenderHint(QT["QPainter"].RenderHint.Antialiasing, True)
@@ -252,6 +296,8 @@ class TranslationOverlay(QWidget):
                 self._paint_track_border(painter, rect)
         for track, rect in layouts:
             self._paint_track_text(painter, track, rect)
+        if debug_snapshot is not None:
+            self._paint_roi_debug_snapshot(painter, debug_snapshot)
         painter.end()
 
     def _track_layout(self, track: TrackedText):
@@ -325,8 +371,128 @@ class TranslationOverlay(QWidget):
 
     @staticmethod
     def _paint_track_border(painter, rect) -> None:
-        painter.setPen(QT["QPen"](QT["QColor"](0, 220, 255, 220), 1))
+        painter.setPen(QT["QPen"](QT["QColor"](255, 70, 220, 225), 1))
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
+
+    def _paint_roi_debug_snapshot(
+        self,
+        painter,
+        snapshot: RoiDebugSnapshot,
+    ) -> None:
+        self._paint_roi_debug_regions(
+            painter,
+            snapshot.change_rois,
+            snapshot.frame_size,
+            color=QT["QColor"](70, 255, 90, 235),
+            width=2,
+            pen_style=Qt.PenStyle.DotLine,
+        )
+        self._paint_roi_debug_regions(
+            painter,
+            snapshot.candidate_rois,
+            snapshot.frame_size,
+            color=QT["QColor"](255, 220, 20, 240),
+            width=3,
+            pen_style=Qt.PenStyle.DashLine,
+        )
+        execution_color = (
+            QT["QColor"](255, 65, 65, 245)
+            if snapshot.fallback_full_frame
+            else QT["QColor"](0, 220, 255, 240)
+        )
+        legend = (
+            f"#{snapshot.job_id} 红=整帧 OCR {snapshot.reason} | "
+            f"绿=变化 x{len(snapshot.change_rois)} "
+            f"黄=候选 x{len(snapshot.candidate_rois)} 紫=译文"
+            if snapshot.fallback_full_frame
+            else f"#{snapshot.job_id} 绿=变化 x{len(snapshot.change_rois)} "
+            f"黄=候选 x{len(snapshot.candidate_rois)} "
+            f"青=局部 OCR x{len(snapshot.executed_rois)} 紫=译文"
+        )
+        self._paint_roi_debug_regions(
+            painter,
+            snapshot.executed_rois,
+            snapshot.frame_size,
+            color=execution_color,
+            width=3 if snapshot.fallback_full_frame else 2,
+            pen_style=Qt.PenStyle.SolidLine,
+        )
+        self._paint_roi_debug_label(
+            painter,
+            legend,
+            execution_color,
+            6,
+            6,
+        )
+
+    def _paint_roi_debug_regions(
+        self,
+        painter,
+        rois: Sequence[tuple[int, int, int, int]],
+        frame_size: tuple[int, int],
+        *,
+        color,
+        width: int,
+        pen_style,
+    ) -> None:
+        rects = tuple(
+            rect
+            for roi in rois
+            if (rect := self._roi_debug_rect(roi, frame_size)) is not None
+        )
+        if not rects:
+            return
+        pen = QT["QPen"](color, width)
+        pen.setStyle(pen_style)
+        painter.setPen(pen)
+        for rect in rects:
+            painter.drawRect(rect.adjusted(0, 0, -1, -1))
+
+    def _roi_debug_rect(
+        self,
+        roi: tuple[int, int, int, int],
+        frame_size: tuple[int, int],
+    ):
+        left, top, width, height = roi
+        if width <= 0 or height <= 0:
+            return None
+        frame_width, frame_height = frame_size
+        scale_x = self.width() / frame_width
+        scale_y = self.height() / frame_height
+        scaled_left = round(left * scale_x)
+        scaled_top = round(top * scale_y)
+        scaled_right = round((left + width) * scale_x)
+        scaled_bottom = round((top + height) * scale_y)
+        rect = QT["QRect"](
+            scaled_left,
+            scaled_top,
+            max(1, scaled_right - scaled_left),
+            max(1, scaled_bottom - scaled_top),
+        ).intersected(self.rect())
+        return None if rect.isEmpty() else rect
+
+    def _paint_roi_debug_label(
+        self,
+        painter,
+        text: str,
+        color,
+        left: int,
+        top: int,
+    ) -> None:
+        font = self._make_font(12)
+        painter.setFont(font)
+        metrics = QT["QFontMetrics"](font)
+        width = metrics.horizontalAdvance(text) + 8
+        height = metrics.height() + 4
+        left = max(0, min(left, self.width() - width))
+        top = max(0, min(top, self.height() - height))
+        background = QT["QRect"](left, top, width, height)
+        painter.fillRect(background, QT["QColor"](0, 0, 0, 190))
+        painter.setPen(color)
+        painter.drawText(
+            QT["QPoint"](left + 4, top + 2 + metrics.ascent()),
+            text,
+        )
 
     def _paint_track_text(self, painter, track: TrackedText, rect) -> None:
         # Keep glyphs inside the original OCR bounds. The surrounding four

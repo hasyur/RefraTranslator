@@ -987,7 +987,11 @@ class LauncherWindow(QMainWindow):
         action_layout = QHBoxLayout(action_bar)
         action_layout.setContentsMargins(14, 10, 14, 10)
         action_layout.setSpacing(10)
-        self.debug_checkbox = QCheckBox("显示 OCR/翻译区域调试边框")
+        self.debug_checkbox = QCheckBox("显示 OCR/ROI 调试边框")
+        self.debug_checkbox.setToolTip(
+            "绿色=变化，黄色=候选，青色=局部 OCR，红色=整帧回退，紫色=译文框；"
+            "同时记录到 output/live.log"
+        )
         action_layout.addWidget(self.debug_checkbox)
         action_layout.addStretch(1)
         self.apply_button = QPushButton("应用设置")
