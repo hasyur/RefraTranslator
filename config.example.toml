@@ -45,6 +45,12 @@ blur_radius = 8.0
 overlay_opacity = 0.55
 font_path = ""
 
+[recording]
+# 启用后，实时翻译进程会在本机提供透明 OBS Browser Source。
+browser_overlay_enabled = false
+# 服务只监听 127.0.0.1；默认地址为 http://127.0.0.1:47831/overlay。
+browser_overlay_port = 47831
+
 [profiles]
 # 每个游戏各占一个子目录，其中包含术语表和 SQLite 翻译缓存。
 root_dir = "profiles"

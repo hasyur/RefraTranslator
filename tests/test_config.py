@@ -4,8 +4,10 @@ import pytest
 
 from game_screen_translator.config import (
     ConfigError,
+    DEFAULT_BROWSER_OVERLAY_PORT,
     DEFAULT_DARK_OVERLAY_OPACITY,
     PreviewConfig,
+    RecordingConfig,
     TranslationConfig,
     load_config,
     save_runtime_selection,
@@ -50,6 +52,9 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.ocr.translate_latin is True
     assert config.ocr.translate_han_only is False
     assert config.preview.overlay_opacity == DEFAULT_DARK_OVERLAY_OPACITY
+    assert config.recording.browser_overlay_enabled is False
+    assert config.recording.browser_overlay_port == DEFAULT_BROWSER_OVERLAY_PORT
+    assert config.recording.browser_overlay_url.endswith(":47831/overlay")
     assert config.live.capture_backend == "dxgi"
     assert config.live.stable_observations == 1
     assert config.live.stable_ms == 0
@@ -217,6 +222,13 @@ def test_load_config_rejects_non_boolean_dynamic_roi_option(tmp_path: Path) -> N
         load_config(path)
 
 
+def test_recording_config_rejects_invalid_browser_overlay_values() -> None:
+    with pytest.raises(ConfigError, match="browser_overlay_enabled"):
+        RecordingConfig(browser_overlay_enabled=1)  # type: ignore[arg-type]
+    with pytest.raises(ConfigError, match="browser_overlay_port"):
+        RecordingConfig(browser_overlay_port=1023)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     (
@@ -336,6 +348,8 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         ocr_text_filter_enabled=False,
         ocr_text_merge_enabled=False,
         preview_overlay_opacity=0.0,
+        recording_browser_overlay_enabled=True,
+        recording_browser_overlay_port=49001,
         ocr_cooldown_ms=125,
         settle_rescan_ms=750,
         idle_rescan_ms=3500,
@@ -357,6 +371,9 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.ocr.text_filter_enabled is False
     assert saved.ocr.text_merge_enabled is False
     assert saved.preview.overlay_opacity == 0.0
+    assert saved.recording.browser_overlay_enabled is True
+    assert saved.recording.browser_overlay_port == 49001
+    assert saved.recording.browser_overlay_url == "http://127.0.0.1:49001/overlay"
     assert saved.live.capture_fps == 16
     assert saved.live.ocr_cooldown_ms == 125
     assert saved.live.settle_rescan_ms == 750
@@ -375,6 +392,8 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert "text_filter_enabled = false" in text
     assert "text_merge_enabled = false" in text
     assert "overlay_opacity = 0.0" in text
+    assert "browser_overlay_enabled = true" in text
+    assert "browser_overlay_port = 49001" in text
     assert "max_concurrency = 7" in text
     assert 'api_key = "secret-\\\"quoted\\\""' in text
     assert "ocr_cooldown_ms = 125" in text
@@ -401,6 +420,8 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.ocr.text_filter_enabled is False
     assert saved.ocr.text_merge_enabled is False
     assert saved.preview.overlay_opacity == 0.0
+    assert saved.recording.browser_overlay_enabled is True
+    assert saved.recording.browser_overlay_port == 49001
     assert saved.live.ocr_cooldown_ms == 125
     assert saved.live.settle_rescan_ms == 750
     assert saved.live.idle_rescan_ms == 3500
@@ -413,6 +434,10 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.live.dynamic_roi_max_coalesce_ms == 450
     assert path.read_text(encoding="utf-8").count("device =") == 1
     assert path.read_text(encoding="utf-8").count("api_key =") == 1
+    assert (
+        path.read_text(encoding="utf-8").count("browser_overlay_enabled =") == 1
+    )
+    assert path.read_text(encoding="utf-8").count("browser_overlay_port =") == 1
     assert path.read_text(encoding="utf-8").count("detection_max_side =") == 1
     assert path.read_text(encoding="utf-8").count("text_filter_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("text_merge_enabled =") == 1
@@ -451,6 +476,37 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert text.count("text_filter_enabled =") == 1
     assert "text_merge_enabled = true" in text
     assert text.count("text_merge_enabled =") == 1
+
+
+def test_save_runtime_selection_updates_existing_recording_values(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(
+        path,
+        """
+[recording]
+browser_overlay_enabled = true
+browser_overlay_port = 49001
+""",
+    )
+
+    saved = save_runtime_selection(
+        path,
+        base_url="http://127.0.0.1:1234/v1",
+        model="hy-mt1.5-7b",
+        ocr_device="cpu",
+        recording_browser_overlay_enabled=False,
+        recording_browser_overlay_port=49002,
+    )
+
+    assert saved.recording.browser_overlay_enabled is False
+    assert saved.recording.browser_overlay_port == 49002
+    text = path.read_text(encoding="utf-8")
+    assert "browser_overlay_enabled = false" in text
+    assert "browser_overlay_port = 49002" in text
+    assert text.count("browser_overlay_enabled =") == 1
+    assert text.count("browser_overlay_port =") == 1
 
 
 def test_save_runtime_selection_updates_existing_live_timing_values(

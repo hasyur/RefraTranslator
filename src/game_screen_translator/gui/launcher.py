@@ -816,6 +816,30 @@ class LauncherWindow(QMainWindow):
             "过高可能增加显存占用和单批延迟。"
         )
         translation_form.addRow("LLM 并发", self.max_concurrency_spin)
+
+        recording_widget = QWidget()
+        recording_layout = QVBoxLayout(recording_widget)
+        recording_layout.setContentsMargins(0, 0, 0, 0)
+        recording_layout.setSpacing(5)
+        self.browser_overlay_checkbox = QCheckBox("启用透明 Browser Source")
+        self.browser_overlay_checkbox.setChecked(
+            self._config.recording.browser_overlay_enabled
+        )
+        self.browser_overlay_checkbox.setToolTip(
+            "启动实时翻译后，仅在本机提供带坐标的译文网页；"
+            "将它作为 OBS Browser Source 叠在游戏画面之上。"
+        )
+        self.browser_overlay_url_edit = QLineEdit(
+            self._config.recording.browser_overlay_url
+        )
+        self.browser_overlay_url_edit.setReadOnly(True)
+        self.browser_overlay_url_edit.setToolTip(
+            "在 OBS 中新增 Browser Source 并粘贴此地址；"
+            "宽高应与所选显示器的物理分辨率一致。"
+        )
+        recording_layout.addWidget(self.browser_overlay_checkbox)
+        recording_layout.addWidget(self.browser_overlay_url_edit)
+        translation_form.addRow("OBS 录制", recording_widget)
         translation_layout.addLayout(translation_form)
         self.service_status_label = QLabel(
             f"当前：{self._config.translation.model} · "
@@ -825,6 +849,8 @@ class LauncherWindow(QMainWindow):
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
             f"合并{'开' if self._config.ocr.text_merge_enabled else '关'} · "
             f"背景 {self._background_summary(self._config.preview.overlay_opacity)} · "
+            f"OBS 译文源"
+            f"{'开' if self._config.recording.browser_overlay_enabled else '关'} · "
             f"{self._scheduling_summary(self._config.live)}"
         )
         self.service_status_label.setObjectName("secondaryText")
@@ -1463,6 +1489,12 @@ class LauncherWindow(QMainWindow):
                 ocr_text_filter_enabled=ocr.text_filter_enabled,
                 ocr_text_merge_enabled=ocr.text_merge_enabled,
                 preview_overlay_opacity=preview_overlay_opacity,
+                recording_browser_overlay_enabled=(
+                    self.browser_overlay_checkbox.isChecked()
+                ),
+                recording_browser_overlay_port=(
+                    self._config.recording.browser_overlay_port
+                ),
                 settle_rescan_ms=live.settle_rescan_ms,
                 idle_rescan_ms=live.idle_rescan_ms,
                 ocr_cooldown_ms=live.ocr_cooldown_ms,
@@ -1495,6 +1527,12 @@ class LauncherWindow(QMainWindow):
         blur_mode_index = self.blur_mode_combo.findData(blur_mode)
         if blur_mode_index >= 0:
             self.blur_mode_combo.setCurrentIndex(blur_mode_index)
+        self.browser_overlay_checkbox.setChecked(
+            self._config.recording.browser_overlay_enabled
+        )
+        self.browser_overlay_url_edit.setText(
+            self._config.recording.browser_overlay_url
+        )
         self.dynamic_roi_checkbox.setChecked(
             self._config.live.dynamic_roi_enabled
         )
@@ -1514,6 +1552,8 @@ class LauncherWindow(QMainWindow):
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
             f"合并{'开' if self._config.ocr.text_merge_enabled else '关'} · "
             f"背景 {self._background_summary(self._config.preview.overlay_opacity)} · "
+            f"OBS 译文源"
+            f"{'开' if self._config.recording.browser_overlay_enabled else '关'} · "
             f"{self._scheduling_summary(self._config.live)}"
         )
         if announce:

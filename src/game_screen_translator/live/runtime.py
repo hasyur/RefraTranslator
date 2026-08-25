@@ -64,6 +64,7 @@ from game_screen_translator.ocr.roi_scheduler import (
 )
 from game_screen_translator.ocr.text_filter import OcrTextFilter, RejectedOcrText
 from game_screen_translator.ocr.types import OcrText
+from game_screen_translator.overlay.browser import BrowserOverlayServer
 from game_screen_translator.overlay.window import (
     OverlayStyle,
     TranslationOverlay,
@@ -400,6 +401,7 @@ class LiveController:
         overlay: TranslationOverlay,
         control: LiveControlWindow,
         app: QApplication,
+        browser_overlay: BrowserOverlayServer | None = None,
         profile: GameProfile | None = None,
         debug: bool = False,
     ) -> None:
@@ -407,6 +409,7 @@ class LiveController:
         self._capture = capture
         self._ocr = ocr
         self._overlay = overlay
+        self._browser_overlay = browser_overlay
         self._control = control
         self._app = app
         self._profile = profile
@@ -572,6 +575,11 @@ class LiveController:
             self._config.ocr.text_merge_enabled
             and self._config.ocr.text_merge_llm_arbitration_enabled
         )
+        browser_overlay_hint = (
+            f" · OBS Browser Source：{self._browser_overlay.url}"
+            if self._browser_overlay is not None
+            else ""
+        )
         self._running_detail = (
             f"捕获：{self._capture.active_backend} {region} @ "
             f"{self._config.live.capture_fps} FPS · "
@@ -583,7 +591,7 @@ class LiveController:
             f"{'开' if self._config.ocr.text_merge_enabled else '关'} · "
             f"歧义仲裁"
             f"{'开' if arbitration_enabled else '关'} · "
-            f"{profile_label}{region_hint}"
+            f"{profile_label}{region_hint}{browser_overlay_hint}"
         )
         self._control.set_status("实时翻译运行中", self._running_detail)
         set_paused = getattr(self._control, "set_paused", None)
@@ -634,8 +642,7 @@ class LiveController:
             future.cancel()
         if self._ocr_future is not None:
             self._ocr_future.cancel()
-        if self._latest_frame is not None:
-            self._overlay.set_scene(self._latest_frame, ())
+        self._publish_scene(self._latest_frame, ())
         self._control.set_status(
             "实时翻译已暂停",
             "已停止提交 OCR 和新翻译请求；点击“恢复翻译”后从当前画面重新识别。",
@@ -666,6 +673,8 @@ class LiveController:
         self._shutting_down = True
         self._timer.stop()
         self._completion_timer.stop()
+        if self._browser_overlay is not None:
+            self._browser_overlay.close()
         self._capture.close()
         self._ocr_executor.shutdown(wait=True, cancel_futures=True)
         self._translation_executor.shutdown(wait=True, cancel_futures=True)
@@ -758,14 +767,14 @@ class LiveController:
             if self._ocr_future is None:
                 self._force_full_scan = False
                 self._submit_ocr(frame, triggered_at=now)
-            self._overlay.set_scene(frame, self._tracker.visible_tracks)
+            self._publish_scene(frame, self._tracker.visible_tracks)
             return
         if self._roi_scheduler is not None:
             self._tick_dynamic_roi(frame, now)
         else:
             self._tick_legacy_ocr(frame, now)
 
-        self._overlay.set_scene(frame, self._tracker.visible_tracks)
+        self._publish_scene(frame, self._tracker.visible_tracks)
 
     def _collect_completed_work(self) -> None:
         if self._shutting_down:
@@ -1564,7 +1573,7 @@ class LiveController:
         self._queue_untranslated_visible_sources()
         self._dispatch_translation_work()
         if self._latest_frame is not None:
-            self._overlay.set_scene(self._latest_frame, self._tracker.visible_tracks)
+            self._publish_scene(self._latest_frame, self._tracker.visible_tracks)
 
     def _arbitrate_layout_blocking_timed(
         self,
@@ -2062,7 +2071,7 @@ class LiveController:
                 )
                 scene_changed = True
         if scene_changed and self._latest_frame is not None:
-            self._overlay.set_scene(self._latest_frame, self._tracker.visible_tracks)
+            self._publish_scene(self._latest_frame, self._tracker.visible_tracks)
 
     def _next_publishable_translation_key(
         self,
@@ -2409,11 +2418,22 @@ class LiveController:
     def _refresh_latency_display(self) -> None:
         self._control.set_latency(self._latency_stats.render())
 
+    def _publish_scene(
+        self,
+        frame: np.ndarray | None,
+        tracks: Sequence[TrackedText],
+    ) -> None:
+        self._overlay.set_scene(frame, tracks)
+        if self._browser_overlay is not None:
+            self._browser_overlay.publish(tracks)
+
     def _fatal(self, message: str) -> None:
         print(message, file=sys.stderr)
         self._control.set_status("实时翻译已停止", message)
         self._timer.stop()
         self._completion_timer.stop()
+        if self._browser_overlay is not None:
+            self._browser_overlay.close()
         self._capture.close()
 
 
@@ -2489,6 +2509,26 @@ def run_live(
     capture.start()
     _live_message(f"capture ready: backend={capture.active_backend}")
     screen, geometry = _overlay_geometry(app, capture, config)
+    browser_overlay = None
+    if config.recording.browser_overlay_enabled:
+        if capture.output_size is None or capture.region is None:
+            capture.close()
+            raise RuntimeError("采集器没有返回 OBS Browser Source 所需的画布信息")
+        browser_overlay = BrowserOverlayServer(
+            canvas_size=capture.output_size,
+            capture_region=capture.region,
+            port=config.recording.browser_overlay_port,
+        )
+        try:
+            browser_overlay.start()
+        except OSError as exc:
+            capture.close()
+            raise RuntimeError(
+                "无法启动 OBS Browser Source："
+                f"{config.recording.browser_overlay_url}（{exc}）。"
+                "请更换 recording.browser_overlay_port 或关闭该功能。"
+            ) from exc
+        _live_message(f"browser overlay ready: {browser_overlay.url}")
     test_window = None
     if test_source is not None:
         from PySide6.QtGui import QPixmap
@@ -2536,6 +2576,7 @@ def run_live(
         overlay=overlay,
         control=control,
         app=app,
+        browser_overlay=browser_overlay,
         profile=profile,
         debug=debug_border,
     )

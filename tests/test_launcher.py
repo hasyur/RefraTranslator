@@ -85,6 +85,12 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.ocr_filter_checkbox.isChecked()
     assert window.ocr_merge_checkbox.isChecked()
     assert window.blur_mode_combo.currentData() == "dark_blur"
+    assert not window.browser_overlay_checkbox.isChecked()
+    assert (
+        window.browser_overlay_url_edit.text()
+        == "http://127.0.0.1:47831/overlay"
+    )
+    assert window.browser_overlay_url_edit.isReadOnly()
     assert not window.dynamic_roi_checkbox.isChecked()
     assert window.settle_rescan_spin.value() == 500
     assert window.idle_rescan_spin.value() == 2000
@@ -186,6 +192,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     window.change_poll_spin.setValue(8)
     window.roi_response_target_spin.setValue(650)
     window.dynamic_roi_checkbox.setChecked(True)
+    window.browser_overlay_checkbox.setChecked(True)
 
     window._start_live()
 
@@ -220,6 +227,8 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.live.change_poll_fps == 8
     assert saved.live.capture_fps == 16
     assert saved.live.dynamic_roi_response_target_ms == 650
+    assert saved.recording.browser_overlay_enabled is True
+    assert saved.recording.browser_overlay_port == 47831
     window._live_monitor.stop()
     window.close()
     app.processEvents()
@@ -356,6 +365,26 @@ def test_launcher_saves_and_restores_ocr_filter_switch(tmp_path: Path) -> None:
 
     restored = LauncherWindow(config_path, probe_ocr_devices=False)
     assert not restored.ocr_filter_checkbox.isChecked()
+    restored.close()
+    app.processEvents()
+
+
+def test_launcher_saves_and_restores_browser_overlay_switch(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+    window.browser_overlay_checkbox.setChecked(True)
+
+    assert window._save_translation_settings(announce=False)
+    assert load_config(config_path).recording.browser_overlay_enabled is True
+    assert "OBS 译文源开" in window.service_status_label.text()
+    window.close()
+    app.processEvents()
+
+    restored = LauncherWindow(config_path, probe_ocr_devices=False)
+    assert restored.browser_overlay_checkbox.isChecked()
+    assert restored.browser_overlay_url_edit.text().endswith(":47831/overlay")
     restored.close()
     app.processEvents()
 

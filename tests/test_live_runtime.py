@@ -133,6 +133,20 @@ class FakeOverlay:
         self.last_tracks = tuple(tracks)
 
 
+class FakeBrowserOverlay:
+    url = "http://127.0.0.1:47831/overlay"
+
+    def __init__(self) -> None:
+        self.published: list[tuple[object, ...]] = []
+        self.closed = False
+
+    def publish(self, tracks) -> None:
+        self.published.append(tuple(tracks))
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class FakeControl:
     def __init__(self) -> None:
         self.status = ""
@@ -209,6 +223,41 @@ def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
     assert "OCR 保留：待って。" in capsys.readouterr().out
     assert overlay.scenes == 2
     controller.close()
+    assert capture.closed
+
+
+def test_live_controller_publishes_and_closes_browser_overlay() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        )
+    )
+    frame = np.zeros((900, 1600, 3), dtype=np.uint8)
+    capture = MutableCapture(frame)
+    overlay = FakeOverlay()
+    browser_overlay = FakeBrowserOverlay()
+    control = FakeControl()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=FakeOcr(),
+        overlay=overlay,
+        control=control,
+        app=app,
+        browser_overlay=browser_overlay,  # type: ignore[arg-type]
+    )
+
+    controller.start()
+    controller._publish_scene(frame, ())
+
+    assert browser_overlay.url in control.detail
+    assert overlay.scenes == 1
+    assert browser_overlay.published == [()]
+    controller.close()
+    assert browser_overlay.closed
     assert capture.closed
 
 

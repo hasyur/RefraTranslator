@@ -16,6 +16,7 @@ class ConfigError(ValueError):
 
 
 DEFAULT_DARK_OVERLAY_OPACITY = 0.55
+DEFAULT_BROWSER_OVERLAY_PORT = 47831
 CAPTURE_FPS_PER_CHANGE_POLL = 2
 MAX_CAPTURE_FPS = 240
 MAX_CHANGE_POLL_FPS = MAX_CAPTURE_FPS // CAPTURE_FPS_PER_CHANGE_POLL
@@ -140,6 +141,27 @@ class PreviewConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class RecordingConfig:
+    browser_overlay_enabled: bool = False
+    browser_overlay_port: int = DEFAULT_BROWSER_OVERLAY_PORT
+
+    def __post_init__(self) -> None:
+        if type(self.browser_overlay_enabled) is not bool:
+            raise ConfigError("recording.browser_overlay_enabled 必须是 true 或 false")
+        if (
+            type(self.browser_overlay_port) is not int
+            or not 1024 <= self.browser_overlay_port <= 65_535
+        ):
+            raise ConfigError(
+                "recording.browser_overlay_port 必须在 1024 到 65535 之间"
+            )
+
+    @property
+    def browser_overlay_url(self) -> str:
+        return f"http://127.0.0.1:{self.browser_overlay_port}/overlay"
+
+
+@dataclass(frozen=True, slots=True)
 class LiveConfig:
     left: int = 0
     top: int = 0
@@ -241,6 +263,7 @@ class AppConfig:
     translation: TranslationConfig
     ocr: OcrConfig = OcrConfig()
     preview: PreviewConfig = PreviewConfig()
+    recording: RecordingConfig = RecordingConfig()
     live: LiveConfig = LiveConfig()
     profiles: ProfileConfig = ProfileConfig()
 
@@ -283,6 +306,7 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         translation=_build(TranslationConfig, translation_values, "translation"),
         ocr=_build(OcrConfig, _section(data, "ocr"), "ocr"),
         preview=_build(PreviewConfig, _section(data, "preview"), "preview"),
+        recording=_build(RecordingConfig, _section(data, "recording"), "recording"),
         live=_build(LiveConfig, _section(data, "live"), "live"),
         profiles=_build(ProfileConfig, _section(data, "profiles"), "profiles"),
     )
@@ -300,6 +324,10 @@ _OCR_VALUE_RE = re.compile(
 )
 _PREVIEW_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>overlay_opacity)[ \t]*="
+)
+_RECORDING_VALUE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<key>"
+    r"browser_overlay_enabled|browser_overlay_port)[ \t]*="
 )
 _LIVE_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
@@ -330,6 +358,8 @@ def save_translation_selection(
         ocr_text_filter_enabled=None,
         ocr_text_merge_enabled=None,
         preview_overlay_opacity=None,
+        recording_browser_overlay_enabled=None,
+        recording_browser_overlay_port=None,
         ocr_cooldown_ms=None,
         settle_rescan_ms=None,
         idle_rescan_ms=None,
@@ -355,6 +385,8 @@ def save_runtime_selection(
     ocr_text_filter_enabled: bool | None = None,
     ocr_text_merge_enabled: bool | None = None,
     preview_overlay_opacity: float | None = None,
+    recording_browser_overlay_enabled: bool | None = None,
+    recording_browser_overlay_port: int | None = None,
     ocr_cooldown_ms: int | None = None,
     settle_rescan_ms: int | None = None,
     idle_rescan_ms: int | None = None,
@@ -378,6 +410,8 @@ def save_runtime_selection(
         ocr_text_filter_enabled=ocr_text_filter_enabled,
         ocr_text_merge_enabled=ocr_text_merge_enabled,
         preview_overlay_opacity=preview_overlay_opacity,
+        recording_browser_overlay_enabled=recording_browser_overlay_enabled,
+        recording_browser_overlay_port=recording_browser_overlay_port,
         ocr_cooldown_ms=ocr_cooldown_ms,
         settle_rescan_ms=settle_rescan_ms,
         idle_rescan_ms=idle_rescan_ms,
@@ -403,6 +437,8 @@ def _save_selected_values(
     ocr_text_filter_enabled: bool | None,
     ocr_text_merge_enabled: bool | None,
     preview_overlay_opacity: float | None,
+    recording_browser_overlay_enabled: bool | None,
+    recording_browser_overlay_port: int | None,
     ocr_cooldown_ms: int | None,
     settle_rescan_ms: int | None,
     idle_rescan_ms: int | None,
@@ -452,6 +488,19 @@ def _save_selected_values(
             current.preview.overlay_opacity
             if preview_overlay_opacity is None
             else preview_overlay_opacity
+        ),
+    )
+    candidate_recording = replace(
+        current.recording,
+        browser_overlay_enabled=(
+            current.recording.browser_overlay_enabled
+            if recording_browser_overlay_enabled is None
+            else recording_browser_overlay_enabled
+        ),
+        browser_overlay_port=(
+            current.recording.browser_overlay_port
+            if recording_browser_overlay_port is None
+            else recording_browser_overlay_port
         ),
     )
     candidate_live = replace(
@@ -511,6 +560,7 @@ def _save_selected_values(
         candidate_translation == current.translation
         and candidate_ocr == current.ocr
         and candidate_preview == current.preview
+        and candidate_recording == current.recording
         and candidate_live == current.live
     ):
         return current
@@ -594,6 +644,24 @@ def _save_selected_values(
         _upsert_preview_values(
             lines,
             overlay_opacity=candidate_preview.overlay_opacity,
+        )
+
+    if (
+        recording_browser_overlay_enabled is not None
+        or recording_browser_overlay_port is not None
+    ):
+        _upsert_recording_values(
+            lines,
+            browser_overlay_enabled=(
+                candidate_recording.browser_overlay_enabled
+                if recording_browser_overlay_enabled is not None
+                else None
+            ),
+            browser_overlay_port=(
+                candidate_recording.browser_overlay_port
+                if recording_browser_overlay_port is not None
+                else None
+            ),
         )
 
     if any(
@@ -824,6 +892,75 @@ def _upsert_preview_values(
     ):
         lines[preview_end_index - 1] += newline
     lines.insert(preview_end_index, value_line)
+
+
+def _upsert_recording_values(
+    lines: list[str],
+    *,
+    browser_overlay_enabled: bool | None,
+    browser_overlay_port: int | None,
+) -> None:
+    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+    values = {
+        key: value
+        for key, value in (
+            ("browser_overlay_enabled", browser_overlay_enabled),
+            ("browser_overlay_port", browser_overlay_port),
+        )
+        if value is not None
+    }
+    current_section: str | None = None
+    recording_header_index: int | None = None
+    recording_end_index = len(lines)
+    replaced_keys: set[str] = set()
+    for index, line in enumerate(lines):
+        body = line.rstrip("\r\n")
+        section_match = _TOML_SECTION_RE.fullmatch(body)
+        if section_match is not None:
+            if current_section == "recording" and recording_end_index == len(lines):
+                recording_end_index = index
+            current_section = section_match.group(1).strip()
+            if current_section == "recording":
+                recording_header_index = index
+            continue
+        if current_section != "recording":
+            continue
+        value_match = _RECORDING_VALUE_RE.match(body)
+        if value_match is None or value_match.group("key") not in values:
+            continue
+        key = value_match.group("key")
+        ending = line[len(body) :]
+        lines[index] = (
+            f'{value_match.group("indent")}{key} = '
+            f'{json.dumps(values[key], ensure_ascii=False)}{ending}'
+        )
+        replaced_keys.add(key)
+
+    missing_keys = tuple(key for key in values if key not in replaced_keys)
+    if not missing_keys:
+        return
+    if recording_header_index is None:
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            lines[-1] += newline
+        if lines and lines[-1].strip():
+            lines.append(newline)
+        lines.append(f"[recording]{newline}")
+        lines.extend(
+            f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}"
+            for key in missing_keys
+        )
+        return
+
+    if recording_end_index > 0 and not lines[recording_end_index - 1].endswith(
+        ("\n", "\r")
+    ):
+        lines[recording_end_index - 1] += newline
+    for key in missing_keys:
+        lines.insert(
+            recording_end_index,
+            f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}",
+        )
+        recording_end_index += 1
 
 
 def _upsert_live_values(
