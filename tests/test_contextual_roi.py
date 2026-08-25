@@ -93,6 +93,22 @@ def test_tall_motion_seed_does_not_absorb_distant_text_column() -> None:
     assert region.roi == (480, 432, 576, 528)
 
 
+def test_tall_motion_seed_cannot_chain_from_inside_label_to_next_column() -> None:
+    anchors = (
+        Anchor("inside", "No Man's Dawn", (700, 500, 1000, 540)),
+        Anchor("right", "first lyric line", (1100, 500, 1900, 540)),
+    )
+
+    region = ContextualRoiPlanner().plan(
+        ((512, 456, 512, 480),),
+        anchors,
+        frame_size=(2560, 1440),
+    ).regions[0]
+
+    assert region.affected_track_ids == ("inside",)
+    assert region.roi == (480, 432, 576, 528)
+
+
 def test_new_wrapped_row_uses_previous_line_only_as_context() -> None:
     anchors = (
         Anchor("line-1", "川岸に沿って進み、", (120, 200, 500, 240)),

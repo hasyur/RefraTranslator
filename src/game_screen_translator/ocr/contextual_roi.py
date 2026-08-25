@@ -271,18 +271,27 @@ class ContextualRoiPlanner:
             if self._seed_relates_to_anchor(seed_bounds, anchor.bounds)
         }
         affected = set(direct)
+        chainable = {
+            anchor.track_id
+            for anchor in anchors
+            if anchor.track_id in direct
+            and self._seed_can_chain_from_anchor(seed_bounds, anchor.bounds)
+        }
         # Same-row chaining is intentionally the only recursive association.
-        # It can recover fragmented OCR words, but cannot spread vertically
-        # through a dense menu or paragraph.
+        # It can recover fragmented OCR words, but a broad motion seed cannot
+        # use an intersecting label as a bridge into another text column.
         changed = True
         while changed and len(affected) <= self.max_affected_tracks:
             changed = False
-            selected = tuple(anchor for anchor in anchors if anchor.track_id in affected)
+            selected = tuple(
+                anchor for anchor in anchors if anchor.track_id in chainable
+            )
             for candidate in anchors:
                 if candidate.track_id in affected:
                     continue
                 if any(self._same_row_neighbors(candidate.bounds, item.bounds) for item in selected):
                     affected.add(candidate.track_id)
+                    chainable.add(candidate.track_id)
                     changed = True
 
         affected_anchors = tuple(
@@ -310,15 +319,19 @@ class ContextualRoiPlanner:
     def _seed_relates_to_anchor(self, seed: Bounds, anchor: Bounds) -> bool:
         if self._intersects(self._expand_bounds(seed, self.direct_margin), anchor):
             return True
-        seed_height = max(1, seed[3] - seed[1])
         anchor_height = max(1, anchor[3] - anchor[1])
-        if seed_height > self.seed_same_row_max_height_ratio * anchor_height:
+        if not self._seed_can_chain_from_anchor(seed, anchor):
             return False
         return self._same_row_neighbors(
             seed,
             anchor,
             gap_line_height=anchor_height,
         )
+
+    def _seed_can_chain_from_anchor(self, seed: Bounds, anchor: Bounds) -> bool:
+        seed_height = max(1, seed[3] - seed[1])
+        anchor_height = max(1, anchor[3] - anchor[1])
+        return seed_height <= self.seed_same_row_max_height_ratio * anchor_height
 
     def _same_row_neighbors(
         self,
