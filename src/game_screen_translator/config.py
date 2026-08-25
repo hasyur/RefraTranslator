@@ -4,7 +4,7 @@ import json
 import os
 import re
 import tomllib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -32,6 +32,7 @@ class TranslationConfig:
     temperature: float = 0.7
     top_p: float = 0.6
     max_output_tokens: int = 2048
+    api_key: str = field(default="", repr=False)
     api_key_env: str = API_KEY_ENV
 
     def __post_init__(self) -> None:
@@ -51,13 +52,21 @@ class TranslationConfig:
             raise ConfigError("translation.top_p 必须在 0 到 1 之间")
         if self.max_output_tokens < 1:
             raise ConfigError("translation.max_output_tokens 必须大于 0")
+        if not isinstance(self.api_key, str):
+            raise ConfigError("translation.api_key 必须是字符串")
+        if not isinstance(self.api_key_env, str) or not self.api_key_env.strip():
+            raise ConfigError("translation.api_key_env 不能为空")
+        object.__setattr__(self, "api_key", self.api_key.strip())
+        object.__setattr__(self, "api_key_env", self.api_key_env.strip())
 
     @property
     def normalized_base_url(self) -> str:
         return self.base_url.rstrip("/") + "/"
 
     @property
-    def api_key(self) -> str | None:
+    def resolved_api_key(self) -> str | None:
+        if self.api_key:
+            return self.api_key
         value = os.getenv(self.api_key_env, "").strip()
         if not value and self.api_key_env == API_KEY_ENV:
             value = os.getenv(LEGACY_API_KEY_ENV, "").strip()
@@ -283,7 +292,7 @@ _TOML_SECTION_RE = re.compile(
     r"^[ \t]*\[([^\[\]\r\n]+)\][ \t]*(?:#.*)?$"
 )
 _TRANSLATION_VALUE_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<key>base_url|model|max_concurrency)[ \t]*="
+    r"^(?P<indent>[ \t]*)(?P<key>base_url|model|max_concurrency|api_key)[ \t]*="
 )
 _OCR_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
@@ -307,12 +316,14 @@ def save_translation_selection(
     *,
     base_url: str,
     model: str,
+    api_key: str | None = None,
 ) -> AppConfig:
-    """Atomically update only the local translation endpoint and model."""
+    """Atomically update the local endpoint, model and optional API key."""
     return _save_selected_values(
         path,
         base_url=base_url,
         model=model,
+        api_key=api_key,
         max_concurrency=None,
         ocr_device=None,
         ocr_detection_max_side=None,
@@ -338,6 +349,7 @@ def save_runtime_selection(
     base_url: str,
     model: str,
     ocr_device: str,
+    api_key: str | None = None,
     max_concurrency: int | None = None,
     ocr_detection_max_side: int | None = None,
     ocr_text_filter_enabled: bool | None = None,
@@ -359,6 +371,7 @@ def save_runtime_selection(
         path,
         base_url=base_url,
         model=model,
+        api_key=api_key,
         max_concurrency=max_concurrency,
         ocr_device=ocr_device,
         ocr_detection_max_side=ocr_detection_max_side,
@@ -383,6 +396,7 @@ def _save_selected_values(
     *,
     base_url: str,
     model: str,
+    api_key: str | None,
     max_concurrency: int | None,
     ocr_device: str | None,
     ocr_detection_max_side: int | None,
@@ -406,6 +420,7 @@ def _save_selected_values(
         current.translation,
         base_url=base_url.strip(),
         model=model.strip(),
+        api_key=current.translation.api_key if api_key is None else api_key,
         max_concurrency=(
             current.translation.max_concurrency
             if max_concurrency is None
@@ -509,6 +524,8 @@ def _save_selected_values(
         "model": candidate_translation.model,
         "max_concurrency": candidate_translation.max_concurrency,
     }
+    if api_key is not None:
+        values["api_key"] = candidate_translation.api_key
     for index, line in enumerate(lines):
         if line.endswith("\r\n"):
             body, ending = line[:-2], "\r\n"
@@ -526,6 +543,8 @@ def _save_selected_values(
         if value_match is None:
             continue
         key = value_match.group("key")
+        if key not in values:
+            continue
         lines[index] = (
             f'{value_match.group("indent")}{key} = '
             f'{json.dumps(values[key], ensure_ascii=False)}{ending}'
@@ -541,6 +560,9 @@ def _save_selected_values(
 
     if max_concurrency is not None and "max_concurrency" not in replaced_keys:
         _upsert_translation_concurrency(lines, candidate_translation.max_concurrency)
+
+    if api_key is not None and "api_key" not in replaced_keys:
+        _upsert_translation_api_key(lines, candidate_translation.api_key)
 
     if (
         ocr_device is not None
@@ -655,6 +677,14 @@ def _save_selected_values(
 
 
 def _upsert_translation_concurrency(lines: list[str], value: int) -> None:
+    _upsert_translation_value(lines, "max_concurrency", value)
+
+
+def _upsert_translation_api_key(lines: list[str], value: str) -> None:
+    _upsert_translation_value(lines, "api_key", value)
+
+
+def _upsert_translation_value(lines: list[str], key: str, value: Any) -> None:
     newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
     current_section: str | None = None
     translation_end_index = len(lines)
@@ -671,7 +701,8 @@ def _upsert_translation_concurrency(lines: list[str], value: int) -> None:
         ("\n", "\r")
     ):
         lines[translation_end_index - 1] += newline
-    lines.insert(translation_end_index, f"max_concurrency = {value}{newline}")
+    serialized = json.dumps(value, ensure_ascii=False)
+    lines.insert(translation_end_index, f"{key} = {serialized}{newline}")
 
 
 def _upsert_ocr_values(

@@ -46,8 +46,9 @@ class OpenAICompatibleTransport:
     ) -> None:
         self.config = config
         headers: dict[str, str] = {"Accept": "application/json"}
-        if config.api_key:
-            headers["Authorization"] = f"Bearer {config.api_key}"
+        api_key = config.resolved_api_key
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         self._client = httpx.AsyncClient(
             base_url=config.normalized_base_url,
             timeout=httpx.Timeout(config.timeout_seconds),

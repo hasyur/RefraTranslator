@@ -39,7 +39,7 @@ async def test_transport_lists_models_and_sends_chat_contract() -> None:
         )
 
     async with OpenAICompatibleTransport(
-        _config(),
+        _config(api_key="request-secret"),
         http_transport=httpx.MockTransport(handler),
     ) as transport:
         assert await transport.list_models() == ("hy-mt1.5-7b",)
@@ -51,6 +51,10 @@ async def test_transport_lists_models_and_sends_chat_contract() -> None:
         "/v1/models",
         "/v1/chat/completions",
     ]
+    assert all(
+        request.headers["Authorization"] == "Bearer request-secret"
+        for request in requests
+    )
 
 
 @pytest.mark.asyncio

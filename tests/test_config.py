@@ -35,6 +35,7 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
 
     assert config.translation.normalized_base_url == "http://127.0.0.1:1234/v1/"
     assert config.translation.max_concurrency == 3
+    assert config.translation.api_key == ""
     assert config.translation.api_key_env == "REFRA_TRANSLATOR_API_KEY"
     assert config.ocr.language == "japan"
     assert config.ocr.cache_dir == ".cache/paddlex"
@@ -74,7 +75,7 @@ def test_default_api_key_name_falls_back_to_legacy_name(monkeypatch) -> None:
         model="model",
     )
 
-    assert config.api_key == "legacy-secret"
+    assert config.resolved_api_key == "legacy-secret"
 
 
 def test_new_api_key_name_takes_priority(monkeypatch) -> None:
@@ -86,7 +87,43 @@ def test_new_api_key_name_takes_priority(monkeypatch) -> None:
         model="model",
     )
 
-    assert config.api_key == "new-secret"
+    assert config.resolved_api_key == "new-secret"
+
+
+def test_explicit_api_key_takes_priority_over_environment(monkeypatch) -> None:
+    monkeypatch.setenv("REFRA_TRANSLATOR_API_KEY", "environment-secret")
+    config = TranslationConfig(
+        provider="openai_compatible",
+        base_url="http://127.0.0.1:1234/v1",
+        model="model",
+        api_key=" explicit-secret ",
+    )
+
+    assert config.api_key == "explicit-secret"
+    assert config.resolved_api_key == "explicit-secret"
+
+
+def test_save_runtime_selection_can_clear_explicit_api_key(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, 'api_key = "stored-secret"\n')
+    monkeypatch.setenv("REFRA_TRANSLATOR_API_KEY", "environment-secret")
+
+    saved = save_runtime_selection(
+        path,
+        base_url="http://127.0.0.1:1234/v1",
+        model="hy-mt1.5-7b",
+        api_key="",
+        ocr_device="cpu",
+    )
+
+    assert saved.translation.api_key == ""
+    assert saved.translation.resolved_api_key == "environment-secret"
+    text = path.read_text(encoding="utf-8")
+    assert 'api_key = ""' in text
+    assert text.count("api_key =") == 1
 
 
 def test_load_config_rejects_unknown_field(tmp_path: Path) -> None:
@@ -293,6 +330,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         base_url="http://gpu.test/v1",
         model="small-model",
         ocr_device="gpu:1",
+        api_key='secret-"quoted"',
         max_concurrency=7,
         ocr_detection_max_side=960,
         ocr_text_filter_enabled=False,
@@ -312,6 +350,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
 
     assert saved.translation.base_url == "http://gpu.test/v1"
     assert saved.translation.model == "small-model"
+    assert saved.translation.api_key == 'secret-"quoted"'
     assert saved.translation.max_concurrency == 7
     assert saved.ocr.device == "gpu:1"
     assert saved.ocr.detection_max_side == 960
@@ -337,6 +376,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert "text_merge_enabled = false" in text
     assert "overlay_opacity = 0.0" in text
     assert "max_concurrency = 7" in text
+    assert 'api_key = "secret-\\\"quoted\\\""' in text
     assert "ocr_cooldown_ms = 125" in text
     assert "settle_rescan_ms = 750" in text
     assert "idle_rescan_ms = 3500" in text
@@ -356,6 +396,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         ocr_device="cpu",
     )
     assert saved.ocr.device == "cpu"
+    assert saved.translation.api_key == 'secret-"quoted"'
     assert saved.ocr.detection_max_side == 960
     assert saved.ocr.text_filter_enabled is False
     assert saved.ocr.text_merge_enabled is False
@@ -371,6 +412,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
     assert saved.live.dynamic_roi_ocr_interval_ms == 250
     assert saved.live.dynamic_roi_max_coalesce_ms == 450
     assert path.read_text(encoding="utf-8").count("device =") == 1
+    assert path.read_text(encoding="utf-8").count("api_key =") == 1
     assert path.read_text(encoding="utf-8").count("detection_max_side =") == 1
     assert path.read_text(encoding="utf-8").count("text_filter_enabled =") == 1
     assert path.read_text(encoding="utf-8").count("text_merge_enabled =") == 1

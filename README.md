@@ -6,7 +6,7 @@ RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具
 
 ## 主要功能
 
-- 图形化配置 API、模型、OCR 设备、字幕区域和每游戏 Profile；
+- 图形化配置 API 地址、API Key、模型、OCR 设备、字幕区域和每游戏 Profile；
 - 支持 CPU 与 NVIDIA GPU OCR，翻译并发数可调；
 - 多行文字默认由快速规则链分组，仅在局部断链、候选边近似平局、菜单/句子冲突时排队调用 LLM 仲裁；
 - 每个游戏独立保存术语表、人工修订和翻译缓存；
@@ -29,11 +29,13 @@ RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具
 
 1. 启动你自己的 LLM 服务；
 2. 双击 `start_gui.bat`；
-3. 在 GUI 中填写 API 地址并读取模型列表；
+3. 在 GUI 中填写 API 地址和服务所需的 API Key，再读取模型列表；
 4. 创建游戏 Profile，选择显示器并框选字幕区域；
 5. 点击“启动实时翻译”。
 
 模板中的 `http://127.0.0.1:1234/v1` 只是示例地址，不代表程序自带服务。第一次运行 OCR 时还会将 PaddleOCR 模型下载到 `.cache\paddlex`。
+
+API Key 在启动器中以密码框显示，填写后会明文保存在仅供本机使用、已被 Git 忽略的 `config.toml`。不希望写入配置文件时可将输入框留空，并通过 `REFRA_TRANSLATOR_API_KEY` 环境变量提供。
 
 ## 更新
 

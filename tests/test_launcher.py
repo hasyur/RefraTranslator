@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QApplication, QLabel, QScrollArea
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QScrollArea
 
 from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.config import load_config
@@ -76,6 +76,9 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window.windowTitle() == PRODUCT_NAME
     assert window.profile_combo.currentData() == "game"
     assert window.server_url_combo.currentText() == "http://127.0.0.1:1234/v1"
+    assert window.api_key_edit.text() == ""
+    assert window.api_key_edit.echoMode() == QLineEdit.EchoMode.Password
+    assert "REFRA_TRANSLATOR_API_KEY" in window.api_key_edit.placeholderText()
     assert window.model_combo.currentText() == "hy-mt1.5-7b"
     assert window.max_concurrency_spin.value() == 2
     assert window.ocr_device_combo.currentData() == "cpu"
@@ -173,6 +176,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert window.detection_quality_label.text() == "性能 37.5% · 960px"
 
     window.server_url_combo.setCurrentText("http://203.0.113.10:9000/v1")
+    window.api_key_edit.setText("launcher-secret")
     window.model_combo.setCurrentText("alternate-model")
     window.max_concurrency_spin.setValue(6)
     window.settle_rescan_spin.setValue(800)
@@ -203,6 +207,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     )
     saved = load_config(config_path)
     assert saved.translation.base_url == "http://203.0.113.10:9000/v1"
+    assert saved.translation.api_key == "launcher-secret"
     assert saved.translation.model == "alternate-model"
     assert saved.translation.max_concurrency == 6
     assert saved.ocr.device == "cpu"

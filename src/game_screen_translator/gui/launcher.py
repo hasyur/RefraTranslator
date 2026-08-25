@@ -779,6 +779,18 @@ class LauncherWindow(QMainWindow):
             )
         translation_form.addRow("API 服务器", self.server_url_combo)
 
+        self.api_key_edit = QLineEdit(self._config.translation.api_key)
+        self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key_edit.setClearButtonEnabled(True)
+        self.api_key_edit.setPlaceholderText(
+            f"可选；留空读取 {self._config.translation.api_key_env}"
+        )
+        self.api_key_edit.setToolTip(
+            "填写后会以明文保存到本机 config.toml（该文件已被 Git 忽略）；"
+            "留空时读取配置的环境变量。"
+        )
+        translation_form.addRow("API Key", self.api_key_edit)
+
         model_widget = QWidget()
         model_layout = QHBoxLayout(model_widget)
         model_layout.setContentsMargins(0, 0, 0, 0)
@@ -1161,6 +1173,7 @@ class LauncherWindow(QMainWindow):
             self._config.translation,
             base_url=base_url,
             model=model,
+            api_key=self.api_key_edit.text(),
             max_concurrency=self.max_concurrency_spin.value(),
         )
 
@@ -1339,10 +1352,11 @@ class LauncherWindow(QMainWindow):
         request = QNetworkRequest(url)
         request.setRawHeader(b"Accept", b"application/json")
         request.setTransferTimeout(max(1000, round(translation.timeout_seconds * 1000)))
-        if translation.api_key:
+        api_key = translation.resolved_api_key
+        if api_key:
             request.setRawHeader(
                 b"Authorization",
-                f"Bearer {translation.api_key}".encode("utf-8"),
+                f"Bearer {api_key}".encode("utf-8"),
             )
         reply = self._network_manager.get(request)
         self._model_reply = reply
@@ -1442,6 +1456,7 @@ class LauncherWindow(QMainWindow):
                 self._config_path,
                 base_url=translation.base_url,
                 model=translation.model,
+                api_key=translation.api_key,
                 ocr_device=ocr.device,
                 max_concurrency=translation.max_concurrency,
                 ocr_detection_max_side=ocr.detection_max_side,
@@ -1463,6 +1478,7 @@ class LauncherWindow(QMainWindow):
             return False
         self.server_url_combo.setCurrentText(self._config.translation.base_url)
         self.model_combo.setCurrentText(self._config.translation.model)
+        self.api_key_edit.setText(self._config.translation.api_key)
         self.max_concurrency_spin.setValue(
             self._config.translation.max_concurrency
         )
