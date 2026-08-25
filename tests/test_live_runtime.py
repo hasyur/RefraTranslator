@@ -231,6 +231,71 @@ def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
     assert capture.closed
 
 
+def test_capture_stall_reports_recovery_and_forces_fresh_scan(
+    monkeypatch,
+    capsys,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(capture_fps=30, stable_observations=99),
+    )
+
+    class StallingCapture:
+        region = (0, 0, 320, 120)
+        output_size = (320, 120)
+        active_backend = "dxgi"
+
+        def __init__(self) -> None:
+            self.frames = [
+                None,
+                None,
+                np.zeros((120, 320, 3), dtype=np.uint8),
+            ]
+            self.closed = False
+
+        def latest_frame(self):
+            return self.frames.pop(0) if self.frames else None
+
+        def close(self) -> None:
+            self.closed = True
+
+    capture = StallingCapture()
+    control = FakeControl()
+    controller = LiveController(
+        config,
+        capture=capture,  # type: ignore[arg-type]
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=control,
+        app=app,
+    )
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    clock[0] = 11.01
+    controller._tick()
+
+    assert control.status == "屏幕采集恢复中"
+    assert "界面和已完成的翻译不会被阻塞" in control.detail
+
+    clock[0] = 11.1
+    controller._tick()
+
+    assert control.status == "实时翻译运行中"
+    assert "屏幕采集已恢复" in control.detail
+    assert controller._ocr_future is not None
+    controller._ocr_future.result(timeout=2)
+    assert "屏幕采集已恢复" in capsys.readouterr().out
+    controller.close()
+    assert capture.closed
+
+
 def test_live_controller_publishes_and_closes_browser_overlay() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(

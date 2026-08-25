@@ -110,6 +110,8 @@ _ROI_INTERNAL_EDGE_MARGIN = 12
 _ROI_INTERNAL_MIN_OCR_INTERVAL_S = 0.1
 _ROI_INTERNAL_SETTLE_INTERVAL_S = 0.05
 _COMPLETION_POLL_INTERVAL_MS = 25
+_CAPTURE_STALL_MIN_SECONDS = 1.0
+_CAPTURE_STALL_FRAME_PERIODS = 3
 _LAYOUT_ARBITRATION_MAX_OUTPUT_TOKENS = 256
 _LAYOUT_ARBITRATION_CACHE_LIMIT = 128
 
@@ -498,6 +500,12 @@ class LiveController:
         self._session_epoch = 0
         self._paused = False
         self._force_full_scan = False
+        self._capture_wait_started_at: float | None = None
+        self._capture_stalled = False
+        self._capture_stall_timeout_s = max(
+            _CAPTURE_STALL_MIN_SECONDS,
+            _CAPTURE_STALL_FRAME_PERIODS / config.live.capture_fps,
+        )
         self._running_detail = ""
         self._shutting_down = False
         self._translated_count = 0
@@ -664,6 +672,8 @@ class LiveController:
         self._settle_rescan_due = None
         self._settle_rescan_triggered_at = None
         self._force_full_scan = True
+        self._capture_wait_started_at = None
+        self._capture_stalled = False
         self._control.set_status(
             "实时翻译运行中",
             self._running_detail or "已恢复，正在从当前画面重新识别。",
@@ -755,16 +765,18 @@ class LiveController:
         self._queue_untranslated_visible_sources()
         self._dispatch_translation_work()
 
+        now = time.monotonic()
         try:
             frame = self._capture.latest_frame()
         except Exception as exc:
             self._fatal(f"屏幕采集失败：{exc}")
             return
         if frame is None:
+            self._mark_capture_waiting(now)
             return
 
+        self._mark_capture_resumed(now)
         self._latest_frame = frame
-        now = time.monotonic()
         if self._force_full_scan:
             if self._ocr_future is None:
                 self._force_full_scan = False
@@ -777,6 +789,41 @@ class LiveController:
             self._tick_legacy_ocr(frame, now)
 
         self._publish_scene(frame, self._tracker.visible_tracks)
+
+    def _mark_capture_waiting(self, now: float) -> None:
+        if self._capture_wait_started_at is None:
+            self._capture_wait_started_at = now
+            return
+        if (
+            self._capture_stalled
+            or now - self._capture_wait_started_at < self._capture_stall_timeout_s
+        ):
+            return
+        self._capture_stalled = True
+        detail = (
+            f"超过 {self._capture_stall_timeout_s:g} 秒没有收到新画面；"
+            "采集线程仍在后台等待显示输出恢复，界面和已完成的翻译不会被阻塞。"
+        )
+        self._control.set_status("屏幕采集恢复中", detail)
+        _live_message(detail)
+
+    def _mark_capture_resumed(self, now: float) -> None:
+        wait_started_at = self._capture_wait_started_at
+        was_stalled = self._capture_stalled
+        self._capture_wait_started_at = None
+        self._capture_stalled = False
+        if not was_stalled:
+            return
+        self._force_full_scan = True
+        stalled_seconds = (
+            max(0.0, now - wait_started_at) if wait_started_at is not None else 0.0
+        )
+        detail = f"屏幕采集已恢复（中断 {stalled_seconds:.1f} 秒），正在重新识别当前画面。"
+        self._control.set_status(
+            "实时翻译运行中",
+            self._running_detail or detail,
+        )
+        _live_message(detail)
 
     def _collect_completed_work(self) -> None:
         if self._shutting_down:
