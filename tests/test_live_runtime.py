@@ -124,6 +124,20 @@ class ColorBlockOcr:
         return tuple(observations)
 
 
+class ScriptedEmptyColorBlockOcr(ColorBlockOcr):
+    def __init__(self, *empty_calls: int) -> None:
+        super().__init__()
+        self.empty_calls = frozenset(empty_calls)
+        self.call_count = 0
+
+    def recognize_frame(self, frame):
+        self.call_count += 1
+        if self.call_count in self.empty_calls:
+            self.input_shapes.append(tuple(frame.shape))
+            return ()
+        return super().recognize_frame(frame)
+
+
 class FakeOverlay:
     def __init__(self) -> None:
         self.scenes = 0
@@ -1200,6 +1214,172 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     assert "执行ROI 1 次" in control.cost_status
     assert "候选 ROI 1 次" in control.cost_status
     assert "整屏的" in control.cost_status
+    controller.close()
+
+
+def test_dynamic_roi_empty_result_retries_once_with_a_wider_fresh_crop(
+    monkeypatch,
+    capsys,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=99,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            dynamic_roi_response_target_ms=500,
+            dynamic_roi_settle_ms=0,
+            dynamic_roi_ocr_interval_ms=250,
+            dynamic_roi_max_coalesce_ms=250,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    ocr = ScriptedEmptyColorBlockOcr(2)
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+        debug=True,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 10.05
+    controller._tick()
+
+    capture.frame = _dynamic_roi_frame(changed=True)
+    clock[0] = 10.3
+    controller._tick()
+    assert controller._ocr_future is None
+    clock[0] = 10.35
+    controller._tick()
+    assert controller._ocr_future is not None
+    assert controller._active_roi_job is not None
+    assert controller._active_roi_plan is not None
+    first_generation = controller._active_roi_job.generation
+    first_roi = controller._active_roi_plan.regions[0].roi
+    assert not controller._active_roi_empty_retry
+    controller._ocr_future.result(timeout=2)
+
+    clock[0] = 10.4
+    controller._tick()
+    assert controller._ocr_future is None
+    assert controller._pending_roi_empty_retry
+    assert "待って。" in [
+        track.text for track in controller._ocr_line_tracker.visible_tracks
+    ]
+
+    clock[0] = 10.45
+    controller._tick()
+    assert controller._ocr_future is not None
+    assert controller._active_roi_job is not None
+    assert controller._active_roi_plan is not None
+    retry_job = controller._active_roi_job
+    retry_plan = controller._active_roi_plan
+    assert controller._active_roi_empty_retry
+    assert retry_job.generation > first_generation
+    assert not retry_plan.fallback_full_frame
+    assert retry_plan.regions[0].roi[2] > first_roi[2]
+    controller._ocr_future.result(timeout=2)
+
+    clock[0] = 10.5
+    controller._tick()
+
+    assert ocr.call_count == 3
+    assert ocr.input_shapes[2][1] > ocr.input_shapes[1][1]
+    assert ocr.input_shapes[2][1] < capture.output_size[0]
+    assert controller._roi_empty_retry_count == 1
+    assert controller._roi_empty_retry_recovered_count == 1
+    assert controller._roi_full_fallback_count == 0
+    assert not controller._pending_roi_empty_retry
+    assert "止まれ。" in [track.text for track in controller._tracker.visible_tracks]
+    roi_plan_logs = [
+        json.loads(line.removeprefix("[ROI_PLAN] "))
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("[ROI_PLAN] ")
+    ]
+    assert [item["empty_retry"] for item in roi_plan_logs] == [False, True]
+    controller.close()
+
+
+def test_dynamic_roi_empty_retry_stops_after_one_failed_retry(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=99,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            dynamic_roi_settle_ms=0,
+            dynamic_roi_ocr_interval_ms=250,
+            dynamic_roi_max_coalesce_ms=250,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    ocr = ScriptedEmptyColorBlockOcr(2, 3, 4)
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [20.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 20.05
+    controller._tick()
+    capture.frame = _dynamic_roi_frame(changed=True)
+
+    clock[0] = 20.3
+    controller._tick()
+    clock[0] = 20.35
+    controller._tick()
+    assert controller._ocr_future is not None
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 20.4
+    controller._tick()
+    clock[0] = 20.45
+    controller._tick()
+    assert controller._ocr_future is not None
+    assert controller._active_roi_empty_retry
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 20.5
+    controller._tick()
+
+    clock[0] = 20.8
+    controller._tick()
+    clock[0] = 21.1
+    controller._tick()
+
+    assert ocr.call_count == 3
+    assert controller._roi_empty_retry_count == 1
+    assert controller._roi_empty_retry_recovered_count == 0
+    assert controller._roi_full_fallback_count == 0
+    assert not controller._pending_roi_empty_retry
+    assert not controller._active_roi_empty_retry
+    assert controller._roi_scheduler is not None
+    assert not controller._roi_scheduler.busy
+    assert not controller._roi_scheduler.has_pending
     controller.close()
 
 

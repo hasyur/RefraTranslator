@@ -109,6 +109,7 @@ _ROI_INITIAL_RETRY_SECONDS = 1.0
 _ROI_INTERNAL_EDGE_MARGIN = 12
 _ROI_INTERNAL_MIN_OCR_INTERVAL_S = 0.1
 _ROI_INTERNAL_SETTLE_INTERVAL_S = 0.05
+_ROI_EMPTY_RETRY_MAX_CHANGED_FRACTION = 0.01
 _COMPLETION_POLL_INTERVAL_MS = 25
 _CAPTURE_STALL_MIN_SECONDS = 1.0
 _CAPTURE_STALL_FRAME_PERIODS = 3
@@ -455,6 +456,8 @@ class LiveController:
         self._active_roi_job: ScheduledRoiScan | None = None
         self._active_roi_plan: ContextualRoiPlan | None = None
         self._active_roi_anchors: tuple[TrackedText, ...] = ()
+        self._active_roi_empty_retry = False
+        self._pending_roi_empty_retry = False
         self._active_ocr_cost: OcrComputeEstimate | None = None
         self._active_ocr_latency_origin: _OcrLatencyOrigin | None = None
         self._translation_futures: dict[
@@ -520,6 +523,8 @@ class LiveController:
         self._roi_fallback_peak_changed_fraction = 0.0
         self._roi_fallback_peak_candidate_coverage = 0.0
         self._roi_fallback_peak_candidate_regions = 0
+        self._roi_empty_retry_count = 0
+        self._roi_empty_retry_recovered_count = 0
         self._ocr_text_count = 0
         self._filtered_text_count = 0
         self._stale_result_count = 0
@@ -636,6 +641,7 @@ class LiveController:
         self._pending_ocr_change_started_at = None
         self._settle_rescan_due = None
         self._settle_rescan_triggered_at = None
+        self._pending_roi_empty_retry = False
         self._pending_translations.clear()
         self._translation_retries.clear()
         self._completed_translations.clear()
@@ -671,6 +677,8 @@ class LiveController:
         self._next_ocr_allowed = 0.0
         self._settle_rescan_due = None
         self._settle_rescan_triggered_at = None
+        self._active_roi_empty_retry = False
+        self._pending_roi_empty_retry = False
         self._force_full_scan = True
         self._capture_wait_started_at = None
         self._capture_stalled = False
@@ -712,6 +720,12 @@ class LiveController:
                 f"动态 ROI：局部/回退扫描 {self._roi_scan_count} 次/"
                 f"整帧回退 {self._roi_full_fallback_count} 次"
             )
+            if self._roi_empty_retry_count:
+                print(
+                    "动态 ROI 空识别补扫：安排 "
+                    f"{self._roi_empty_retry_count} 次/"
+                    f"恢复 {self._roi_empty_retry_recovered_count} 次"
+                )
             feedback_count = (
                 self._roi_scheduler.empty_result_count
                 + self._roi_scheduler.productive_result_count
@@ -843,6 +857,14 @@ class LiveController:
         job = scheduler.observe(frame, now)
         if job is not None:
             self._submit_roi_ocr(job)
+        elif (
+            self._pending_roi_empty_retry
+            and not scheduler.busy
+            and not scheduler.has_pending
+        ):
+            # The changed pixels returned to the accepted baseline before the
+            # retry ran. Do not turn the next unrelated local scan into a retry.
+            self._pending_roi_empty_retry = False
 
     def _tick_legacy_ocr(self, frame: np.ndarray, now: float) -> None:
         changed = self._detector.changed(frame)
@@ -927,6 +949,8 @@ class LiveController:
         self._active_roi_job = None
         self._active_roi_plan = None
         self._active_roi_anchors = ()
+        self._active_roi_empty_retry = False
+        self._pending_roi_empty_retry = False
         frame_height, frame_width = frame.shape[:2]
         self._active_ocr_cost = estimate_ocr_compute_cost(
             (frame_width, frame_height),
@@ -954,13 +978,37 @@ class LiveController:
         planner = self._roi_planner
         if planner is None:
             raise RuntimeError("动态 ROI 规划器未初始化")
+        scheduler = self._roi_scheduler
+        if scheduler is None:
+            raise RuntimeError("动态 ROI 调度器未初始化")
         anchors = self._active_ocr_lines()
         frame_height, frame_width = job.frame.shape[:2]
+        change_rois = job.proposal.change_rois or job.proposal.rois
+        detector_candidates = scheduler.detector.candidate_rois_for_changes(
+            change_rois,
+            frame_size=(frame_width, frame_height),
+        )
+        planning_proposal = job.proposal
+        if not job.proposal.fallback_full_frame:
+            detector_coverage = sum(
+                width * height for _, _, width, height in detector_candidates
+            ) / (frame_width * frame_height)
+            planning_proposal = replace(
+                job.proposal,
+                rois=detector_candidates,
+                candidate_coverage_fraction=detector_coverage,
+                candidate_region_count=len(detector_candidates),
+            )
+        empty_retry = (
+            self._pending_roi_empty_retry
+            and not job.proposal.fallback_full_frame
+        )
         try:
             plan = planner.plan_proposal(
-                job.proposal,
+                planning_proposal,
                 anchors,
                 frame_size=(frame_width, frame_height),
+                expand_candidate_rois_for_all=empty_retry,
             )
         except Exception as exc:
             self._recover_empty_roi_job(f"ROI 规划异常：{exc}")
@@ -987,12 +1035,15 @@ class LiveController:
                 plan,
                 planned_rois,
                 frame_size=(frame_width, frame_height),
+                empty_retry=empty_retry,
             )
+        self._pending_roi_empty_retry = False
         self._active_ocr_frame = job.frame
         self._active_ocr_epoch = self._session_epoch
         self._active_roi_job = job
         self._active_roi_plan = plan
         self._active_roi_anchors = anchors
+        self._active_roi_empty_retry = empty_retry
         self._active_ocr_cost = estimate_ocr_compute_cost(
             (frame_width, frame_height),
             detection_max_side=self._config.ocr.detection_max_side,
@@ -1022,6 +1073,7 @@ class LiveController:
         executed_rois: tuple[OcrRoi, ...],
         *,
         frame_size: tuple[int, int],
+        empty_retry: bool,
     ) -> None:
         proposal = job.proposal
         change_rois = proposal.change_rois or proposal.rois
@@ -1084,6 +1136,7 @@ class LiveController:
             ),
             "candidate_region_count": len(candidate_rois),
             "affected_track_count": plan.affected_track_count,
+            "empty_retry": empty_retry,
         }
         print(
             "[ROI_PLAN] "
@@ -1094,6 +1147,8 @@ class LiveController:
     def _recover_empty_roi_job(self, reason: str) -> None:
         """Release a pre-submit ROI dead end by rebuilding from a full scan."""
         print(f"动态 ROI 已自动重置：{reason}", file=sys.stderr)
+        self._active_roi_empty_retry = False
+        self._pending_roi_empty_retry = False
         self._roi_scheduler = _create_roi_scheduler(self._config)
         self._roi_planner = (
             ContextualRoiPlanner()
@@ -1137,6 +1192,28 @@ class LiveController:
             track
             for track in self._ocr_line_tracker.visible_tracks
             if track.missing_since is None
+        )
+
+    @staticmethod
+    def _should_retry_empty_roi(
+        *,
+        raw_count: int,
+        job: ScheduledRoiScan | None,
+        plan: ContextualRoiPlan | None,
+        already_retrying: bool,
+    ) -> bool:
+        if (
+            raw_count > 0
+            or already_retrying
+            or job is None
+            or plan is None
+            or plan.fallback_full_frame
+        ):
+            return False
+        return (
+            plan.affected_track_count > 0
+            or job.proposal.changed_fraction
+            <= _ROI_EMPTY_RETRY_MAX_CHANGED_FRACTION
         )
 
     def _build_translation_layout(
@@ -1243,6 +1320,7 @@ class LiveController:
         roi_job = self._active_roi_job
         roi_plan = self._active_roi_plan
         roi_anchors = self._active_roi_anchors
+        roi_empty_retry = self._active_roi_empty_retry
         ocr_cost = self._active_ocr_cost
         ocr_latency_origin = self._active_ocr_latency_origin
         self._ocr_future = None
@@ -1251,6 +1329,7 @@ class LiveController:
         self._active_roi_job = None
         self._active_roi_plan = None
         self._active_roi_anchors = ()
+        self._active_roi_empty_retry = False
         self._active_ocr_cost = None
         self._active_ocr_latency_origin = None
         if active_epoch != self._session_epoch:
@@ -1306,6 +1385,7 @@ class LiveController:
             return
 
         raw_observations = task_result.observations
+        raw_count = len(raw_observations)
         line_selection = self._text_filter.select_layout_candidates(
             raw_observations,
             merge_enabled=self._config.ocr.text_merge_enabled,
@@ -1339,20 +1419,35 @@ class LiveController:
                     self._roi_fallback_peak_candidate_regions,
                     roi_plan.candidate_region_count,
                 )
-        if contextual_update is not None and not roi_plan.fallback_full_frame:
+        empty_roi_retry_requested = self._should_retry_empty_roi(
+            raw_count=raw_count,
+            job=roi_job,
+            plan=roi_plan,
+            already_retrying=roi_empty_retry,
+        )
+        if empty_roi_retry_requested:
+            self._pending_roi_empty_retry = True
+            self._roi_empty_retry_count += 1
+        elif roi_empty_retry and raw_count > 0:
+            self._roi_empty_retry_recovered_count += 1
+
+        if (
+            contextual_update is not None
+            and not roi_plan.fallback_full_frame
+            and not empty_roi_retry_requested
+        ):
             self._ocr_line_tracker.observe_partial(
                 contextual_update.observations,
                 now,
                 replace_track_ids=contextual_update.replace_track_ids,
             )
-        else:
+        elif contextual_update is None or roi_plan.fallback_full_frame:
             self._ocr_line_tracker.observe(line_observations, now)
 
         active_lines = self._active_ocr_lines()
         layout_result = self._build_translation_layout(active_lines)
         observations = layout_result.observations
         rejected = line_selection.rejected + layout_result.rejected
-        raw_count = len(raw_observations)
         self._ocr_text_count += raw_count
         self._filtered_text_count += len(rejected)
         set_filter_status = getattr(self._control, "set_filter_status", None)
@@ -1436,6 +1531,13 @@ class LiveController:
                     f"更新 {len(contextual_update.observations)} 条 / "
                     f"target {roi_target_count} 条"
                 )
+            if empty_roi_retry_requested:
+                print("动态 ROI OCR 空结果：保留当前文字并安排一次加宽局部补扫")
+            elif roi_empty_retry:
+                print(
+                    "动态 ROI OCR 补扫完成："
+                    + (f"恢复 {raw_count} 框" if raw_count else "仍为 0 框")
+                )
         # Atomic OCR lines outside a local ROI remain in the line tracker, so
         # this is a complete translation-layout snapshot after every scan.
         self._observe_translation_layout(
@@ -1479,16 +1581,28 @@ class LiveController:
         follow_up = None
         if scheduler is not None:
             if roi_job is not None:
+                empty_retry_exhausted = roi_empty_retry and raw_count == 0
                 accepted = (
-                    not self._tracker.has_pending_revisions
-                    and not self._layout_stabilizer.has_pending
+                    not empty_roi_retry_requested
+                    and (
+                        empty_retry_exhausted
+                        or (
+                            not self._tracker.has_pending_revisions
+                            and not self._layout_stabilizer.has_pending
+                        )
+                    )
                 )
                 follow_up = scheduler.complete(
                     roi_job,
                     accepted=accepted,
                     completed_at_s=now,
                     target_count=roi_target_count if accepted else None,
+                    dispatch_follow_up=not empty_roi_retry_requested,
                 )
+                if empty_roi_retry_requested and not scheduler.has_pending:
+                    # The pixels already returned to the accepted baseline;
+                    # there is no changed local region left to retry.
+                    self._pending_roi_empty_retry = False
                 if self._debug:
                     print(
                         "动态 ROI 自适应：连续无目标 "

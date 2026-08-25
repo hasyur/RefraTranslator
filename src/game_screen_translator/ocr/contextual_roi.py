@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol, Sequence
 
 from game_screen_translator.ocr.dynamic_roi import DynamicRoiProposal
@@ -123,6 +123,7 @@ class ContextualRoiPlanner:
         anchors: Sequence[TextAnchor],
         *,
         frame_size: tuple[int, int],
+        expand_candidate_rois_for_all: bool = False,
     ) -> ContextualRoiPlan:
         if proposal.fallback_full_frame:
             change_rois = proposal.change_rois or proposal.rois
@@ -141,10 +142,89 @@ class ContextualRoiPlanner:
                 fallback_candidate_region_count=proposal.candidate_region_count,
                 fallback_candidate_rois=candidate_plan.candidate_rois,
             )
-        return self.plan(
+        plan = self.plan(
             proposal.change_rois or proposal.rois,
             anchors,
             frame_size=frame_size,
+        )
+        if plan.fallback_full_frame or not proposal.rois:
+            return plan
+        return self._expand_candidate_rois(
+            plan,
+            proposal.rois,
+            frame_size=frame_size,
+            include_anchored=expand_candidate_rois_for_all,
+        )
+
+    def _expand_candidate_rois(
+        self,
+        plan: ContextualRoiPlan,
+        candidate_rois: Sequence[OcrRoi],
+        *,
+        frame_size: tuple[int, int],
+        include_anchored: bool,
+    ) -> ContextualRoiPlan:
+        """Use detector-sized crops without broadening the changed-text scope."""
+
+        expanded: list[ContextualOcrRegion] = []
+        for region in plan.regions:
+            if region.affected_track_ids and not include_anchored:
+                expanded.append(region)
+                continue
+            related = tuple(
+                candidate
+                for candidate in candidate_rois
+                if any(
+                    self._intersects(
+                        self._roi_edges(candidate),
+                        self._roi_edges(change_roi),
+                    )
+                    for change_roi in region.change_rois
+                )
+            )
+            if not related:
+                expanded.append(region)
+                continue
+            bounds = self._union_bounds(
+                (
+                    self._roi_edges(region.roi),
+                    *(self._roi_edges(roi) for roi in related),
+                )
+            )
+            expanded.append(
+                replace(
+                    region,
+                    roi=(
+                        bounds[0],
+                        bounds[1],
+                        bounds[2] - bounds[0],
+                        bounds[3] - bounds[1],
+                    ),
+                )
+            )
+
+        regions = self._merge_regions(expanded)
+        frame_width, frame_height = frame_size
+        coverage = sum(
+            region.roi[2] * region.roi[3] for region in regions
+        ) / (frame_width * frame_height)
+        # Accuracy expansion must remain a local optimization. Existing safety
+        # fallbacks may still request a full scan, but this widening alone must
+        # never create one.
+        if coverage >= self.max_coverage_fraction:
+            return plan
+        affected_count = len(
+            {track_id for region in regions for track_id in region.affected_track_ids}
+        )
+        expanded_rois = tuple(region.roi for region in regions)
+        return replace(
+            plan,
+            regions=regions,
+            coverage_fraction=coverage,
+            candidate_coverage_fraction=coverage,
+            candidate_region_count=len(regions),
+            affected_track_count=affected_count,
+            candidate_rois=expanded_rois,
         )
 
     def plan(

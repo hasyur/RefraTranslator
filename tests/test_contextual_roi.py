@@ -235,6 +235,85 @@ def test_upstream_fallback_rebuilds_full_screen_and_affects_all_tracks() -> None
     assert plan.regions[0].affected_track_ids == ("one", "two")
 
 
+def test_unanchored_change_uses_the_wider_detector_candidate() -> None:
+    proposal = DynamicRoiProposal(
+        ((1792, 280, 768, 208),),
+        0.004,
+        0.05,
+        False,
+        "local-change",
+        ((2144, 312, 96, 144),),
+    )
+
+    plan = ContextualRoiPlanner().plan_proposal(
+        proposal,
+        (),
+        frame_size=(2560, 1440),
+    )
+
+    assert not plan.fallback_full_frame
+    assert plan.regions[0].affected_track_ids == ()
+    assert plan.regions[0].roi == (1792, 280, 768, 208)
+
+
+def test_empty_retry_widens_an_anchored_region_without_changing_affected_ids() -> None:
+    anchors = (Anchor("line", "見逃さないで。", (2100, 320, 2250, 360)),)
+    proposal = DynamicRoiProposal(
+        ((1792, 280, 768, 208),),
+        0.004,
+        0.05,
+        False,
+        "local-change",
+        ((2144, 312, 96, 144),),
+    )
+    planner = ContextualRoiPlanner()
+
+    normal = planner.plan_proposal(
+        proposal,
+        anchors,
+        frame_size=(2560, 1440),
+    )
+    retry = planner.plan_proposal(
+        proposal,
+        anchors,
+        frame_size=(2560, 1440),
+        expand_candidate_rois_for_all=True,
+    )
+
+    assert normal.regions[0].roi[2] == 384
+    assert retry.regions[0].roi == (1792, 280, 768, 208)
+    assert normal.regions[0].affected_track_ids == ("line",)
+    assert retry.regions[0].affected_track_ids == ("line",)
+    assert retry.regions[0].change_rois == normal.regions[0].change_rois
+
+
+def test_candidate_widening_never_creates_a_full_frame_fallback() -> None:
+    proposal = DynamicRoiProposal(
+        ((1792, 280, 768, 208),),
+        0.004,
+        0.05,
+        False,
+        "local-change",
+        ((2144, 312, 96, 144),),
+    )
+    planner = ContextualRoiPlanner(max_coverage_fraction=0.04)
+    tight = planner.plan(
+        proposal.change_rois,
+        (),
+        frame_size=(2560, 1440),
+    )
+
+    widened = planner.plan_proposal(
+        proposal,
+        (),
+        frame_size=(2560, 1440),
+    )
+
+    assert not widened.fallback_full_frame
+    assert widened.regions == tight.regions
+    assert widened.coverage_fraction == tight.coverage_fraction
+
+
 def test_contextual_expansion_falls_back_when_coverage_is_too_large() -> None:
     planner = ContextualRoiPlanner(
         min_roi_size=(600, 400), max_coverage_fraction=0.25

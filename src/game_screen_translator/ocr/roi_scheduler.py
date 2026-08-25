@@ -371,6 +371,7 @@ class LatestFrameRoiScheduler:
         accepted: bool,
         completed_at_s: float,
         target_count: int | None = None,
+        dispatch_follow_up: bool = True,
     ) -> ScheduledRoiScan | None:
         """Finish a job, advancing the baseline only for accepted OCR output.
 
@@ -378,7 +379,8 @@ class LatestFrameRoiScheduler:
         they produced. Repeated empty results gradually lower only the OCR
         cadence (the cheap global change scan keeps running); the first empty
         result receives a grace scan, and any real target restores the user
-        configured interval immediately.
+        configured interval immediately. ``dispatch_follow_up=False`` keeps
+        rebuilt work pending so the caller can wait for a fresh observation.
         """
         self._require_primed()
         self._validate_poll_time(completed_at_s)
@@ -468,6 +470,8 @@ class LatestFrameRoiScheduler:
                     default=job.observed_at_s,
                 )
 
+        if not dispatch_follow_up:
+            return None
         return self.poll(completed_at_s)
 
     def _record_target_feedback(self, target_count: int) -> None:

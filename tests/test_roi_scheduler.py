@@ -180,6 +180,35 @@ def test_rejected_ocr_does_not_consume_the_pending_change() -> None:
     assert np.array_equal(retry.frame, changed)
 
 
+def test_rejected_ocr_can_wait_for_a_fresh_observation_before_retry() -> None:
+    base = _blank()
+    changed = _paint(base, 120, 70)
+    scheduler = LatestFrameRoiScheduler(
+        _detector(),
+        min_ocr_interval_s=0.1,
+        settle_interval_s=0.0,
+        max_coalesce_s=0.1,
+    )
+    scheduler.prime(base, 0.0)
+    first_job = scheduler.observe(changed, 0.1)
+    assert first_job is not None
+
+    follow_up = scheduler.complete(
+        first_job,
+        accepted=False,
+        completed_at_s=0.2,
+        dispatch_follow_up=False,
+    )
+
+    assert follow_up is None
+    assert not scheduler.busy
+    assert scheduler.has_pending
+    retry = scheduler.observe(changed.copy(), 0.2)
+    assert retry is not None
+    assert retry.generation > first_job.generation
+    assert retry.frame is not first_job.frame
+
+
 def test_latest_frame_returning_to_baseline_drops_a_local_transient() -> None:
     base = _blank()
     transient = _paint(base, 120, 70)
