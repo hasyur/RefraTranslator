@@ -75,6 +75,7 @@ class ContextualRoiPlanner:
         direct_margin: int = 12,
         same_row_overlap: float = 0.35,
         same_row_gap_lines: float = 3.0,
+        seed_same_row_max_height_ratio: float = 3.0,
         context_gap_lines: float = 2.5,
         context_horizontal_gap_lines: float = 4.0,
         ocr_padding: tuple[int, int] = (32, 24),
@@ -90,6 +91,8 @@ class ContextualRoiPlanner:
             raise ValueError("same_row_overlap 必须在 0 到 1 之间")
         if same_row_gap_lines < 0 or context_gap_lines < 0:
             raise ValueError("行间距倍数不能为负数")
+        if seed_same_row_max_height_ratio <= 0:
+            raise ValueError("变化框行高倍数必须大于 0")
         if context_horizontal_gap_lines < 0:
             raise ValueError("上下文水平间距倍数不能为负数")
         if any(value < 0 for value in ocr_padding + merge_gap):
@@ -104,6 +107,7 @@ class ContextualRoiPlanner:
         self.direct_margin = direct_margin
         self.same_row_overlap = same_row_overlap
         self.same_row_gap_lines = same_row_gap_lines
+        self.seed_same_row_max_height_ratio = seed_same_row_max_height_ratio
         self.context_gap_lines = context_gap_lines
         self.context_horizontal_gap_lines = context_horizontal_gap_lines
         self.ocr_padding = ocr_padding
@@ -306,15 +310,33 @@ class ContextualRoiPlanner:
     def _seed_relates_to_anchor(self, seed: Bounds, anchor: Bounds) -> bool:
         if self._intersects(self._expand_bounds(seed, self.direct_margin), anchor):
             return True
-        return self._same_row_neighbors(seed, anchor)
+        seed_height = max(1, seed[3] - seed[1])
+        anchor_height = max(1, anchor[3] - anchor[1])
+        if seed_height > self.seed_same_row_max_height_ratio * anchor_height:
+            return False
+        return self._same_row_neighbors(
+            seed,
+            anchor,
+            gap_line_height=anchor_height,
+        )
 
-    def _same_row_neighbors(self, first: Bounds, second: Bounds) -> bool:
+    def _same_row_neighbors(
+        self,
+        first: Bounds,
+        second: Bounds,
+        *,
+        gap_line_height: int | None = None,
+    ) -> bool:
         first_height = max(1, first[3] - first[1])
         second_height = max(1, second[3] - second[1])
         overlap = max(0, min(first[3], second[3]) - max(first[1], second[1]))
         overlap_ratio = overlap / min(first_height, second_height)
         gap = self._horizontal_gap(first, second)
-        line_height = max(first_height, second_height)
+        line_height = (
+            max(first_height, second_height)
+            if gap_line_height is None
+            else max(1, gap_line_height)
+        )
         return (
             overlap_ratio >= self.same_row_overlap
             and gap <= self.same_row_gap_lines * line_height

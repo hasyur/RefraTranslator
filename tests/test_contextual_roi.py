@@ -64,6 +64,35 @@ def test_same_row_fragments_chain_but_distant_label_does_not_stick() -> None:
     assert "unrelated" not in region.affected_track_ids
 
 
+def test_text_height_seed_can_reach_nearby_line_horizontally() -> None:
+    anchors = (Anchor("line", "The gate opens", (100, 300, 340, 340)),)
+
+    region = ContextualRoiPlanner().plan(
+        ((360, 300, 80, 40),),
+        anchors,
+        frame_size=(1000, 600),
+    ).regions[0]
+
+    assert region.affected_track_ids == ("line",)
+
+
+def test_tall_motion_seed_does_not_absorb_distant_text_column() -> None:
+    anchors = (
+        Anchor("inside", "album art label", (700, 500, 900, 540)),
+        Anchor("right-1", "first lyric line", (1280, 500, 1850, 540)),
+        Anchor("right-2", "second lyric line", (1280, 560, 1900, 600)),
+    )
+
+    region = ContextualRoiPlanner().plan(
+        ((512, 456, 512, 480),),
+        anchors,
+        frame_size=(2560, 1440),
+    ).regions[0]
+
+    assert region.affected_track_ids == ("inside",)
+    assert region.roi == (480, 432, 576, 528)
+
+
 def test_new_wrapped_row_uses_previous_line_only_as_context() -> None:
     anchors = (
         Anchor("line-1", "川岸に沿って進み、", (120, 200, 500, 240)),
