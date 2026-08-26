@@ -9,7 +9,7 @@ RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具
 - 图形化配置 API 地址、API Key、模型、OCR 设备、字幕区域和每游戏 Profile；
 - 支持 CPU 与 NVIDIA GPU OCR，翻译并发数可调；
 - 多行文字默认由快速规则链分组，仅在局部断链、候选边近似平局、菜单/句子冲突时排队调用 LLM 仲裁；
-- 每个游戏独立保存术语表、人工修订和翻译缓存；
+- 每个配置独立保存补充提示词、术语表、人工修订和翻译缓存；
 - 原文字区域可选择“黑化模糊”或“仅模糊”，覆盖层鼠标穿透且不会被再次 OCR；
 - 可向 OBS 提供仅限本机访问的透明 Browser Source，在录制画面中单独叠加译文；
 - 变化检测减少无效 OCR，并提供默认关闭的实验性动态 ROI 模式。
@@ -31,7 +31,7 @@ RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具
 1. 启动你自己的 LLM 服务；
 2. 双击 `start_gui.bat`；
 3. 在 GUI 中填写 API 地址和服务所需的 API Key，再读取模型列表；
-4. 创建游戏 Profile，选择显示器并框选字幕区域；
+4. 创建配置，填写可选的场景提示词，选择显示器并框选字幕区域；
 5. 点击“启动实时翻译”。
 
 模板中的 `http://127.0.0.1:1234/v1` 只是示例地址，不代表程序自带服务。第一次运行 OCR 时还会将 PaddleOCR 模型下载到 `.cache\paddlex`。
@@ -77,7 +77,7 @@ git clone https://github.com/hasyur/RefraTranslator.git C:\RefraTranslator
 - 普通窗口和无边框窗口兼容性最好，独占全屏暂不保证可用；
 - “实验性动态 ROI”默认关闭，适合在具体游戏中对比测试；
 - LLM 并发只控制客户端请求数，实际速度仍取决于翻译后端与显存；
-- Profile 会隔离不同游戏的术语表、人工修订和缓存；
+- 配置会隔离不同游戏或网页的提示词、术语表、人工修订和缓存；
 - 当前不会识别说话人，也不会为不同人物自动生成不同语气。
 
 动态 ROI 的设计、限制和测试结果见 [全屏动态 ROI 实验](docs/dynamic-roi-experiment.md)。所有配置项及默认值见 [config.example.toml](config.example.toml)。

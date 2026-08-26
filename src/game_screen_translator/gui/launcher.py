@@ -24,10 +24,11 @@ from game_screen_translator.profiles import (
     GameProfile,
     ProfileCaptureSettings,
     ProfileError,
-    create_game_profile,
+    create_named_game_profile,
     list_game_profiles,
     load_game_profile,
     save_profile_capture_settings,
+    save_profile_custom_prompt,
     save_profile_glossary,
 )
 from game_screen_translator.translation.transport import (
@@ -105,6 +106,7 @@ try:
         QLineEdit,
         QMainWindow,
         QMessageBox,
+        QPlainTextEdit,
         QPushButton,
         QScrollArea,
         QSlider,
@@ -254,14 +256,13 @@ class NewProfileDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("新建配置")
         self.setMinimumWidth(430)
-        self.profile_id_edit = QLineEdit()
-        self.profile_id_edit.setPlaceholderText("例如 cyberpunk2077")
-        self.display_name_edit = QLineEdit()
-        self.display_name_edit.setPlaceholderText("例如 赛博朋克 2077")
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("例如 赛博朋克 2077 或某个网页")
         form = QFormLayout()
-        form.addRow("配置 ID", self.profile_id_edit)
-        form.addRow("配置名称", self.display_name_edit)
-        note = QLabel("配置 ID 创建后用于目录名，只能包含文字、数字、连字符和下划线。")
+        form.addRow("配置名称", self.name_edit)
+        note = QLabel(
+            "名称会同时作为配置标识；程序会自动生成安全的内部目录名。"
+        )
         note.setWordWrap(True)
         note.setObjectName("secondaryText")
         buttons = QDialogButtonBox(
@@ -275,13 +276,8 @@ class NewProfileDialog(QDialog):
         layout.addWidget(buttons)
 
     @property
-    def profile_id(self) -> str:
-        return self.profile_id_edit.text().strip()
-
-    @property
-    def display_name(self) -> str | None:
-        value = self.display_name_edit.text().strip()
-        return value or None
+    def display_name(self) -> str:
+        return self.name_edit.text().strip()
 
 
 class PairTableEditor(QWidget):
@@ -763,8 +759,8 @@ class LauncherWindow(QMainWindow):
 
         translation_card, translation_layout = _settings_card(
             "翻译服务",
-            "连接 OpenAI 兼容的本地或局域网 LLM 后端。",
-            scope="全局",
+            "连接 OpenAI 兼容的 LLM；补充提示词单独属于当前配置。",
+            scope="全局 + 此配置",
         )
         translation_form = QFormLayout()
         translation_form.setHorizontalSpacing(14)
@@ -806,6 +802,29 @@ class LauncherWindow(QMainWindow):
         model_layout.addWidget(self.model_combo, 1)
         model_layout.addWidget(self.refresh_models_button)
         translation_form.addRow("API 模型", model_widget)
+
+        prompt_widget = QWidget()
+        prompt_layout = QVBoxLayout(prompt_widget)
+        prompt_layout.setContentsMargins(0, 0, 0, 0)
+        prompt_layout.setSpacing(6)
+        self.custom_prompt_edit = QPlainTextEdit()
+        self.custom_prompt_edit.setPlaceholderText(
+            "用一两句话描述当前游戏、网页或翻译风格。\n"
+            "例如：这是一款近未来题材 RPG，角色对话偏口语。"
+        )
+        self.custom_prompt_edit.setMaximumHeight(88)
+        self.custom_prompt_edit.setTabChangesFocus(True)
+        prompt_actions = QHBoxLayout()
+        prompt_actions.setContentsMargins(0, 0, 0, 0)
+        prompt_hint = QLabel("切换配置时自动加载；应用设置或启动时也会保存。")
+        prompt_hint.setObjectName("secondaryText")
+        self.save_custom_prompt_button = QPushButton("保存到当前配置")
+        self.save_custom_prompt_button.clicked.connect(self._save_custom_prompt)
+        prompt_actions.addWidget(prompt_hint, 1)
+        prompt_actions.addWidget(self.save_custom_prompt_button)
+        prompt_layout.addWidget(self.custom_prompt_edit)
+        prompt_layout.addLayout(prompt_actions)
+        translation_form.addRow("配置提示词", prompt_widget)
 
         self.max_concurrency_spin = QSpinBox()
         self.max_concurrency_spin.setRange(1, 32)
@@ -1570,10 +1589,12 @@ class LauncherWindow(QMainWindow):
     def _apply_all_settings(self) -> None:
         if not self._save_translation_settings(announce=False):
             return
+        if not self._save_custom_prompt(announce=False):
+            return
         if not self._save_capture_settings():
             return
         self.statusBar().showMessage(
-            "已应用全局运行设置和当前配置的捕获区域",
+            "已应用全局运行设置、配置提示词和捕获区域",
             6000,
         )
 
@@ -1605,8 +1626,13 @@ class LauncherWindow(QMainWindow):
         selected_index = 0
         for index, profile in enumerate(profiles):
             self.profile_combo.addItem(
-                f"{profile.display_name} ({profile.profile_id})",
+                profile.display_name,
                 profile.profile_id,
+            )
+            self.profile_combo.setItemData(
+                index,
+                f"内部 ID：{profile.profile_id}",
+                Qt.ItemDataRole.ToolTipRole,
             )
             if profile.profile_id == current_id:
                 selected_index = index
@@ -1618,6 +1644,7 @@ class LauncherWindow(QMainWindow):
             self.profile_combo.blockSignals(False)
             self._profile = None
             self._set_profile_enabled(False)
+            self.custom_prompt_edit.clear()
             self._glossary_editor.set_pairs(())
             self._correction_editor.set_pairs(())
             self.info_label.setText(
@@ -1635,11 +1662,10 @@ class LauncherWindow(QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            profile = create_game_profile(
+            profile = create_named_game_profile(
                 self._config_path,
                 self._config,
-                dialog.profile_id,
-                display_name=dialog.display_name,
+                dialog.display_name,
             )
         except (ProfileError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("新建配置失败", exc)
@@ -1662,6 +1688,7 @@ class LauncherWindow(QMainWindow):
             return
         self._profile = profile
         self._set_profile_enabled(True)
+        self.custom_prompt_edit.setPlainText(profile.custom_prompt)
         capture = profile.capture_settings
         monitor_index = (
             capture.monitor_index
@@ -1697,6 +1724,32 @@ class LauncherWindow(QMainWindow):
     def _reload_current_profile(self) -> None:
         if self._profile is not None:
             self.refresh_profiles(self._profile.profile_id)
+
+    def _save_custom_prompt(self, *, announce: bool = True) -> bool:
+        profile = self._require_profile()
+        if profile is None:
+            return False
+        try:
+            save_profile_custom_prompt(
+                profile,
+                self.custom_prompt_edit.toPlainText(),
+            )
+            self._profile = load_game_profile(
+                self._config_path,
+                self._config,
+                profile.profile_id,
+            )
+        except (ProfileError, OSError, RuntimeError, ValueError) as exc:
+            self._show_error("保存配置提示词失败", exc)
+            return False
+        self.custom_prompt_edit.setPlainText(self._profile.custom_prompt)
+        self._update_info()
+        if announce:
+            self.statusBar().showMessage(
+                f"{profile.display_name} 的配置提示词已保存",
+                5000,
+            )
+        return True
 
     def _save_glossary(self) -> None:
         profile = self._require_profile()
@@ -1817,6 +1870,8 @@ class LauncherWindow(QMainWindow):
             return
         if not self._save_translation_settings(announce=False):
             return
+        if not self._save_custom_prompt(announce=False):
+            return
         if not self._save_capture_settings():
             return
         arguments = [
@@ -1912,10 +1967,12 @@ class LauncherWindow(QMainWindow):
             else "未单独设置（使用 config.toml）"
         )
         self.info_label.setText(
-            f"配置：{profile.display_name} ({profile.profile_id})\n\n"
+            f"配置：{profile.display_name}\n"
+            f"内部 ID：{profile.profile_id}\n\n"
             f"目录：{profile.directory}\n"
             f"显示器：{monitor}\n"
             f"字幕区域：{region}\n\n"
+            f"配置提示词：{'已设置' if profile.custom_prompt else '未设置'}\n"
             f"术语：{len(profile.glossary)} 条\n"
             f"模型缓存：{stats.automatic_entries} 条，命中 {stats.automatic_hits} 次\n"
             f"人工修订：{stats.manual_corrections} 条，命中 {stats.manual_hits} 次"

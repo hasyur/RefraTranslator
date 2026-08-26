@@ -13,7 +13,11 @@ from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.config import load_config
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.gui import launcher as launcher_module
-from game_screen_translator.gui.launcher import LauncherWindow, PairTableEditor
+from game_screen_translator.gui.launcher import (
+    LauncherWindow,
+    NewProfileDialog,
+    PairTableEditor,
+)
 from game_screen_translator.gui.theme import (
     THEME_DARK,
     THEME_LIGHT,
@@ -26,6 +30,7 @@ from game_screen_translator.profiles import (
     create_game_profile,
     load_game_profile,
     save_profile_capture_settings,
+    save_profile_custom_prompt,
     save_profile_glossary,
 )
 
@@ -108,7 +113,8 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert window._current_region() == (100, 200, 800, 300)
     assert window._glossary_editor.pairs() == (("仕事", "委托"),)
     assert window._correction_editor.pairs() == (("待て。", "等等。"),)
-    assert "测试游戏 (game)" in window.info_label.text()
+    assert "配置：测试游戏" in window.info_label.text()
+    assert "内部 ID：game" in window.info_label.text()
 
     for spin, value in zip(window.region_spins, (20, 30, 900, 240)):
         spin.setValue(value)
@@ -149,6 +155,59 @@ def test_pair_editor_ignores_fully_blank_row_but_rejects_half_row() -> None:
     with pytest.raises(ValueError, match="同时填写"):
         editor.pairs()
     editor.close()
+    app.processEvents()
+
+
+def test_new_profile_dialog_uses_one_visible_name_field() -> None:
+    app = QApplication.instance() or QApplication([])
+    dialog = NewProfileDialog()
+
+    dialog.name_edit.setText("  网页翻译  ")
+
+    assert dialog.display_name == "网页翻译"
+    assert not hasattr(dialog, "profile_id_edit")
+    assert not hasattr(dialog, "display_name_edit")
+    dialog.close()
+    app.processEvents()
+
+
+def test_launcher_switches_and_saves_profile_custom_prompt(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    config = load_config(config_path)
+    game = create_game_profile(
+        config_path,
+        config,
+        "game",
+        display_name="游戏配置",
+    )
+    web = create_game_profile(
+        config_path,
+        config,
+        "web",
+        display_name="网页配置",
+    )
+    save_profile_custom_prompt(game, "这是一款悬疑游戏。对话语气自然。")
+    save_profile_custom_prompt(web, "这是一个技术文档网页。术语保持准确。")
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+
+    game_index = window.profile_combo.findData("game")
+    web_index = window.profile_combo.findData("web")
+    assert window.profile_combo.itemText(game_index) == "游戏配置"
+    assert window.profile_combo.itemText(web_index) == "网页配置"
+    window.profile_combo.setCurrentIndex(game_index)
+    assert "悬疑游戏" in window.custom_prompt_edit.toPlainText()
+
+    window.profile_combo.setCurrentIndex(web_index)
+    assert "技术文档网页" in window.custom_prompt_edit.toPlainText()
+    window.custom_prompt_edit.setPlainText("这是新闻网页。使用简洁书面语。")
+    assert window._save_custom_prompt(announce=False)
+    assert load_game_profile(config_path, config, "web").custom_prompt == (
+        "这是新闻网页。使用简洁书面语。"
+    )
+
+    window.close()
     app.processEvents()
 
 

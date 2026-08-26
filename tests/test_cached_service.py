@@ -15,7 +15,11 @@ from game_screen_translator.domain import (
     SourceText,
     TranslationBatch,
 )
-from game_screen_translator.profiles import create_game_profile, load_game_profile
+from game_screen_translator.profiles import (
+    create_game_profile,
+    load_game_profile,
+    save_profile_custom_prompt,
+)
 from game_screen_translator.translation.cached import CachedTranslationService
 from game_screen_translator.translation.hy_mt import HyMtPromptBuilder
 from game_screen_translator.translation.service import TranslationService
@@ -81,7 +85,7 @@ def _config() -> AppConfig:
 
 
 def _service(transport, profile, *, revisions: RevisionRegistry | None = None):
-    builder = HyMtPromptBuilder()
+    builder = HyMtPromptBuilder(custom_prompt=profile.custom_prompt)
     base = TranslationService(
         transport,
         prompt_builder=builder,
@@ -120,6 +124,28 @@ async def test_profile_glossary_and_cache_avoid_repeated_model_calls(tmp_path: P
     assert second.origins == ("automatic",)
     assert len(transport.prompts) == 1
     assert "フィクサー 翻译成 中间人" in transport.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_changed_profile_prompt_does_not_reuse_old_automatic_cache(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    transport = RecordingTransport()
+
+    await _service(transport, profile).translate(
+        TranslationBatch((SourceText("z", "first", 1, "待って。"),))
+    )
+    save_profile_custom_prompt(profile, "这是一款校园游戏。角色对话偏口语。")
+    updated = load_game_profile(config_path, _config(), "game")
+    outcome = await _service(transport, updated).translate(
+        TranslationBatch((SourceText("z", "second", 1, "待って。"),))
+    )
+
+    assert outcome.origins == ("model",)
+    assert len(transport.prompts) == 2
+    assert "这是一款校园游戏" in transport.prompts[1]
 
 
 @pytest.mark.asyncio

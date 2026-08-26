@@ -19,7 +19,11 @@ from game_screen_translator.config import (
 from game_screen_translator.live import runtime as live_runtime
 from game_screen_translator.live.runtime import LiveController
 from game_screen_translator.ocr.types import OcrText
-from game_screen_translator.profiles import create_game_profile
+from game_screen_translator.profiles import (
+    create_game_profile,
+    load_game_profile,
+    save_profile_custom_prompt,
+)
 from game_screen_translator.domain import (
     SourceText,
     TranslationBatch,
@@ -908,6 +912,59 @@ def test_live_translation_path_uses_profile_manual_correction(tmp_path: Path) ->
     assert translated.origins == ("manual",)
     controller.close()
     assert capture.closed
+
+
+def test_live_translation_path_includes_profile_custom_prompt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        )
+    )
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, config, "game")
+    save_profile_custom_prompt(profile, "这是一款黑色幽默游戏。角色对话偏口语。")
+    profile = load_game_profile(config_path, config, "game")
+    prompts = []
+
+    class FakeTransport:
+        def __init__(self, transport_config):
+            self.completion_durations = (0.01,)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def complete(self, prompt):
+            prompts.append(prompt)
+            return '<target><sn id="1">等等。</sn></target>'
+
+    monkeypatch.setattr(live_runtime, "OpenAICompatibleTransport", FakeTransport)
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+        profile=profile,
+    )
+
+    translated = controller._translate_blocking(
+        TranslationBatch((SourceText("live", "line", 1, "待って。"),)),
+        (),
+    )
+
+    assert [item.translated_text for item in translated.outcome.results] == ["等等。"]
+    assert "这是一款黑色幽默游戏" in prompts[0]
+    controller.close()
 
 
 def test_ocr_backlog_waits_for_cooldown_after_completion(monkeypatch) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass
@@ -37,7 +38,15 @@ def _one_line(value: str) -> str:
 @dataclass(frozen=True, slots=True)
 class HyMtPromptBuilder:
     target_language: str = "简体中文"
-    prompt_version: str = PROMPT_VERSION
+    custom_prompt: str = ""
+
+    @property
+    def prompt_version(self) -> str:
+        custom_prompt = self.custom_prompt.strip()
+        if not custom_prompt:
+            return PROMPT_VERSION
+        revision = hashlib.sha256(custom_prompt.encode("utf-8")).hexdigest()[:16]
+        return f"{PROMPT_VERSION}-custom-{revision}"
 
     def build(
         self,
@@ -47,6 +56,10 @@ class HyMtPromptBuilder:
         context: Sequence[ContextPair] = (),
     ) -> str:
         sections: list[str] = []
+
+        custom_prompt = self.custom_prompt.strip()
+        if custom_prompt:
+            sections.append(f"当前配置的补充说明：\n{custom_prompt}")
 
         if glossary:
             terminology = ["参考下面的固定翻译，必须优先使用这些术语："]

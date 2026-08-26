@@ -40,6 +40,22 @@ def test_prompt_uses_native_tags_and_escapes_source() -> None:
     assert "<target>" in prompt
 
 
+def test_profile_custom_prompt_is_included_and_revises_cache_contract() -> None:
+    plain_builder = HyMtPromptBuilder()
+    custom_builder = HyMtPromptBuilder(
+        custom_prompt="这是一款太空歌剧游戏。角色对话使用自然口语。"
+    )
+
+    prompt = custom_builder.build(_batch())
+
+    assert prompt.startswith("当前配置的补充说明：")
+    assert "这是一款太空歌剧游戏" in prompt
+    assert custom_builder.prompt_version != plain_builder.prompt_version
+    assert custom_builder.prompt_version == HyMtPromptBuilder(
+        custom_prompt="  这是一款太空歌剧游戏。角色对话使用自然口语。  "
+    ).prompt_version
+
+
 def test_parser_accepts_code_fence_and_preserves_requested_order() -> None:
     batch = _batch()
     first, second = (item.wire_id for item in batch.items)

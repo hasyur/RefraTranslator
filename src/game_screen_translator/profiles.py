@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import tomllib
+import unicodedata
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ from game_screen_translator.translation.cache import (
 
 
 PROFILE_VERSION = 1
+MAX_CUSTOM_PROMPT_CHARACTERS = 2_000
 _WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",
@@ -62,6 +64,35 @@ def validate_profile_id(profile_id: str) -> str:
     return value
 
 
+def profile_id_from_display_name(display_name: str) -> str:
+    """Derive a stable filesystem-safe internal ID from one visible name."""
+
+    name = display_name.strip()
+    if not name:
+        raise ProfileError("配置名称不能为空")
+    normalized = unicodedata.normalize("NFKC", name).casefold()
+    characters: list[str] = []
+    separator_pending = False
+    for character in normalized:
+        if character.isalnum() or character in {"-", "_"}:
+            if (
+                separator_pending
+                and characters
+                and characters[-1] not in {"-", "_"}
+            ):
+                characters.append("-")
+            characters.append(character)
+            separator_pending = False
+        else:
+            separator_pending = True
+
+    candidate = "".join(characters).strip("-_")[:80].rstrip("-_")
+    if not candidate or candidate.upper() in _WINDOWS_RESERVED_NAMES:
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+        candidate = f"profile-{digest}"
+    return validate_profile_id(candidate)
+
+
 def resolve_profiles_root(config_path: Path, config: AppConfig) -> Path:
     base = config_path.resolve().parent
     root = (base / config.profiles.root_dir).resolve()
@@ -80,6 +111,7 @@ class GameProfile:
     glossary: tuple[GlossaryEntry, ...]
     glossary_revision: str
     capture_settings: ProfileCaptureSettings
+    custom_prompt: str
     cache: TranslationCache
 
     @property
@@ -152,37 +184,96 @@ def _load_glossary(path: Path) -> tuple[tuple[GlossaryEntry, ...], str]:
     return tuple(entries), revision
 
 
-def _load_capture_settings(path: Path) -> ProfileCaptureSettings:
+def _normalize_custom_prompt(custom_prompt: str) -> str:
+    if not isinstance(custom_prompt, str):
+        raise ProfileError("配置提示词必须是字符串")
+    value = custom_prompt.strip()
+    if len(value) > MAX_CUSTOM_PROMPT_CHARACTERS:
+        raise ProfileError(
+            f"配置提示词不能超过 {MAX_CUSTOM_PROMPT_CHARACTERS} 个字符"
+        )
+    return value
+
+
+def _load_profile_settings(path: Path) -> tuple[ProfileCaptureSettings, str]:
     if not path.exists():
-        return ProfileCaptureSettings()
+        return ProfileCaptureSettings(), ""
     data = _read_toml(path, "Profile 设置")
-    unknown_root = set(data) - {"capture"}
+    unknown_root = set(data) - {"capture", "translation"}
     if unknown_root:
         raise ProfileError(f"settings.toml 包含未知字段：{sorted(unknown_root)}")
     capture = data.get("capture")
     if capture is None:
-        return ProfileCaptureSettings()
-    if not isinstance(capture, Mapping):
-        raise ProfileError("settings.toml 的 [capture] 必须是 TOML 表")
-    allowed = {"monitor_index", "left", "top", "width", "height"}
-    unknown = set(capture) - allowed
-    if unknown:
-        raise ProfileError(f"[capture] 包含未知字段：{sorted(unknown)}")
+        capture_settings = ProfileCaptureSettings()
+    else:
+        if not isinstance(capture, Mapping):
+            raise ProfileError("settings.toml 的 [capture] 必须是 TOML 表")
+        allowed = {"monitor_index", "left", "top", "width", "height"}
+        unknown = set(capture) - allowed
+        if unknown:
+            raise ProfileError(f"[capture] 包含未知字段：{sorted(unknown)}")
 
-    monitor_index = capture.get("monitor_index")
-    if monitor_index is not None and type(monitor_index) is not int:
-        raise ProfileError("capture.monitor_index 必须是整数")
-    region_keys = ("left", "top", "width", "height")
-    present = [key in capture for key in region_keys]
-    if any(present) and not all(present):
-        raise ProfileError("capture.left/top/width/height 必须同时提供")
-    region = None
-    if all(present):
-        raw_region = tuple(capture[key] for key in region_keys)
-        if any(type(value) is not int for value in raw_region):
-            raise ProfileError("Profile 捕获区域必须是整数")
-        region = raw_region
-    return ProfileCaptureSettings(monitor_index=monitor_index, region=region)
+        monitor_index = capture.get("monitor_index")
+        if monitor_index is not None and type(monitor_index) is not int:
+            raise ProfileError("capture.monitor_index 必须是整数")
+        region_keys = ("left", "top", "width", "height")
+        present = [key in capture for key in region_keys]
+        if any(present) and not all(present):
+            raise ProfileError("capture.left/top/width/height 必须同时提供")
+        region = None
+        if all(present):
+            raw_region = tuple(capture[key] for key in region_keys)
+            if any(type(value) is not int for value in raw_region):
+                raise ProfileError("Profile 捕获区域必须是整数")
+            region = raw_region
+        capture_settings = ProfileCaptureSettings(
+            monitor_index=monitor_index,
+            region=region,
+        )
+
+    translation = data.get("translation")
+    if translation is None:
+        custom_prompt = ""
+    else:
+        if not isinstance(translation, Mapping):
+            raise ProfileError("settings.toml 的 [translation] 必须是 TOML 表")
+        unknown = set(translation) - {"custom_prompt"}
+        if unknown:
+            raise ProfileError(f"[translation] 包含未知字段：{sorted(unknown)}")
+        custom_prompt = _normalize_custom_prompt(
+            translation.get("custom_prompt", "")
+        )
+    return capture_settings, custom_prompt
+
+
+def _serialize_profile_settings(
+    capture: ProfileCaptureSettings,
+    custom_prompt: str,
+) -> str:
+    lines = ["# 每个配置独立的捕获设置和翻译提示词。"]
+    if capture.monitor_index is not None or capture.region is not None:
+        lines.extend(("", "[capture]"))
+    if capture.monitor_index is not None:
+        lines.append(f"monitor_index = {capture.monitor_index}")
+    if capture.region is not None:
+        left, top, width, height = capture.region
+        lines.extend(
+            (
+                f"left = {left}",
+                f"top = {top}",
+                f"width = {width}",
+                f"height = {height}",
+            )
+        )
+    if custom_prompt:
+        lines.extend(
+            (
+                "",
+                "[translation]",
+                f"custom_prompt = {json.dumps(custom_prompt, ensure_ascii=False)}",
+            )
+        )
+    return "\n".join(lines) + "\n"
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -237,7 +328,7 @@ def load_game_profile(
     settings_path = directory / "settings.toml"
     if settings_path.exists() and settings_path.resolve().parent != directory:
         raise ProfileError("设置文件路径越出了当前游戏 Profile")
-    capture_settings = _load_capture_settings(settings_path)
+    capture_settings, custom_prompt = _load_profile_settings(settings_path)
     database_path = (directory / "translations.sqlite3").resolve()
     if database_path.parent != directory:
         raise ProfileError("翻译缓存路径越出了当前游戏 Profile")
@@ -249,6 +340,7 @@ def load_game_profile(
         glossary=glossary,
         glossary_revision=glossary_revision,
         capture_settings=capture_settings,
+        custom_prompt=custom_prompt,
         cache=cache,
     )
 
@@ -291,11 +383,45 @@ def create_game_profile(
     (directory / "profile.toml").write_text(manifest, encoding="utf-8")
     (directory / "glossary.toml").write_text(glossary, encoding="utf-8")
     (directory / "settings.toml").write_text(
-        "# 由图形化启动器保存每个游戏自己的显示器和字幕区域。\n",
+        "# 由图形化启动器保存当前配置的捕获设置和翻译提示词。\n",
         encoding="utf-8",
     )
     TranslationCache(directory / "translations.sqlite3")
     return load_game_profile(config_path, config, normalized_id)
+
+
+def create_named_game_profile(
+    config_path: Path,
+    config: AppConfig,
+    display_name: str,
+) -> GameProfile:
+    """Create a profile from one user-facing name and derive its internal ID."""
+
+    name = display_name.strip()
+    if not name:
+        raise ProfileError("配置名称不能为空")
+    existing_profiles = list_game_profiles(config_path, config)
+    if any(
+        profile.display_name.casefold() == name.casefold()
+        for profile in existing_profiles
+    ):
+        raise ProfileError(f"配置名称 {name!r} 已存在")
+
+    root = resolve_profiles_root(config_path, config)
+    base_id = profile_id_from_display_name(name)
+    profile_id = base_id
+    suffix_index = 2
+    while (root / profile_id).exists():
+        suffix = f"-{suffix_index}"
+        stem = base_id[: 80 - len(suffix)].rstrip("-_")
+        profile_id = f"{stem}{suffix}"
+        suffix_index += 1
+    return create_game_profile(
+        config_path,
+        config,
+        profile_id,
+        display_name=name,
+    )
 
 
 def list_game_profiles(config_path: Path, config: AppConfig) -> tuple[GameProfile, ...]:
@@ -318,22 +444,19 @@ def save_profile_capture_settings(
 ) -> None:
     path = profile.settings_path
     _ensure_profile_file(profile, path)
-    lines = ["# 每个游戏独立的屏幕捕获设置。"]
-    if settings.monitor_index is not None or settings.region is not None:
-        lines.extend(("", "[capture]"))
-    if settings.monitor_index is not None:
-        lines.append(f"monitor_index = {settings.monitor_index}")
-    if settings.region is not None:
-        left, top, width, height = settings.region
-        lines.extend(
-            (
-                f"left = {left}",
-                f"top = {top}",
-                f"width = {width}",
-                f"height = {height}",
-            )
-        )
-    _atomic_write_text(path, "\n".join(lines) + "\n")
+    _, custom_prompt = _load_profile_settings(path)
+    _atomic_write_text(path, _serialize_profile_settings(settings, custom_prompt))
+
+
+def save_profile_custom_prompt(profile: GameProfile, custom_prompt: str) -> None:
+    path = profile.settings_path
+    _ensure_profile_file(profile, path)
+    capture, _ = _load_profile_settings(path)
+    normalized_prompt = _normalize_custom_prompt(custom_prompt)
+    _atomic_write_text(
+        path,
+        _serialize_profile_settings(capture, normalized_prompt),
+    )
 
 
 def save_profile_glossary(

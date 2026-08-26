@@ -169,7 +169,10 @@ async def _translate(
     config = load_config(config_path)
     profile = _optional_profile(config_path, config, profile_id)
     async with OpenAICompatibleTransport(config.translation) as transport:
-        prompt_builder = HyMtPromptBuilder(config.translation.target_language)
+        prompt_builder = HyMtPromptBuilder(
+            config.translation.target_language,
+            custom_prompt=profile.custom_prompt if profile is not None else "",
+        )
         service = TranslationService(
             transport,
             prompt_builder=prompt_builder,
@@ -246,7 +249,10 @@ async def _preview(
         for index, observation in enumerate(observations)
     )
     async with OpenAICompatibleTransport(config.translation) as transport:
-        prompt_builder = HyMtPromptBuilder(config.translation.target_language)
+        prompt_builder = HyMtPromptBuilder(
+            config.translation.target_language,
+            custom_prompt=profile.custom_prompt if profile is not None else "",
+        )
         service = TranslationService(
             transport,
             prompt_builder=prompt_builder,

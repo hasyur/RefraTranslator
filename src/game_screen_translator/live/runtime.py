@@ -2145,7 +2145,12 @@ class LiveController:
         async def translate() -> tuple[CachedTranslationOutcome, float | None]:
             async with OpenAICompatibleTransport(self._config.translation) as transport:
                 prompt_builder = HyMtPromptBuilder(
-                    self._config.translation.target_language
+                    self._config.translation.target_language,
+                    custom_prompt=(
+                        self._profile.custom_prompt
+                        if self._profile is not None
+                        else ""
+                    ),
                 )
                 service = TranslationService(
                     transport,

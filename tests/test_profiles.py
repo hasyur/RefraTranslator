@@ -5,13 +5,17 @@ import pytest
 from game_screen_translator.config import AppConfig, LiveConfig, TranslationConfig
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.profiles import (
+    MAX_CUSTOM_PROMPT_CHARACTERS,
     ProfileCaptureSettings,
     ProfileError,
     apply_profile_capture_settings,
     create_game_profile,
+    create_named_game_profile,
     list_game_profiles,
     load_game_profile,
+    profile_id_from_display_name,
     save_profile_capture_settings,
+    save_profile_custom_prompt,
     save_profile_glossary,
     validate_profile_id,
 )
@@ -53,6 +57,23 @@ def test_create_and_load_isolated_game_profile(tmp_path: Path) -> None:
         ("フィクサー", "中间人")
     ]
     assert len(loaded.glossary_revision) == 64
+
+
+def test_visible_profile_name_derives_internal_id_and_handles_collisions(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+
+    first = create_named_game_profile(config_path, _config(), "赛博朋克 2077")
+    second = create_named_game_profile(config_path, _config(), "赛博朋克：2077")
+
+    assert first.display_name == "赛博朋克 2077"
+    assert first.profile_id == "赛博朋克-2077"
+    assert second.profile_id == "赛博朋克-2077-2"
+    assert profile_id_from_display_name(" Cyberpunk 2077 ") == "cyberpunk-2077"
+    assert profile_id_from_display_name("🎮").startswith("profile-")
+    with pytest.raises(ProfileError, match="已存在"):
+        create_named_game_profile(config_path, _config(), "赛博朋克 2077")
 
 
 @pytest.mark.parametrize(
@@ -112,6 +133,39 @@ def test_profile_capture_settings_override_only_saved_values(tmp_path: Path) -> 
         applied.height,
         applied.monitor_index,
     ) == (100, 700, 1800, 350, 1)
+
+
+def test_profile_custom_prompt_round_trips_and_survives_capture_updates(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    prompt = "这是一款近未来题材 RPG。\n角色对话偏口语。"
+
+    save_profile_custom_prompt(profile, prompt)
+    with_prompt = load_game_profile(config_path, _config(), "game")
+    assert with_prompt.custom_prompt == prompt
+
+    capture = ProfileCaptureSettings(monitor_index=1, region=(10, 20, 800, 300))
+    save_profile_capture_settings(with_prompt, capture)
+    loaded = load_game_profile(config_path, _config(), "game")
+    assert loaded.capture_settings == capture
+    assert loaded.custom_prompt == prompt
+
+    save_profile_custom_prompt(loaded, "")
+    cleared = load_game_profile(config_path, _config(), "game")
+    assert cleared.custom_prompt == ""
+    assert cleared.capture_settings == capture
+
+
+def test_profile_custom_prompt_has_a_bounded_size(tmp_path: Path) -> None:
+    profile = create_game_profile(tmp_path / "config.toml", _config(), "game")
+
+    with pytest.raises(ProfileError, match="不能超过"):
+        save_profile_custom_prompt(
+            profile,
+            "x" * (MAX_CUSTOM_PROMPT_CHARACTERS + 1),
+        )
 
 
 def test_gui_glossary_save_and_profile_listing(tmp_path: Path) -> None:
