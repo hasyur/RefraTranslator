@@ -30,6 +30,7 @@ def test_prompt_uses_native_tags_and_escapes_source() -> None:
         context=(ContextPair("仕事は片付いた。", "活儿已经处理完了。"),),
     )
 
+    assert "术语表中的固定译名必须原样使用" in prompt
     assert "フィクサー 翻译成 中间人" in prompt
     assert "仕事は片付いた。" in prompt
     assert "A &lt; B &amp; &quot;quoted&quot;" in prompt
@@ -38,6 +39,16 @@ def test_prompt_uses_native_tags_and_escapes_source() -> None:
     assert batch.items[0].wire_id not in prompt
     assert batch.items[1].wire_id not in prompt
     assert "<target>" in prompt
+
+
+def test_prompt_uses_short_katakana_translation_policy() -> None:
+    prompt = HyMtPromptBuilder(target_language="简体中文").build(_batch())
+
+    assert "片假名人名一律按日语读音音译成简体中文" in prompt
+    assert "禁止意译或保留原文" in prompt
+    assert "其他片假名词优先使用简体中文常用译名或意译" in prompt
+    assert "无法自然意译时才音译" in prompt
+    assert "相同原文始终使用相同译名" in prompt
 
 
 def test_profile_custom_prompt_is_included_and_revises_cache_contract() -> None:

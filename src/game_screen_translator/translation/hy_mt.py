@@ -10,7 +10,7 @@ from typing import Iterable, Sequence
 from game_screen_translator.domain import ContextPair, GlossaryEntry, TranslationBatch
 
 
-PROMPT_VERSION = "hy-mt1.5-batch-v2-short-ids"
+PROMPT_VERSION = "hy-mt1.5-batch-v3-katakana-policy"
 _CODE_FENCE_RE = re.compile(r"^\s*```(?:xml)?\s*(.*?)\s*```\s*$", re.DOTALL | re.IGNORECASE)
 _TARGET_RE = re.compile(r"<target(?:\s[^>]*)?>.*?</target\s*>", re.DOTALL | re.IGNORECASE)
 _SN_RE = re.compile(r"<sn\b[^>]*>.*?</sn\s*>", re.DOTALL | re.IGNORECASE)
@@ -62,7 +62,7 @@ class HyMtPromptBuilder:
             sections.append(f"当前配置的补充说明：\n{custom_prompt}")
 
         if glossary:
-            terminology = ["参考下面的固定翻译，必须优先使用这些术语："]
+            terminology = ["术语表中的固定译名必须原样使用："]
             terminology.extend(
                 f"{_one_line(entry.source)} 翻译成 {_one_line(entry.target)}"
                 for entry in glossary
@@ -86,6 +86,9 @@ class HyMtPromptBuilder:
 
         instruction = (
             f"参考上面的信息，把下面文本翻译成{self.target_language}。"
+            f"片假名人名一律按日语读音音译成{self.target_language}，禁止意译或保留原文；"
+            f"其他片假名词优先使用{self.target_language}常用译名或意译，"
+            "无法自然意译时才音译；相同原文始终使用相同译名。"
             "保留每个 <sn> 标签及其 id 属性和原有顺序，只翻译标签内的文字；"
             "id 是从 1 开始的连续短编号，请原样保留数字和两侧的双引号；"
             "用一个 <target> 根标签包住全部结果。"
