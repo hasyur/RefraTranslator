@@ -59,23 +59,26 @@ def test_engine_forces_project_local_model_cache(monkeypatch, tmp_path: Path) ->
             return ()
 
     monkeypatch.setitem(sys.modules, "paddleocr", SimpleNamespace(PaddleOCR=FakePaddleOcr))
+    monkeypatch.setattr(
+        paddle_module,
+        "validate_ocr_device",
+        lambda device: f"{device} · test runtime",
+    )
     for variable in (
         "PADDLE_PDX_CACHE_HOME",
         "PADDLE_PDX_MODEL_SOURCE",
         "PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK",
-        "PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT",
     ):
         monkeypatch.setenv(variable, "test-original")
 
     cache = tmp_path / "paddlex-cache"
-    engine = PaddleOcrEngine(cache_dir=cache, cpu_threads=2, detection_max_side=1280)
+    engine = PaddleOcrEngine(cache_dir=cache, detection_max_side=1280)
     frame = object()
     assert engine.recognize_frame(frame) == ()
 
     assert Path(os.environ["PADDLE_PDX_CACHE_HOME"]) == cache.resolve()
     assert os.environ["PADDLE_PDX_MODEL_SOURCE"] == "bos"
     assert os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] == "True"
-    assert os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] == "False"
     assert calls == [
         {
             "text_detection_model_name": "PP-OCRv6_small_det",
@@ -83,9 +86,7 @@ def test_engine_forces_project_local_model_cache(monkeypatch, tmp_path: Path) ->
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
             "use_textline_orientation": False,
-            "device": "cpu",
-            "enable_mkldnn": False,
-            "cpu_threads": 2,
+            "device": "gpu:0",
         }
     ]
     assert predict_calls == [
@@ -114,15 +115,34 @@ def test_validate_gpu_device_reports_runtime(monkeypatch) -> None:
     assert validate_ocr_device("gpu:1") == "gpu:1 · Paddle 3.3.1 · CUDA 12.9"
 
 
-def test_validate_gpu_device_rejects_cpu_paddle(monkeypatch) -> None:
+def test_validate_gpu_device_rejects_runtime_without_cuda(monkeypatch) -> None:
     fake_paddle = SimpleNamespace(
         device=SimpleNamespace(is_compiled_with_cuda=lambda: False),
     )
     monkeypatch.setitem(sys.modules, "paddle", fake_paddle)
     monkeypatch.setattr(paddle_module, "_configure_bundled_nvidia_dlls", lambda: ())
 
-    with pytest.raises(paddle_module.OcrDependencyError, match="CPU 版 Paddle"):
+    with pytest.raises(paddle_module.OcrDependencyError, match="不支持 CUDA"):
         validate_ocr_device("gpu:0")
+
+
+def test_validate_gpu_device_rejects_when_no_gpu_is_detected(monkeypatch) -> None:
+    fake_paddle = SimpleNamespace(
+        device=SimpleNamespace(
+            is_compiled_with_cuda=lambda: True,
+            cuda=SimpleNamespace(device_count=lambda: 0),
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "paddle", fake_paddle)
+    monkeypatch.setattr(paddle_module, "_configure_bundled_nvidia_dlls", lambda: ())
+
+    with pytest.raises(paddle_module.OcrDependencyError, match="只发现 0 张 GPU"):
+        validate_ocr_device("gpu:0")
+
+
+def test_validate_gpu_device_rejects_removed_cpu_device() -> None:
+    with pytest.raises(paddle_module.OcrDependencyError, match="仅支持 NVIDIA GPU"):
+        validate_ocr_device("cpu")
 
 
 def test_available_ocr_devices_lists_only_cuda_devices_seen_by_paddle(
@@ -145,17 +165,16 @@ def test_available_ocr_devices_lists_only_cuda_devices_seen_by_paddle(
     monkeypatch.setattr(paddle_module, "_configure_bundled_nvidia_dlls", lambda: ())
 
     assert available_ocr_devices() == (
-        ("cpu", "CPU"),
         ("gpu:0", "GPU 0 · NVIDIA GeForce RTX 4070 Laptop GPU"),
         ("gpu:1", "GPU 1 · NVIDIA RTX A2000"),
     )
 
 
-def test_available_ocr_devices_hides_gpu_choices_for_cpu_paddle(monkeypatch) -> None:
+def test_available_ocr_devices_is_empty_without_cuda_runtime(monkeypatch) -> None:
     fake_paddle = SimpleNamespace(
         device=SimpleNamespace(is_compiled_with_cuda=lambda: False),
     )
     monkeypatch.setitem(sys.modules, "paddle", fake_paddle)
     monkeypatch.setattr(paddle_module, "_configure_bundled_nvidia_dlls", lambda: ())
 
-    assert available_ocr_devices() == (("cpu", "CPU"),)
+    assert available_ocr_devices() == ()

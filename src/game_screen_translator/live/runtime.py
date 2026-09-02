@@ -570,11 +570,7 @@ class LiveController:
             region_hint = " · 当前为整屏 OCR，框选字幕区域可继续降载"
         else:
             region_hint = ""
-        ocr_runtime = (
-            f"{self._config.ocr.device} / {self._config.ocr.cpu_threads} 线程"
-            if self._config.ocr.device == "cpu"
-            else self._config.ocr.device
-        )
+        ocr_runtime = self._config.ocr.device
         scheduling = (
             "实验性动态 ROI：热图 "
             f"{self._config.live.change_poll_fps} Hz / 画面响应目标 "
@@ -2736,7 +2732,6 @@ def run_live(
         recognition_model=config.ocr.recognition_model,
         model_source=config.ocr.model_source,
         device=config.ocr.device,
-        cpu_threads=config.ocr.cpu_threads,
         detection_max_side=config.ocr.detection_max_side,
     )
     _live_message(f"OCR ready: {ocr.runtime_description}")

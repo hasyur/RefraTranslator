@@ -49,24 +49,24 @@ def _configure_bundled_nvidia_dlls() -> tuple[Path, ...]:
 def validate_ocr_device(device: str) -> str:
     """Validate a configured OCR device and return a short runtime description."""
     normalized = device.strip().lower()
-    if normalized == "cpu":
-        return "CPU"
     match = re.fullmatch(r"gpu:(\d+)", normalized)
     if match is None:
-        raise OcrDependencyError("OCR 设备必须是 cpu 或 gpu:N（例如 gpu:1）")
+        raise OcrDependencyError(
+            "OCR 仅支持 NVIDIA GPU，设备必须是 gpu:N（例如 gpu:0）"
+        )
 
     _configure_bundled_nvidia_dlls()
     try:
         import paddle
     except ImportError as exc:
         raise OcrDependencyError(
-            "尚未安装 Paddle GPU 运行时。请运行："
-            ".\\bootstrap.ps1 -WithGpuOcr -WithGui"
+            "尚未安装 NVIDIA GPU OCR 运行时。请运行："
+            ".\\bootstrap.ps1 -WithGui"
         ) from exc
     if not paddle.device.is_compiled_with_cuda():
         raise OcrDependencyError(
-            "当前是 CPU 版 Paddle，不能使用 GPU OCR。请运行："
-            ".\\bootstrap.ps1 -WithGpuOcr -WithGui"
+            "当前 Paddle 运行时不支持 CUDA。请运行："
+            ".\\bootstrap.ps1 -WithGui"
         )
     index = int(match.group(1))
     count = int(paddle.device.cuda.device_count())
@@ -79,8 +79,8 @@ def validate_ocr_device(device: str) -> str:
 
 
 def available_ocr_devices() -> tuple[tuple[str, str], ...]:
-    """Return CPU plus CUDA devices that the installed Paddle runtime can use."""
-    devices: list[tuple[str, str]] = [("cpu", "CPU")]
+    """Return NVIDIA CUDA devices that the installed Paddle runtime can use."""
+    devices: list[tuple[str, str]] = []
     _configure_bundled_nvidia_dlls()
     try:
         import paddle
@@ -168,8 +168,7 @@ class PaddleOcrEngine:
         detection_model: str = "PP-OCRv6_small_det",
         recognition_model: str = "PP-OCRv6_small_rec",
         model_source: str = "bos",
-        device: str = "cpu",
-        cpu_threads: int = 2,
+        device: str = "gpu:0",
         detection_max_side: int = 1280,
     ) -> None:
         device = device.strip().lower()
@@ -180,17 +179,13 @@ class PaddleOcrEngine:
         os.environ["PADDLE_PDX_CACHE_HOME"] = str(isolated_cache)
         os.environ["PADDLE_PDX_MODEL_SOURCE"] = model_source
         os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
-        # Paddle 3.3.1 on Windows currently fails while converting oneDNN PIR
-        # array attributes for PP-OCRv6. The plain CPU executor is stable.
-        os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "False"
         runtime_description = validate_ocr_device(device)
         try:
             from paddleocr import PaddleOCR
         except ImportError as exc:
-            install_switch = "-WithGpuOcr" if device.startswith("gpu:") else "-WithOcr"
             raise OcrDependencyError(
                 "尚未安装 OCR 可选依赖。请运行："
-                f".\\bootstrap.ps1 {install_switch}"
+                ".\\bootstrap.ps1 -WithGui"
             ) from exc
 
         self._min_score = min_score
@@ -205,18 +200,12 @@ class PaddleOcrEngine:
                 use_doc_unwarping=False,
                 use_textline_orientation=False,
                 device=device,
-                enable_mkldnn=False,
-                cpu_threads=cpu_threads,
             )
         except Exception as exc:
-            gpu_hint = (
-                "；可重新运行 .\\bootstrap.ps1 -WithGpuOcr -WithGui 补齐运行库"
-                if device.startswith("gpu:")
-                else ""
-            )
             raise OcrDependencyError(
                 f"无法初始化 PaddleOCR（设备={device}，语言={language}，"
-                f"检测={detection_model}，识别={recognition_model}）：{exc}{gpu_hint}"
+                f"检测={detection_model}，识别={recognition_model}）：{exc}"
+                "；可重新运行 .\\bootstrap.ps1 -WithGui 补齐运行库"
             ) from exc
 
     def recognize(self, image_path: str | Path) -> tuple[OcrText, ...]:

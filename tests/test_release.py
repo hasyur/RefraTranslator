@@ -44,7 +44,7 @@ def test_public_config_template_is_valid() -> None:
     config = load_config(PROJECT_ROOT / "config.example.toml")
 
     assert config.translation.base_url == "http://127.0.0.1:1234/v1"
-    assert config.ocr.device == "cpu"
+    assert config.ocr.device == "gpu:0"
 
 
 def test_public_endpoint_examples_do_not_expose_private_lan_addresses() -> None:
@@ -68,6 +68,11 @@ def test_release_metadata_declares_and_bundles_notices() -> None:
     assert (PROJECT_ROOT / "LICENSE").is_file()
     assert (PROJECT_ROOT / "THIRD_PARTY_NOTICES.md").is_file()
     assert "dxcam[winrt]>=0.3,<0.4" in project["optional-dependencies"]["gui"]
+    assert "ocr" not in project["optional-dependencies"]
+    assert any(
+        dependency.startswith("paddlepaddle-gpu")
+        for dependency in project["optional-dependencies"]["ocr-gpu"]
+    )
 
 
 def test_source_release_manifest_includes_first_run_files() -> None:
@@ -84,15 +89,15 @@ def test_bootstrap_script_is_ascii_for_windows_powershell_51() -> None:
     assert script.decode("ascii")
 
 
-def test_bootstrap_gui_install_prompts_for_ocr_device_with_nvidia_default() -> None:
+def test_bootstrap_gui_install_uses_nvidia_gpu_without_device_prompt() -> None:
     script = (PROJECT_ROOT / "bootstrap.ps1").read_text(encoding="ascii")
 
-    assert '[ValidateSet("CPU", "NVIDIA", "None")]' in script
-    assert 'elseif ($WithGui)' in script
-    assert '$ocrInstallDevice = Read-OcrDeviceChoice' in script
-    assert 'Write-Host "  [1] NVIDIA GPU (default)"' in script
-    assert 'if ([string]::IsNullOrWhiteSpace($choice)) { return "nvidia" }' in script
-    assert 'Write-Host "  [2] CPU"' in script
+    assert "[switch]$WithGpuOcr" in script
+    assert "$installGpuOcr = $WithGui -or $WithGpuOcr" in script
+    assert 'Write-Host "OCR installation selected: NVIDIA GPU ($GpuCuda)"' in script
+    assert "Read-OcrDeviceChoice" not in script
+    assert "[switch]$WithOcr" not in script
+    assert "$OcrDevice" not in script
 
 
 def test_bootstrap_rejects_max_path_unsafe_ocr_install_location() -> None:
@@ -101,10 +106,19 @@ def test_bootstrap_rejects_max_path_unsafe_ocr_install_location() -> None:
     assert "function Assert-OcrInstallPathLength" in script
     assert "predicated_tile_access_iterator_residual_last.h" in script
     assert "if ($paddleDeepPath.Length -le 259)" in script
-    assert "if ($installCpuOcr -or $installGpuOcr)" in script
+    assert "if ($installGpuOcr)" in script
     path_check_call = "Assert-OcrInstallPathLength -ProjectRoot $projectRoot"
     venv_creation = "if (-not (Test-Path -LiteralPath $venvPython))"
     assert script.index(path_check_call) < script.index(venv_creation)
+
+
+def test_bootstrap_migrates_legacy_ocr_config_to_nvidia_gpu() -> None:
+    script = (PROJECT_ROOT / "bootstrap.ps1").read_text(encoding="ascii")
+
+    assert "function Update-NvidiaOcrConfig" in script
+    assert "cpu_threads" in script
+    assert 'device = `"gpu:0`"' in script
+    assert "Update-NvidiaOcrConfig -ConfigPath $localConfig" in script
 
 
 def test_bootstrap_removes_only_pip_cache_after_success_unless_kept() -> None:

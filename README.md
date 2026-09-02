@@ -7,7 +7,7 @@ RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具
 ## 主要功能
 
 - 图形化配置 API 地址、API Key、模型、OCR 设备、字幕区域和每游戏 Profile；
-- 支持 CPU 与 NVIDIA GPU OCR，翻译并发数可调；
+- 使用 NVIDIA GPU 加速 OCR，翻译并发数可调；
 - 多行文字默认由快速规则链分组，仅在局部断链、候选边近似平局、菜单/句子冲突时排队调用 LLM 仲裁；
 - 每个配置独立保存补充提示词、术语表、人工修订和翻译缓存；
 - 原文字区域可选择“黑化模糊”或“仅模糊”，覆盖层鼠标穿透且不会被再次 OCR；
@@ -20,9 +20,10 @@ RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具
 
 - 64 位 Windows 10 或 Windows 11；
 - 64 位 Python 3.11、3.12 或 3.13，并可在终端运行 `python`；
+- 支持 CUDA 的 NVIDIA GPU，并安装可用的 NVIDIA 驱动；
 - 一个提供 `/v1/models` 和 `/v1/chat/completions` 的 OpenAI-compatible 翻译服务。
 
-下载或克隆源码，并放到较短的目录（例如 `C:\RefraTranslator`）；不要让 GitHub ZIP 的长目录名重复嵌套，Paddle 在 Windows 下包含很深的文件路径。然后双击 `install.bat`。安装器会询问 OCR 使用 NVIDIA GPU（默认）还是 CPU。
+下载或克隆源码，并放到较短的目录（例如 `C:\RefraTranslator`）；不要让 GitHub ZIP 的长目录名重复嵌套，Paddle 在 Windows 下包含很深的文件路径。然后双击 `install.bat`。安装器会直接安装 NVIDIA GPU OCR 运行时。
 
 所有 Python 包都安装到项目内的 `.venv`，不会污染系统环境；首次使用 GPU OCR 会下载数 GB 的运行库。
 
@@ -61,14 +62,10 @@ git clone https://github.com/hasyur/RefraTranslator.git C:\RefraTranslator
 
 更新器发现非 `main`/旧版 `master` 分支、detached HEAD 或尚未提交的源码改动时会安全停止，不会覆盖本机数据。
 
-也可以显式选择安装类型：
+默认安装 CUDA 12.9 运行时；需要匹配其他驱动环境时，可以显式指定受支持的 CUDA 包：
 
 ```powershell
-# CPU OCR
-.\bootstrap.ps1 -WithGui -OcrDevice CPU
-
-# NVIDIA GPU OCR
-.\bootstrap.ps1 -WithGui -OcrDevice NVIDIA
+.\bootstrap.ps1 -WithGui -GpuCuda cu126
 ```
 
 ## 使用建议
@@ -104,7 +101,7 @@ git clone https://github.com/hasyur/RefraTranslator.git C:\RefraTranslator
 安装开发环境并运行离线测试：
 
 ```powershell
-.\bootstrap.ps1 -WithDev -WithGui -OcrDevice None
+.\bootstrap.ps1 -WithDev -WithGui
 .\.venv\Scripts\python.exe -m pytest
 ```
 
@@ -115,7 +112,7 @@ GitHub Actions 会在 Python 3.11、3.12 和 3.13 上运行离线测试，不会
 ## 当前限制
 
 - 每次运行只有一个捕获区域，游戏窗口移动后需要重新框选；
-- GPU OCR 目前仅支持 NVIDIA，其他显卡使用 CPU；
+- OCR 仅支持 NVIDIA GPU，没有可用 NVIDIA GPU 时无法启动实时翻译；
 - 动态复杂背景可能使实验性 ROI 回退到整帧 OCR；
 - 项目仍处于 Alpha 阶段，建议先在非关键环境测试。
 

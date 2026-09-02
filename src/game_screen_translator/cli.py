@@ -208,7 +208,6 @@ async def _preview(
         recognition_model=config.ocr.recognition_model,
         model_source=config.ocr.model_source,
         device=config.ocr.device,
-        cpu_threads=config.ocr.cpu_threads,
         detection_max_side=config.ocr.detection_max_side,
     )
     raw_observations = engine.recognize(image_path)

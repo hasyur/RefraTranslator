@@ -187,8 +187,6 @@ def _install_ui_font(app: QApplication, config: AppConfig, config_path: Path) ->
 
 def _validate_ocr_device_isolated(device: str) -> str:
     """Probe Paddle in a short-lived process so the launcher keeps no GPU runtime."""
-    if device == "cpu":
-        return "CPU"
     probe = (
         "import sys; "
         "from game_screen_translator.ocr.paddle import validate_ocr_device; "
@@ -238,16 +236,12 @@ def _parse_ocr_device_probe_output(output: str) -> tuple[tuple[str, str], ...]:
         device, label = item
         if not isinstance(device, str) or not isinstance(label, str):
             raise RuntimeError("OCR 硬件检测返回了无效设备")
-        if device != "cpu" and not (
-            device.startswith("gpu:") and device[4:].isdigit()
-        ):
+        if not (device.startswith("gpu:") and device[4:].isdigit()):
             raise RuntimeError(f"OCR 硬件检测返回了未知设备：{device}")
         if not label.strip() or device in seen:
             continue
         devices.append((device, label.strip()))
         seen.add(device)
-    if "cpu" not in seen:
-        devices.insert(0, ("cpu", "CPU"))
     return tuple(devices)
 
 
@@ -666,18 +660,14 @@ class LauncherWindow(QMainWindow):
         ocr_form.setHorizontalSpacing(14)
         ocr_form.setVerticalSpacing(10)
         self.ocr_device_combo = QComboBox()
-        self.ocr_device_combo.addItem("CPU", "cpu")
         configured_device = self._config.ocr.device
-        device_index = self.ocr_device_combo.findData(configured_device)
-        if device_index < 0:
-            self.ocr_device_combo.addItem(
-                f"{configured_device}（正在检测实际硬件……）",
-                configured_device,
-            )
-            device_index = self.ocr_device_combo.count() - 1
-        self.ocr_device_combo.setCurrentIndex(device_index)
+        self.ocr_device_combo.addItem(
+            f"{configured_device}（正在检测 NVIDIA GPU……）",
+            configured_device,
+        )
+        self.ocr_device_combo.setCurrentIndex(0)
         self.ocr_device_combo.setToolTip(
-            "正在后台检测当前隔离环境中 Paddle 实际可用的 OCR 硬件；"
+            "正在后台检测当前隔离环境中 Paddle 实际可用的 NVIDIA GPU；"
             "启动实时翻译时仍会再次隔离校验。"
         )
         self.ocr_device_combo.currentIndexChanged.connect(
@@ -1052,7 +1042,7 @@ class LauncherWindow(QMainWindow):
             )
         except OSError as exc:
             self._set_ocr_device_choices(
-                (("cpu", "CPU"),),
+                (),
                 error=f"无法启动硬件检测：{exc}",
             )
             return
@@ -1076,7 +1066,7 @@ class LauncherWindow(QMainWindow):
             self._ocr_device_probe_started_at = None
             self._ocr_device_probe_monitor.stop()
             self._set_ocr_device_choices(
-                (("cpu", "CPU"),),
+                (),
                 error="硬件检测超过 20 秒，已停止",
             )
             return
@@ -1093,7 +1083,7 @@ class LauncherWindow(QMainWindow):
             devices = _parse_ocr_device_probe_output(output)
         except (json.JSONDecodeError, RuntimeError, ValueError) as exc:
             self._set_ocr_device_choices(
-                (("cpu", "CPU"),),
+                (),
                 error=str(exc),
             )
             return
@@ -1129,18 +1119,20 @@ class LauncherWindow(QMainWindow):
         if error:
             self.ocr_device_combo.setToolTip(
                 f"OCR 硬件检测失败：{error}\n"
-                "当前保留 CPU 与原配置；启动实时翻译时会再次隔离校验。"
+                "当前保留原配置；启动实时翻译时会再次隔离校验 NVIDIA GPU。"
             )
         else:
             self.ocr_device_combo.setToolTip(
-                "仅列出当前隔离环境中 Paddle 实际可用的 CPU 与 NVIDIA GPU；"
+                "仅列出当前隔离环境中 Paddle 实际可用的 NVIDIA GPU；"
                 "启动实时翻译时仍会再次隔离校验。"
             )
         if unavailable:
-            self.statusBar().showMessage(
-                f"当前配置的 OCR 设备 {current} 未被 Paddle 检测到，请选择可用硬件",
-                10000,
+            message = (
+                "未检测到可用的 NVIDIA GPU，无法启动实时翻译"
+                if not devices and not error
+                else f"当前配置的 OCR 设备 {current} 未被 Paddle 检测到，请选择可用硬件"
             )
+            self.statusBar().showMessage(message, 10000)
         self._update_ocr_status_from_selection(
             tone="error" if error else ("warning" if unavailable else "success")
         )
@@ -1172,9 +1164,7 @@ class LauncherWindow(QMainWindow):
         ):
             return
         device = self.ocr_device_combo.currentData()
-        if device == "cpu":
-            short_label = "CPU"
-        elif isinstance(device, str) and device.startswith("gpu:"):
+        if isinstance(device, str) and device.startswith("gpu:"):
             short_label = f"GPU {device.removeprefix('gpu:')}"
         else:
             short_label = "未选择"

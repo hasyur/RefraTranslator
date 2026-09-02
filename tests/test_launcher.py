@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent
@@ -86,7 +88,7 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert "REFRA_TRANSLATOR_API_KEY" in window.api_key_edit.placeholderText()
     assert window.model_combo.currentText() == "hy-mt1.5-7b"
     assert window.max_concurrency_spin.value() == 2
-    assert window.ocr_device_combo.currentData() == "cpu"
+    assert window.ocr_device_combo.currentData() == "gpu:0"
     assert window.ocr_filter_checkbox.isChecked()
     assert window.ocr_merge_checkbox.isChecked()
     assert window.blur_mode_combo.currentData() == "dark_blur"
@@ -235,6 +237,11 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
         return FakeProcess()
 
     monkeypatch.setattr(launcher_module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        launcher_module,
+        "_validate_ocr_device_isolated",
+        lambda device: f"{device} · test runtime",
+    )
     monkeypatch.setattr(window, "_selected_display_long_side", lambda: 2560)
     window.detection_quality_slider.setValue(0)
     window._refresh_detection_quality_label()
@@ -276,7 +283,7 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.translation.api_key == "launcher-secret"
     assert saved.translation.model == "alternate-model"
     assert saved.translation.max_concurrency == 6
-    assert saved.ocr.device == "cpu"
+    assert saved.ocr.device == "gpu:0"
     assert saved.ocr.detection_max_side == 960
     assert saved.live.settle_rescan_ms == 800
     assert saved.live.idle_rescan_ms == 4000
@@ -666,28 +673,48 @@ def test_launcher_lists_only_gpu_devices_reported_by_paddle(tmp_path: Path) -> N
 
     window._set_ocr_device_choices(
         (
-            ("cpu", "CPU"),
             ("gpu:0", "GPU 0 · NVIDIA GeForce RTX 4070 Laptop GPU"),
         )
     )
 
-    assert window.ocr_device_combo.currentData() == "cpu"
+    assert window.ocr_device_combo.currentData() == "gpu:0"
     assert window.ocr_device_combo.findData("gpu:0") >= 0
     assert window.ocr_device_combo.findData("gpu:1") < 0
-    assert "RTX 4070 Laptop GPU" in window.ocr_device_combo.itemText(1)
+    assert "RTX 4070 Laptop GPU" in window.ocr_device_combo.itemText(0)
     window.close()
     app.processEvents()
 
 
 def test_ocr_device_probe_parser_ignores_paddle_diagnostics() -> None:
     output = """Paddle diagnostic line
-REFRA_OCR_DEVICES=[[\"cpu\", \"CPU\"], [\"gpu:0\", \"GPU 0 · NVIDIA RTX\"]]
+REFRA_OCR_DEVICES=[[\"gpu:0\", \"GPU 0 · NVIDIA RTX\"]]
 """
 
     assert launcher_module._parse_ocr_device_probe_output(output) == (
-        ("cpu", "CPU"),
         ("gpu:0", "GPU 0 · NVIDIA RTX"),
     )
+
+
+def test_ocr_device_probe_parser_rejects_removed_cpu_device() -> None:
+    output = 'REFRA_OCR_DEVICES=[["cpu", "CPU"]]'
+
+    with pytest.raises(RuntimeError, match="未知设备"):
+        launcher_module._parse_ocr_device_probe_output(output)
+
+
+def test_launcher_reports_when_no_nvidia_gpu_is_available(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+
+    window._set_ocr_device_choices(())
+
+    assert window.ocr_device_combo.currentData() == "gpu:0"
+    assert "当前不可用" in window.ocr_device_combo.currentText()
+    assert "未检测到可用的 NVIDIA GPU" in window.statusBar().currentMessage()
+    window.close()
+    app.processEvents()
 
 
 def test_light_theme_checkbox_uses_a_contrasting_checked_indicator() -> None:

@@ -82,8 +82,7 @@ class OcrConfig:
     detection_model: str = "PP-OCRv6_small_det"
     recognition_model: str = "PP-OCRv6_small_rec"
     model_source: str = "bos"
-    device: str = "cpu"
-    cpu_threads: int = 2
+    device: str = "gpu:0"
     detection_max_side: int = 1280
     text_filter_enabled: bool = True
     text_merge_enabled: bool = True
@@ -102,10 +101,10 @@ class OcrConfig:
             raise ConfigError("OCR 检测和识别模型名称均不能为空")
         if self.model_source not in {"bos", "huggingface", "modelscope", "aistudio"}:
             raise ConfigError("ocr.model_source 必须是 bos/huggingface/modelscope/aistudio")
-        if re.fullmatch(r"(?:cpu|gpu:\d+)", self.device) is None:
-            raise ConfigError("ocr.device 必须是 cpu 或 gpu:N（例如 gpu:1）")
-        if not 1 <= self.cpu_threads <= 32:
-            raise ConfigError("ocr.cpu_threads 必须在 1 到 32 之间")
+        if re.fullmatch(r"gpu:\d+", self.device) is None:
+            raise ConfigError(
+                "ocr.device 仅支持 NVIDIA GPU，必须是 gpu:N（例如 gpu:0）"
+            )
         if not 320 <= self.detection_max_side <= 4096:
             raise ConfigError("ocr.detection_max_side 必须在 320 到 4096 之间")
         for key, value in (

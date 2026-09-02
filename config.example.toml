@@ -21,10 +21,8 @@ cache_dir = ".cache/paddlex"
 detection_model = "PP-OCRv6_small_det"
 recognition_model = "PP-OCRv6_small_rec"
 model_source = "bos"
-# cpu 或 gpu:N；例如第二张显卡使用 gpu:1。
-device = "cpu"
-# 限制 PaddleOCR 并行线程，避免与游戏争抢全部 CPU 核心。
-cpu_threads = 2
+# 仅支持 NVIDIA GPU；例如第二张显卡使用 gpu:1。
+device = "gpu:0"
 # 整屏输入会在检测阶段等比缩小，OCR 坐标仍会还原到原始画面。
 detection_max_side = 1280
 # OCR 后、稳定跟踪和 LLM 前过滤图标、数字及非源语言文字；也可在启动器中切换。

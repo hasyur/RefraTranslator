@@ -43,8 +43,7 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.ocr.cache_dir == ".cache/paddlex"
     assert config.ocr.detection_model == "PP-OCRv6_small_det"
     assert config.ocr.recognition_model == "PP-OCRv6_small_rec"
-    assert config.ocr.device == "cpu"
-    assert config.ocr.cpu_threads == 2
+    assert config.ocr.device == "gpu:0"
     assert config.ocr.detection_max_side == 1280
     assert config.ocr.text_filter_enabled is True
     assert config.ocr.text_merge_enabled is True
@@ -121,7 +120,7 @@ def test_save_runtime_selection_can_clear_explicit_api_key(
         base_url="http://127.0.0.1:1234/v1",
         model="hy-mt1.5-7b",
         api_key="",
-        ocr_device="cpu",
+        ocr_device="gpu:0",
     )
 
     assert saved.translation.api_key == ""
@@ -155,11 +154,11 @@ def test_profile_root_must_stay_below_config_directory(tmp_path: Path) -> None:
         load_config(path)
 
 
-def test_load_config_rejects_excessive_ocr_threads(tmp_path: Path) -> None:
+def test_load_config_rejects_removed_cpu_threads_option(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
-    _write(path, "\n[ocr]\ncpu_threads=64\n")
+    _write(path, "\n[ocr]\ncpu_threads=2\n")
 
-    with pytest.raises(ConfigError, match="cpu_threads"):
+    with pytest.raises(ConfigError, match="未知字段"):
         load_config(path)
 
 
@@ -185,6 +184,14 @@ def test_load_config_rejects_invalid_ocr_device(tmp_path: Path) -> None:
     _write(path, "\n[ocr]\ndevice='cuda'\n")
 
     with pytest.raises(ConfigError, match="ocr.device"):
+        load_config(path)
+
+
+def test_load_config_rejects_removed_cpu_ocr_device(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, "\n[ocr]\ndevice='cpu'\n")
+
+    with pytest.raises(ConfigError, match="仅支持 NVIDIA GPU"):
         load_config(path)
 
 
@@ -412,9 +419,9 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         path,
         base_url="http://gpu.test/v1",
         model="small-model",
-        ocr_device="cpu",
+        ocr_device="gpu:0",
     )
-    assert saved.ocr.device == "cpu"
+    assert saved.ocr.device == "gpu:0"
     assert saved.translation.api_key == 'secret-"quoted"'
     assert saved.ocr.detection_max_side == 960
     assert saved.ocr.text_filter_enabled is False
@@ -465,7 +472,7 @@ def test_save_runtime_selection_inserts_and_updates_ocr_device_atomically(
         path,
         base_url="http://gpu.test/v1",
         model="small-model",
-        ocr_device="cpu",
+        ocr_device="gpu:0",
         ocr_text_filter_enabled=True,
         ocr_text_merge_enabled=True,
     )
@@ -495,7 +502,7 @@ browser_overlay_port = 49001
         path,
         base_url="http://127.0.0.1:1234/v1",
         model="hy-mt1.5-7b",
-        ocr_device="cpu",
+        ocr_device="gpu:0",
         recording_browser_overlay_enabled=False,
         recording_browser_overlay_port=49002,
     )
@@ -532,7 +539,7 @@ dynamic_roi_max_coalesce_ms = 333
         path,
         base_url="http://127.0.0.1:1234/v1",
         model="hy-mt1.5-7b",
-        ocr_device="cpu",
+        ocr_device="gpu:0",
         ocr_cooldown_ms=0,
         settle_rescan_ms=900,
         idle_rescan_ms=5000,
@@ -580,10 +587,10 @@ def test_save_runtime_selection_adds_device_to_existing_ocr_section(
         path,
         base_url="http://127.0.0.1:1234/v1",
         model="hy-mt1.5-7b",
-        ocr_device="gpu:0",
+        ocr_device="gpu:1",
     )
 
-    assert saved.ocr.device == "gpu:0"
+    assert saved.ocr.device == "gpu:1"
     assert saved.live.capture_fps == 12
     assert path.read_text(encoding="utf-8").count("device =") == 1
 
@@ -616,7 +623,7 @@ def test_save_runtime_selection_rejects_non_boolean_filter_without_writing(
             path,
             base_url="http://gpu.test/v1",
             model="model",
-            ocr_device="cpu",
+            ocr_device="gpu:0",
             ocr_text_filter_enabled="no",  # type: ignore[arg-type]
         )
 
@@ -635,7 +642,7 @@ def test_save_runtime_selection_rejects_non_boolean_merge_without_writing(
             path,
             base_url="http://gpu.test/v1",
             model="model",
-            ocr_device="cpu",
+            ocr_device="gpu:0",
             ocr_text_merge_enabled="no",  # type: ignore[arg-type]
         )
 
@@ -654,7 +661,7 @@ def test_save_runtime_selection_rejects_invalid_overlay_opacity_without_writing(
             path,
             base_url="http://gpu.test/v1",
             model="model",
-            ocr_device="cpu",
+            ocr_device="gpu:0",
             preview_overlay_opacity=1.1,
         )
 
