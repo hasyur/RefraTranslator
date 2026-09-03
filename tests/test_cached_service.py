@@ -20,6 +20,7 @@ from game_screen_translator.profiles import (
     load_game_profile,
     save_profile_custom_prompt,
 )
+from game_screen_translator.translation.cache import CacheEnvironment
 from game_screen_translator.translation.cached import CachedTranslationService
 from game_screen_translator.translation.hy_mt import HyMtPromptBuilder
 from game_screen_translator.translation.service import TranslationService
@@ -35,6 +36,16 @@ class RecordingTransport:
         return "<target>" + "".join(
             f'<sn id="{wire_id}">模型译文</sn>' for wire_id in wire_ids
         ) + "</target>"
+
+
+class ScriptedTransport:
+    def __init__(self, *responses: str) -> None:
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+
+    async def complete(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return self.responses.pop(0)
 
 
 class ControlledTransport:
@@ -345,3 +356,113 @@ async def test_inflight_result_survives_a_stale_owner_for_current_waiter(
     ]
     assert current_outcome.origins == ("inflight",)
     assert profile.cache.inflight_count == 0
+
+
+@pytest.mark.asyncio
+async def test_source_equal_retry_result_is_not_written_to_automatic_cache(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    response = '<target><sn id="1">Please wait.</sn></target>'
+    transport = ScriptedTransport(response, response, response, response)
+    service = _service(transport, profile)
+
+    first = await service.translate(
+        TranslationBatch((SourceText("z", "first", 1, "Please wait."),))
+    )
+    second = await service.translate(
+        TranslationBatch((SourceText("z", "second", 1, "Please wait."),))
+    )
+
+    assert [item.translated_text for item in first.outcome.results] == ["Please wait."]
+    assert [item.translated_text for item in second.outcome.results] == ["Please wait."]
+    assert first.origins == ("model",)
+    assert second.origins == ("model",)
+    assert len(transport.prompts) == 4
+    assert profile.cache.stats().automatic_entries == 0
+
+
+@pytest.mark.asyncio
+async def test_existing_source_equal_cache_is_removed_without_invalidating_good_cache(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    builder = HyMtPromptBuilder(custom_prompt=profile.custom_prompt)
+    environment = CacheEnvironment(
+        profile_id=profile.profile_id,
+        source_language="japan",
+        target_language="简体中文",
+        model="hy-mt1.5-7b",
+        prompt_version=builder.prompt_version,
+        glossary_revision=profile.glossary_revision,
+    )
+    profile.cache.store_automatic(
+        "Please wait.",
+        "Please wait.",
+        environment,
+        (),
+    )
+    profile.cache.store_automatic(
+        "Restart",
+        "重新开始",
+        environment,
+        (),
+    )
+    transport = ScriptedTransport(
+        '<target><sn id="1">请稍等。</sn></target>',
+    )
+    service = _service(transport, profile)
+
+    repaired = await service.translate(
+        TranslationBatch((SourceText("z", "first", 1, "Please wait."),))
+    )
+    preserved = await service.translate(
+        TranslationBatch((SourceText("z", "second", 1, "Restart"),))
+    )
+
+    assert [item.translated_text for item in repaired.outcome.results] == ["请稍等。"]
+    assert [item.translated_text for item in preserved.outcome.results] == ["重新开始"]
+    assert repaired.origins == ("model",)
+    assert preserved.origins == ("automatic",)
+    assert len(transport.prompts) == 1
+    assert profile.cache.stats().automatic_entries == 2
+
+
+@pytest.mark.asyncio
+async def test_uncacheable_inflight_result_is_shared_without_persisting(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    transport = ControlledTransport()
+    first_source = SourceText("z", "first", 1, "待って。")
+    second_source = SourceText("z", "second", 1, "待って。")
+    first_task = asyncio.create_task(
+        _service(transport, profile).translate(TranslationBatch((first_source,)))
+    )
+    await _wait_for_calls(transport, 1)
+    second_task = asyncio.create_task(
+        _service(transport, profile).translate(TranslationBatch((second_source,)))
+    )
+    await asyncio.sleep(0)
+
+    assert len(transport.calls) == 1
+    transport.calls[0][1].set_result(
+        '<target><sn id="1">待って。</sn></target>'
+    )
+    await _wait_for_calls(transport, 2)
+    transport.calls[1][1].set_result(
+        '<target><sn id="1">待って。</sn></target>'
+    )
+    first, second = await asyncio.gather(first_task, second_task)
+
+    assert [item.translated_text for item in first.outcome.results] == ["待って。"]
+    assert [item.translated_text for item in second.outcome.results] == ["待って。"]
+    assert first.origins == ("model",)
+    assert second.origins == ("inflight",)
+    assert first.outcome.suspected_untranslated == (first_source,)
+    assert second.outcome.suspected_untranslated == (second_source,)
+    assert profile.cache.inflight_count == 0
+    assert profile.cache.stats().automatic_entries == 0

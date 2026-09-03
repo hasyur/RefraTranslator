@@ -54,8 +54,16 @@ class HyMtPromptBuilder:
         *,
         glossary: Sequence[GlossaryEntry] = (),
         context: Sequence[ContextPair] = (),
+        correction: bool = False,
     ) -> str:
         sections: list[str] = []
+
+        if correction:
+            sections.append(
+                "这是纠正重试：上次结果原样复制了原文。"
+                f"不要原样复制可翻译的英文或日文，必须翻译成{self.target_language}；"
+                "专名、品牌和缩写可以保留。"
+            )
 
         custom_prompt = self.custom_prompt.strip()
         if custom_prompt:

@@ -51,6 +51,17 @@ def test_prompt_uses_short_katakana_translation_policy() -> None:
     assert "相同原文始终使用相同译名" in prompt
 
 
+def test_correction_prompt_explicitly_rejects_copying_translatable_source() -> None:
+    prompt = HyMtPromptBuilder(target_language="简体中文").build(
+        _batch(),
+        correction=True,
+    )
+
+    assert "这是纠正重试" in prompt
+    assert "不要原样复制可翻译的英文或日文" in prompt
+    assert "专名、品牌和缩写可以保留" in prompt
+
+
 def test_profile_custom_prompt_is_included_and_revises_cache_contract() -> None:
     plain_builder = HyMtPromptBuilder()
     custom_builder = HyMtPromptBuilder(

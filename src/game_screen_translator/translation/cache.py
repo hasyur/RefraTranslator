@@ -104,7 +104,7 @@ class CacheHit:
 @dataclass(frozen=True, slots=True)
 class InFlightCacheClaim:
     cache_key: str
-    future: Future[None]
+    future: Future[str | None]
     is_owner: bool
 
 
@@ -138,7 +138,7 @@ class TranslationCache:
                 f"缓存目录不存在：{self.database_path.parent}"
             )
         self._inflight_lock = threading.Lock()
-        self._inflight: dict[str, Future[None]] = {}
+        self._inflight: dict[str, Future[str | None]] = {}
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -280,15 +280,41 @@ class TranslationCache:
             self._inflight[cache_key] = future
             return InFlightCacheClaim(cache_key, future, True)
 
-    def complete_inflight(self, claim: InFlightCacheClaim) -> None:
-        self._settle_inflight(claim, error=None)
+    def delete_automatic(
+        self,
+        source_text: str,
+        environment: CacheEnvironment,
+        context: Sequence[ContextPair],
+    ) -> bool:
+        cache_key, _, _ = environment.automatic_key(source_text, context)
+        try:
+            with self._connection() as connection:
+                cursor = connection.execute(
+                    "DELETE FROM automatic_translations WHERE cache_key = ?",
+                    (cache_key,),
+                )
+                return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            raise TranslationCacheError(f"删除自动翻译缓存失败：{exc}") from exc
+
+    def complete_inflight(
+        self,
+        claim: InFlightCacheClaim,
+        *,
+        transient_translation: str | None = None,
+    ) -> None:
+        self._settle_inflight(
+            claim,
+            transient_translation=transient_translation,
+            error=None,
+        )
 
     def fail_inflight(
         self,
         claim: InFlightCacheClaim,
         error: BaseException,
     ) -> None:
-        self._settle_inflight(claim, error=error)
+        self._settle_inflight(claim, transient_translation=None, error=error)
 
     @property
     def inflight_count(self) -> int:
@@ -299,6 +325,7 @@ class TranslationCache:
         self,
         claim: InFlightCacheClaim,
         *,
+        transient_translation: str | None,
         error: BaseException | None,
     ) -> None:
         if not claim.is_owner:
@@ -311,7 +338,7 @@ class TranslationCache:
         if claim.future.done():
             return
         if error is None:
-            claim.future.set_result(None)
+            claim.future.set_result(transient_translation)
         else:
             claim.future.set_exception(error)
 

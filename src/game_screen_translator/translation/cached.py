@@ -13,10 +13,15 @@ from game_screen_translator.domain import (
 from game_screen_translator.profiles import GameProfile
 from game_screen_translator.translation.cache import (
     CacheEnvironment,
+    CacheHit,
     InFlightCacheClaim,
     TranslationCacheError,
 )
-from game_screen_translator.translation.service import TranslationOutcome, TranslationService
+from game_screen_translator.translation.service import (
+    TranslationOutcome,
+    TranslationService,
+    is_suspected_untranslated,
+)
 
 
 TranslationOrigin = Literal["manual", "automatic", "inflight", "model"]
@@ -77,12 +82,29 @@ class CachedTranslationService:
         )
         cached: dict[str, tuple[TranslationResult, TranslationOrigin]] = {}
         model_results: dict[str, TranslationResult] = {}
+        suspected_model_ids: set[str] = set()
         owners: list[SourceText] = []
         owner_claims: dict[str, InFlightCacheClaim] = {}
         waiters: list[tuple[SourceText, InFlightCacheClaim]] = []
+
+        def lookup_cache(source: SourceText) -> CacheHit | None:
+            hit = profile.cache.lookup(source.text, environment, context)
+            if (
+                hit is not None
+                and hit.origin == "automatic"
+                and is_suspected_untranslated(
+                    source.text,
+                    hit.translated_text,
+                    glossary=profile.glossary,
+                )
+            ):
+                profile.cache.delete_automatic(source.text, environment, context)
+                return None
+            return hit
+
         try:
             for source in batch.items:
-                hit = profile.cache.lookup(source.text, environment, context)
+                hit = lookup_cache(source)
                 if hit is not None:
                     cached[source.wire_id] = (
                         TranslationResult(source, hit.translated_text),
@@ -102,7 +124,7 @@ class CachedTranslationService:
                 owner_claims[source.wire_id] = claim
                 # Close the lookup/claim race: another owner may have populated
                 # SQLite immediately before this request acquired the key.
-                hit = profile.cache.lookup(source.text, environment, context)
+                hit = lookup_cache(source)
                 if hit is not None:
                     profile.cache.complete_inflight(claim)
                     del owner_claims[source.wire_id]
@@ -126,6 +148,10 @@ class CachedTranslationService:
                 results_by_id = {
                     result.source.wire_id: result for result in model_outcome.results
                 }
+                suspected_model_ids.update(
+                    source.wire_id
+                    for source in model_outcome.suspected_untranslated
+                )
                 missing_result_ids = [
                     source.wire_id
                     for source in owners
@@ -139,29 +165,49 @@ class CachedTranslationService:
 
                 for source in owners:
                     result = results_by_id[source.wire_id]
-                    profile.cache.store_automatic(
-                        source.text,
-                        result.translated_text,
-                        environment,
-                        context,
-                    )
+                    if source.wire_id not in suspected_model_ids:
+                        profile.cache.store_automatic(
+                            source.text,
+                            result.translated_text,
+                            environment,
+                            context,
+                        )
                     model_results[source.wire_id] = result
                 for source in owners:
-                    profile.cache.complete_inflight(owner_claims.pop(source.wire_id))
+                    result = results_by_id[source.wire_id]
+                    profile.cache.complete_inflight(
+                        owner_claims.pop(source.wire_id),
+                        transient_translation=(
+                            result.translated_text
+                            if source.wire_id in suspected_model_ids
+                            else None
+                        ),
+                    )
 
             if waiters:
-                await asyncio.gather(
+                shared_translations = await asyncio.gather(
                     *(
                         asyncio.shield(asyncio.wrap_future(claim.future))
                         for _, claim in waiters
                     )
                 )
-                for source, _ in waiters:
+                for (source, _), transient_translation in zip(
+                    waiters,
+                    shared_translations,
+                    strict=True,
+                ):
                     hit = profile.cache.lookup(source.text, environment, context)
                     if hit is None:
-                        raise TranslationCacheError(
-                            "在途翻译已结束，但缓存中缺少对应结果"
+                        if transient_translation is None:
+                            raise TranslationCacheError(
+                                "在途翻译已结束，但缓存中缺少对应结果"
+                            )
+                        cached[source.wire_id] = (
+                            TranslationResult(source, transient_translation),
+                            "inflight",
                         )
+                        suspected_model_ids.add(source.wire_id)
+                        continue
                     origin: TranslationOrigin = (
                         "manual" if hit.origin == "manual" else "inflight"
                     )
@@ -177,6 +223,7 @@ class CachedTranslationService:
         results: list[TranslationResult] = []
         origins: list[TranslationOrigin] = []
         discarded: list[SourceText] = []
+        suspected: list[SourceText] = []
         for source in batch.items:
             if not self._service.revisions.is_current(source):
                 discarded.append(source)
@@ -186,13 +233,17 @@ class CachedTranslationService:
                 result, origin = cached_result
                 results.append(result)
                 origins.append(origin)
+                if source.wire_id in suspected_model_ids:
+                    suspected.append(source)
                 continue
             model_result = model_results.get(source.wire_id)
             if model_result is not None:
                 results.append(model_result)
                 origins.append("model")
+                if source.wire_id in suspected_model_ids:
+                    suspected.append(source)
 
         return CachedTranslationOutcome(
-            TranslationOutcome(tuple(results), tuple(discarded)),
+            TranslationOutcome(tuple(results), tuple(discarded), tuple(suspected)),
             tuple(origins),
         )
