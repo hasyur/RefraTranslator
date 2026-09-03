@@ -31,6 +31,8 @@ def main() -> int:
             """
 [translation]
 provider = "openai_compatible"
+backend = "builtin"
+builtin_model = "Hy-MT2-1.8B-Q8_0.gguf"
 base_url = "http://127.0.0.1:1234/v1"
 model = "hy-mt1.5-7b"
 target_language = "简体中文"
@@ -63,8 +65,9 @@ target_language = "简体中文"
         )
 
         app = QApplication.instance() or QApplication([])
-        window = LauncherWindow(config_path)
+        window = LauncherWindow(config_path, probe_ocr_devices=False)
         window.theme_combo.setCurrentIndex(window.theme_combo.findData(THEME_DARK))
+        window.resize(1080, 980)
         window.show()
         app.processEvents()
         if not window.grab().save(str(output_path)):

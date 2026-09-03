@@ -435,6 +435,89 @@ def test_launcher_saves_and_restores_ocr_filter_switch(tmp_path: Path) -> None:
     app.processEvents()
 
 
+def test_launcher_switches_builtin_backend_without_overwriting_external_api(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+    monkeypatch.setattr(launcher_module, "model_is_ready", lambda *_args: True)
+    monkeypatch.setattr(launcher_module, "runtime_is_ready", lambda *_args: True)
+
+    window.server_url_combo.setCurrentText("https://external.test/v1")
+    window.api_key_edit.setText("external-secret")
+    window.model_combo.setCurrentText("external-model")
+    window.backend_combo.setCurrentIndex(window.backend_combo.findData("builtin"))
+    window.builtin_model_combo.setCurrentIndex(
+        window.builtin_model_combo.findData("Hy-MT2-7B-Q4_K_M.gguf")
+    )
+    window._refresh_local_model_status()
+
+    assert window._translation_form.isRowVisible(window._builtin_model_widget)
+    assert not window._translation_form.isRowVisible(window.server_url_combo)
+    assert window.local_download_button.text() == "已下载"
+    assert "本地就绪" in window.llm_status_chip.text()
+    assert window._save_translation_settings(announce=False)
+
+    saved = load_config(config_path)
+    assert saved.translation.backend == "builtin"
+    assert saved.translation.builtin_model == "Hy-MT2-7B-Q4_K_M.gguf"
+    assert saved.translation.base_url == "https://external.test/v1"
+    assert saved.translation.model == "external-model"
+    assert saved.translation.api_key == "external-secret"
+
+    window.backend_combo.setCurrentIndex(window.backend_combo.findData("external"))
+    assert not window._translation_form.isRowVisible(window._builtin_model_widget)
+    assert window._translation_form.isRowVisible(window.server_url_combo)
+    assert window.server_url_combo.currentText() == "https://external.test/v1"
+    assert window.model_combo.currentText() == "external-model"
+    window.close()
+    app.processEvents()
+
+
+def test_launcher_refuses_to_start_missing_builtin_model_before_ocr_probe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    config = load_config(config_path)
+    create_game_profile(config_path, config, "game")
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+    window.backend_combo.setCurrentIndex(window.backend_combo.findData("builtin"))
+    errors = []
+    monkeypatch.setattr(
+        launcher_module,
+        "local_backend_is_ready",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        launcher_module,
+        "_validate_ocr_device_isolated",
+        lambda _device: pytest.fail("missing local model must fail before OCR probe"),
+    )
+    monkeypatch.setattr(
+        window,
+        "_show_error",
+        lambda title, error: errors.append((title, str(error))),
+    )
+
+    window._start_live()
+
+    assert errors == [
+        (
+            "内置模型尚未准备好",
+            "请先点击“下载并使用”，等待下载和校验完成",
+        )
+    ]
+    assert window._live_process is None
+    window.close()
+    app.processEvents()
+
+
 def test_launcher_saves_and_restores_browser_overlay_switch(tmp_path: Path) -> None:
     app = QApplication.instance() or QApplication([])
     config_path = tmp_path / "config.toml"

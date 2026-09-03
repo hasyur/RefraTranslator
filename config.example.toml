@@ -1,5 +1,9 @@
 [translation]
 provider = "openai_compatible"
+# external 使用用户自己的 OpenAI-compatible API；builtin 使用程序管理的本地模型。
+backend = "external"
+# 切换后端不会覆盖下面的外部 API 地址、模型或 API Key。
+builtin_model = "Hy-MT2-1.8B-Q8_0.gguf"
 base_url = "http://127.0.0.1:1234/v1"
 model = "hy-mt1.5-7b"
 # 可在启动器中填写；非空值会明文保存在本机 config.toml（该文件已被 Git 忽略）。

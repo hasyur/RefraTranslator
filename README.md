@@ -1,12 +1,13 @@
 # RefraTranslator
 
-RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具。它截取指定屏幕区域，使用 PaddleOCR 识别日文或英文，通过用户自己的 OpenAI-compatible LLM 翻译，并将中文译文覆盖回原文字位置。
+RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具。它截取指定屏幕区域，使用 PaddleOCR 识别日文或英文，通过内置本地模型或用户自己的 OpenAI-compatible LLM 翻译，并将中文译文覆盖回原文字位置。
 
-程序不会注入游戏进程，也不包含、下载或启动任何 LLM 后端及模型权重。
+程序不会注入游戏进程。内置后端由程序按需下载并管理；不选择内置后端时，不会下载 LLM 运行时或模型。
 
 ## 主要功能
 
-- 图形化配置 API 地址、API Key、模型、OCR 设备、字幕区域和每游戏 Profile；
+- 可选的内置 CUDA 本地模型，自动下载、断点续传和 SHA-256 校验；
+- 图形化切换内置模型或外部 API，并配置 OCR 设备、字幕区域和每游戏 Profile；
 - 使用 NVIDIA GPU 加速 OCR，翻译并发数可调；
 - 多行文字默认由快速规则链分组，仅在局部断链、候选边近似平局、菜单/句子冲突时排队调用 LLM 仲裁；
 - 每个配置独立保存补充提示词、术语表、人工修订和翻译缓存；
@@ -21,21 +22,32 @@ RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具
 - 64 位 Windows 10 或 Windows 11；
 - 64 位 Python 3.11、3.12 或 3.13，并可在终端运行 `python`；
 - 支持 CUDA 的 NVIDIA GPU，并安装可用的 NVIDIA 驱动；
-- 一个提供 `/v1/models` 和 `/v1/chat/completions` 的 OpenAI-compatible 翻译服务。
+- 使用外部 API 时，需要一个提供 `/v1/models` 和 `/v1/chat/completions` 的 OpenAI-compatible 翻译服务。
 
 下载或克隆源码，并放到较短的目录（例如 `C:\RefraTranslator`）；不要让 GitHub ZIP 的长目录名重复嵌套，Paddle 在 Windows 下包含很深的文件路径。然后双击 `install.bat`。安装器会直接安装 NVIDIA GPU OCR 运行时。
 
 所有 Python 包都安装到项目内的 `.venv`，不会污染系统环境；首次使用 GPU OCR 会下载数 GB 的运行库。
 
-安装完成后：
+安装完成后使用内置本地模型：
 
-1. 启动你自己的 LLM 服务；
-2. 双击 `start_gui.bat`；
-3. 在 GUI 中填写 API 地址和服务所需的 API Key，再读取模型列表；
+1. 双击 `start_gui.bat`；
+2. 在“LLM 后端”选择“内置本地模型（CUDA）”；
+3. 选择模型并点击“下载并使用”，等待下载、校验和安装完成；
 4. 创建配置，填写可选的场景提示词，选择显示器并框选字幕区域；
-5. 点击“启动实时翻译”。
+5. 点击“启动实时翻译”。程序会先初始化 CUDA OCR，再在同一张 GPU 上加载模型。
 
-模板中的 `http://127.0.0.1:1234/v1` 只是示例地址，不代表程序自带服务。第一次运行 OCR 时还会将 PaddleOCR 模型下载到 `.cache\paddlex`。
+首发内置两档模型：
+
+| 档位 | 模型 | 下载大小 | 来源 |
+| --- | --- | ---: | --- |
+| 低显存 / 快速 | `Hy-MT2-1.8B-Q8_0.gguf` | 1.78 GiB | [ModelScope 官方仓库](https://www.modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B-GGUF/files) |
+| 高显存 / 质量 | `Hy-MT2-7B-Q4_K_M.gguf` | 4.31 GiB | [ModelScope 官方仓库](https://www.modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-7B-GGUF/files) |
+
+程序还会从 llama.cpp 官方发布页下载约 0.60 GiB 的 Windows x64 CUDA 12.4 运行时。当前固定使用与稳定版 `v0.3.0` 相同提交的 `b10621`，不会在用户机器上自动追踪未验证的新构建。运行库和模型保存在 `.cache\local-llm`；无需安装 CUDA Toolkit，但需要可用且兼容 CUDA 12 的 NVIDIA 驱动。第一次运行 OCR 时还会将 PaddleOCR 模型下载到 `.cache\paddlex`。
+
+内置 `llama-server` 只监听 `127.0.0.1`，每次启动生成临时 API Key，关闭实时翻译时一并结束。显存不足、驱动不兼容或模型服务启动失败都会明确报错，不会静默切换到外部 API、CPU 或 Vulkan。
+
+如需使用自己的服务，在“LLM 后端”选择“外部 API”，填写 API 地址、API Key 并读取模型列表。切换后端不会覆盖已经保存的外部设置。模板中的 `http://127.0.0.1:1234/v1` 只是外部 API 示例地址。
 
 API Key 在启动器中以密码框显示，填写后会明文保存在仅供本机使用、已被 Git 忽略的 `config.toml`。不希望写入配置文件时可将输入框留空，并通过 `REFRA_TRANSLATOR_API_KEY` 环境变量提供。
 
@@ -81,7 +93,7 @@ git clone https://github.com/hasyur/RefraTranslator.git C:\RefraTranslator
 
 ## 排查问题
 
-检查 API 服务与模型：
+检查当前所选翻译后端与模型（选择内置后端时会临时启动本地模型）：
 
 ```powershell
 .\.venv\Scripts\python.exe -m game_screen_translator --config config.toml doctor
@@ -94,7 +106,7 @@ git clone https://github.com/hasyur/RefraTranslator.git C:\RefraTranslator
 
 如果看不到控制框或译文，请先使用本机屏幕或有线显示器测试；部分无线投屏、虚拟显示器和捕获链路无法正确显示或排除覆盖层。
 
-安装脚本成功后会清理 `.cache\pip` 下载缓存，但保留 OCR 模型。不要为了清理空间直接删除整个 `.cache`，否则下次需要重新下载模型。
+安装脚本成功后会清理 `.cache\pip` 下载缓存，但保留 OCR 和内置 LLM 模型。内置模型可在 GUI 中单独删除；不要为了清理空间直接删除整个 `.cache`，否则下次需要重新下载相关模型。
 
 ## 开发与测试
 
@@ -113,9 +125,10 @@ GitHub Actions 会在 Python 3.11、3.12 和 3.13 上运行离线测试，不会
 
 - 每次运行只有一个捕获区域，游戏窗口移动后需要重新框选；
 - OCR 仅支持 NVIDIA GPU，没有可用 NVIDIA GPU 时无法启动实时翻译；
+- 内置 LLM 后端仅支持 Windows x64 + NVIDIA CUDA，不提供 CPU 或 Vulkan 回退；
 - 动态复杂背景可能使实验性 ROI 回退到整帧 OCR；
 - 项目仍处于 Alpha 阶段，建议先在非关键环境测试。
 
 ## 许可证
 
-RefraTranslator 源代码采用 [Apache License 2.0](LICENSE)。第三方依赖及再分发说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。LLM 后端和模型不属于本项目，其许可证需由使用者自行确认。
+RefraTranslator 源代码采用 [Apache License 2.0](LICENSE)。按需下载的 llama.cpp、NVIDIA CUDA 运行库、Hy-MT2 模型及其他第三方依赖仍采用各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

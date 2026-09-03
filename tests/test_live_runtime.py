@@ -2,6 +2,7 @@ import json
 import os
 import threading
 from concurrent.futures import Future
+from contextlib import contextmanager
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -70,6 +71,49 @@ class FakeOcr:
         return (
             OcrText("待って。", 0.99, ((10, 20), (200, 20), (200, 60), (10, 60))),
         )
+
+
+def test_run_live_initializes_cuda_ocr_before_managed_local_model(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    events = []
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            backend="builtin",
+            builtin_model="Hy-MT2-1.8B-Q8_0.gguf",
+            base_url="http://external.test/v1",
+            model="external-model",
+        )
+    )
+
+    class OrderedOcr:
+        runtime_description = "gpu:0 test"
+
+        def __init__(self, **_kwargs) -> None:
+            events.append("ocr")
+
+    @contextmanager
+    def ordered_backend(runtime_config, _config_path):
+        events.append("backend-enter")
+        yield runtime_config
+        events.append("backend-exit")
+
+    def ready(*_args, **kwargs):
+        assert kwargs["app"] is app
+        assert isinstance(kwargs["ocr"], OrderedOcr)
+        events.append("runtime")
+        return 7
+
+    monkeypatch.setattr(live_runtime, "prefer_game_process_priority", lambda: True)
+    monkeypatch.setattr(live_runtime, "PaddleOcrEngine", OrderedOcr)
+    monkeypatch.setattr(live_runtime, "managed_translation_backend", ordered_backend)
+    monkeypatch.setattr(live_runtime, "_run_live_ready", ready)
+
+    assert live_runtime.run_live(config, tmp_path / "config.toml") == 7
+    assert events == ["ocr", "backend-enter", "runtime", "backend-exit"]
 
 
 class FakeEmptyOcr:

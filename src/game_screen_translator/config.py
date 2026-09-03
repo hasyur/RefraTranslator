@@ -35,10 +35,19 @@ class TranslationConfig:
     max_output_tokens: int = 2048
     api_key: str = field(default="", repr=False)
     api_key_env: str = API_KEY_ENV
+    backend: str = "external"
+    builtin_model: str = "Hy-MT2-1.8B-Q8_0.gguf"
 
     def __post_init__(self) -> None:
         if self.provider != "openai_compatible":
             raise ConfigError(f"暂不支持 translation.provider={self.provider!r}")
+        if not isinstance(self.backend, str) or self.backend not in {
+            "external",
+            "builtin",
+        }:
+            raise ConfigError("translation.backend 必须是 external 或 builtin")
+        if not isinstance(self.builtin_model, str) or not self.builtin_model.strip():
+            raise ConfigError("translation.builtin_model 不能为空")
         if not self.base_url.startswith(("http://", "https://")):
             raise ConfigError("translation.base_url 必须以 http:// 或 https:// 开头")
         if not self.model.strip():
@@ -59,6 +68,7 @@ class TranslationConfig:
             raise ConfigError("translation.api_key_env 不能为空")
         object.__setattr__(self, "api_key", self.api_key.strip())
         object.__setattr__(self, "api_key_env", self.api_key_env.strip())
+        object.__setattr__(self, "builtin_model", self.builtin_model.strip())
 
     @property
     def normalized_base_url(self) -> str:
@@ -315,7 +325,8 @@ _TOML_SECTION_RE = re.compile(
     r"^[ \t]*\[([^\[\]\r\n]+)\][ \t]*(?:#.*)?$"
 )
 _TRANSLATION_VALUE_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<key>base_url|model|max_concurrency|api_key)[ \t]*="
+    r"^(?P<indent>[ \t]*)(?P<key>"
+    r"backend|builtin_model|base_url|model|max_concurrency|api_key)[ \t]*="
 )
 _OCR_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
@@ -350,6 +361,8 @@ def save_translation_selection(
         path,
         base_url=base_url,
         model=model,
+        backend=None,
+        builtin_model=None,
         api_key=api_key,
         max_concurrency=None,
         ocr_device=None,
@@ -378,6 +391,8 @@ def save_runtime_selection(
     base_url: str,
     model: str,
     ocr_device: str,
+    backend: str | None = None,
+    builtin_model: str | None = None,
     api_key: str | None = None,
     max_concurrency: int | None = None,
     ocr_detection_max_side: int | None = None,
@@ -402,6 +417,8 @@ def save_runtime_selection(
         path,
         base_url=base_url,
         model=model,
+        backend=backend,
+        builtin_model=builtin_model,
         api_key=api_key,
         max_concurrency=max_concurrency,
         ocr_device=ocr_device,
@@ -429,6 +446,8 @@ def _save_selected_values(
     *,
     base_url: str,
     model: str,
+    backend: str | None,
+    builtin_model: str | None,
     api_key: str | None,
     max_concurrency: int | None,
     ocr_device: str | None,
@@ -453,6 +472,14 @@ def _save_selected_values(
     current = load_config(config_path)
     candidate_translation = replace(
         current.translation,
+        backend=(
+            current.translation.backend if backend is None else backend.strip()
+        ),
+        builtin_model=(
+            current.translation.builtin_model
+            if builtin_model is None
+            else builtin_model.strip()
+        ),
         base_url=base_url.strip(),
         model=model.strip(),
         api_key=current.translation.api_key if api_key is None else api_key,
@@ -573,6 +600,10 @@ def _save_selected_values(
         "model": candidate_translation.model,
         "max_concurrency": candidate_translation.max_concurrency,
     }
+    if backend is not None:
+        values["backend"] = candidate_translation.backend
+    if builtin_model is not None:
+        values["builtin_model"] = candidate_translation.builtin_model
     if api_key is not None:
         values["api_key"] = candidate_translation.api_key
     for index, line in enumerate(lines):
@@ -609,6 +640,16 @@ def _save_selected_values(
 
     if max_concurrency is not None and "max_concurrency" not in replaced_keys:
         _upsert_translation_concurrency(lines, candidate_translation.max_concurrency)
+
+    if backend is not None and "backend" not in replaced_keys:
+        _upsert_translation_value(lines, "backend", candidate_translation.backend)
+
+    if builtin_model is not None and "builtin_model" not in replaced_keys:
+        _upsert_translation_value(
+            lines,
+            "builtin_model",
+            candidate_translation.builtin_model,
+        )
 
     if api_key is not None and "api_key" not in replaced_keys:
         _upsert_translation_api_key(lines, candidate_translation.api_key)

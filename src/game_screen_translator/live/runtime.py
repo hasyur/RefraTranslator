@@ -81,6 +81,7 @@ from game_screen_translator.translation.hy_mt import (
     HyMtPromptBuilder,
     TranslationProtocolError,
 )
+from game_screen_translator.translation.local_backend import managed_translation_backend
 from game_screen_translator.translation.service import TranslationService
 from game_screen_translator.translation.transport import (
     OpenAICompatibleTransport,
@@ -2735,6 +2736,38 @@ def run_live(
         detection_max_side=config.ocr.detection_max_side,
     )
     _live_message(f"OCR ready: {ocr.runtime_description}")
+    if config.translation.backend == "builtin":
+        _live_message(
+            f"starting managed local model: {config.translation.builtin_model}"
+        )
+    with managed_translation_backend(config, config_path) as runtime_config:
+        if config.translation.backend == "builtin":
+            _live_message(
+                f"managed local model ready: {runtime_config.translation.model}"
+            )
+        return _run_live_ready(
+            runtime_config,
+            config_path,
+            app=app,
+            ocr=ocr,
+            duration_seconds=duration_seconds,
+            debug_border=debug_border,
+            test_source=test_source,
+            profile=profile,
+        )
+
+
+def _run_live_ready(
+    config: AppConfig,
+    config_path: Path,
+    *,
+    app: QApplication,
+    ocr: PaddleOcrEngine,
+    duration_seconds: float | None = None,
+    debug_border: bool = False,
+    test_source: Path | None = None,
+    profile: GameProfile | None = None,
+) -> int:
     _live_message(
         f"starting capture: monitor={config.live.monitor_index} "
         f"fps={config.live.capture_fps} "

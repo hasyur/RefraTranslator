@@ -26,6 +26,7 @@ from game_screen_translator.translation.hy_mt import (
     HyMtPromptBuilder,
     TranslationProtocolError,
 )
+from game_screen_translator.translation.local_backend import managed_translation_backend
 from game_screen_translator.translation.service import TranslationService
 from game_screen_translator.translation.transport import (
     OpenAICompatibleTransport,
@@ -140,14 +141,18 @@ def _parse_region(value: str) -> tuple[int, int, int, int]:
 
 async def _doctor(config_path: Path) -> int:
     config = load_config(config_path)
-    async with OpenAICompatibleTransport(config.translation) as transport:
-        models = await transport.list_models()
-    print(f"API：{config.translation.normalized_base_url}")
+    with managed_translation_backend(config, config_path) as runtime_config:
+        async with OpenAICompatibleTransport(runtime_config.translation) as transport:
+            models = await transport.list_models()
+    print(f"API：{runtime_config.translation.normalized_base_url}")
     print(f"可见模型：{len(models)} 个")
-    if config.translation.model not in models:
-        print(f"失败：找不到配置模型 {config.translation.model!r}", file=sys.stderr)
+    if runtime_config.translation.model not in models:
+        print(
+            f"失败：找不到配置模型 {runtime_config.translation.model!r}",
+            file=sys.stderr,
+        )
         return 2
-    print(f"模型：{config.translation.model}（可用）")
+    print(f"模型：{runtime_config.translation.model}（可用）")
     return 0
 
 
@@ -168,24 +173,25 @@ async def _translate(
 ) -> str:
     config = load_config(config_path)
     profile = _optional_profile(config_path, config, profile_id)
-    async with OpenAICompatibleTransport(config.translation) as transport:
-        prompt_builder = HyMtPromptBuilder(
-            config.translation.target_language,
-            custom_prompt=profile.custom_prompt if profile is not None else "",
-        )
-        service = TranslationService(
-            transport,
-            prompt_builder=prompt_builder,
-        )
-        cached_service = CachedTranslationService(
-            service,
-            profile=profile,
-            source_language=config.ocr.language,
-            target_language=config.translation.target_language,
-            model=config.translation.model,
-            prompt_version=prompt_builder.prompt_version,
-        )
-        cached_outcome = await cached_service.translate(TranslationBatch((source,)))
+    with managed_translation_backend(config, config_path) as runtime_config:
+        async with OpenAICompatibleTransport(runtime_config.translation) as transport:
+            prompt_builder = HyMtPromptBuilder(
+                runtime_config.translation.target_language,
+                custom_prompt=profile.custom_prompt if profile is not None else "",
+            )
+            service = TranslationService(
+                transport,
+                prompt_builder=prompt_builder,
+            )
+            cached_service = CachedTranslationService(
+                service,
+                profile=profile,
+                source_language=runtime_config.ocr.language,
+                target_language=runtime_config.translation.target_language,
+                model=runtime_config.translation.model,
+                prompt_version=prompt_builder.prompt_version,
+            )
+            cached_outcome = await cached_service.translate(TranslationBatch((source,)))
     outcome = cached_outcome.outcome
     if not outcome.results:
         raise RuntimeError("翻译结果因 revision 过期而被丢弃")
@@ -247,24 +253,25 @@ async def _preview(
         )
         for index, observation in enumerate(observations)
     )
-    async with OpenAICompatibleTransport(config.translation) as transport:
-        prompt_builder = HyMtPromptBuilder(
-            config.translation.target_language,
-            custom_prompt=profile.custom_prompt if profile is not None else "",
-        )
-        service = TranslationService(
-            transport,
-            prompt_builder=prompt_builder,
-        )
-        cached_service = CachedTranslationService(
-            service,
-            profile=profile,
-            source_language=config.ocr.language,
-            target_language=config.translation.target_language,
-            model=config.translation.model,
-            prompt_version=prompt_builder.prompt_version,
-        )
-        cached_outcome = await cached_service.translate(TranslationBatch(sources))
+    with managed_translation_backend(config, config_path) as runtime_config:
+        async with OpenAICompatibleTransport(runtime_config.translation) as transport:
+            prompt_builder = HyMtPromptBuilder(
+                runtime_config.translation.target_language,
+                custom_prompt=profile.custom_prompt if profile is not None else "",
+            )
+            service = TranslationService(
+                transport,
+                prompt_builder=prompt_builder,
+            )
+            cached_service = CachedTranslationService(
+                service,
+                profile=profile,
+                source_language=runtime_config.ocr.language,
+                target_language=runtime_config.translation.target_language,
+                model=runtime_config.translation.model,
+                prompt_version=prompt_builder.prompt_version,
+            )
+            cached_outcome = await cached_service.translate(TranslationBatch(sources))
     outcome = cached_outcome.outcome
 
     translations = tuple(result.translated_text for result in outcome.results)

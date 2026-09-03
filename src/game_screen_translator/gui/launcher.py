@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -34,6 +36,21 @@ from game_screen_translator.profiles import (
 from game_screen_translator.translation.transport import (
     TranslationTransportError,
     parse_model_ids,
+)
+from game_screen_translator.translation.local_backend import (
+    BUILTIN_MODELS,
+    LLAMA_CPP_STABLE_VERSION,
+    LLAMA_CPP_VERSION,
+    LocalBackendDownloadCancelled,
+    LocalBackendError,
+    get_builtin_model,
+    install_local_backend,
+    local_backend_is_ready,
+    local_backend_root,
+    model_is_ready,
+    model_path,
+    remove_builtin_model,
+    runtime_is_ready,
 )
 
 from .region_selector import RegionSelector
@@ -107,6 +124,7 @@ try:
         QMainWindow,
         QMessageBox,
         QPlainTextEdit,
+        QProgressBar,
         QPushButton,
         QScrollArea,
         QSlider,
@@ -366,6 +384,7 @@ class LauncherWindow(QMainWindow):
         self._network_manager = QNetworkAccessManager(self)
         self._model_reply: QNetworkReply | None = None
         self._live_process: subprocess.Popen | None = None
+        self._live_waiting_for_ready = False
         self._live_log_path = self._config_path.parent / "output" / "live.log"
         self._live_monitor = QTimer(self)
         self._live_monitor.setInterval(500)
@@ -375,6 +394,12 @@ class LauncherWindow(QMainWindow):
         self._ocr_device_probe_monitor = QTimer(self)
         self._ocr_device_probe_monitor.setInterval(100)
         self._ocr_device_probe_monitor.timeout.connect(self._check_ocr_device_probe)
+        self._local_install_thread: threading.Thread | None = None
+        self._local_install_cancel = threading.Event()
+        self._local_install_events: queue.SimpleQueue[tuple] = queue.SimpleQueue()
+        self._local_install_monitor = QTimer(self)
+        self._local_install_monitor.setInterval(100)
+        self._local_install_monitor.timeout.connect(self._check_local_install_events)
         self.setWindowTitle(PRODUCT_NAME)
         self.resize(1080, 760)
         self.setMinimumSize(820, 620)
@@ -503,6 +528,8 @@ class LauncherWindow(QMainWindow):
             self._apply_theme()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt callback name
+        self._local_install_cancel.set()
+        self._local_install_monitor.stop()
         process = self._ocr_device_probe_process
         if process is not None and process.poll() is None:
             process.terminate()
@@ -749,12 +776,68 @@ class LauncherWindow(QMainWindow):
 
         translation_card, translation_layout = _settings_card(
             "翻译服务",
-            "连接 OpenAI 兼容的 LLM；补充提示词单独属于当前配置。",
+            "使用内置 CUDA 本地模型，或连接自己的 OpenAI-compatible API；"
+            "补充提示词单独属于当前配置。",
             scope="全局 + 此配置",
         )
         translation_form = QFormLayout()
+        self._translation_form = translation_form
         translation_form.setHorizontalSpacing(14)
         translation_form.setVerticalSpacing(10)
+
+        self.backend_combo = QComboBox()
+        self.backend_combo.addItem("内置本地模型（CUDA）", "builtin")
+        self.backend_combo.addItem("外部 API", "external")
+        backend_index = self.backend_combo.findData(self._config.translation.backend)
+        self.backend_combo.setCurrentIndex(max(backend_index, 0))
+        self.backend_combo.setToolTip(
+            "内置模式只监听本机并由实时翻译进程管理；"
+            "切换模式不会覆盖外部 API 设置。"
+        )
+        translation_form.addRow("LLM 后端", self.backend_combo)
+
+        builtin_widget = QWidget()
+        builtin_layout = QVBoxLayout(builtin_widget)
+        builtin_layout.setContentsMargins(0, 0, 0, 0)
+        builtin_layout.setSpacing(6)
+        self.builtin_model_combo = QComboBox()
+        for builtin_model in BUILTIN_MODELS:
+            self.builtin_model_combo.addItem(
+                f"{builtin_model.display_name} · {builtin_model.tier} · "
+                f"{builtin_model.size_gib:.2f} GiB",
+                builtin_model.model_id,
+            )
+        builtin_index = self.builtin_model_combo.findData(
+            self._config.translation.builtin_model
+        )
+        self.builtin_model_combo.setCurrentIndex(max(builtin_index, 0))
+        builtin_actions = QHBoxLayout()
+        builtin_actions.setContentsMargins(0, 0, 0, 0)
+        builtin_actions.setSpacing(8)
+        self.local_download_button = QPushButton("下载并使用")
+        self.local_download_button.clicked.connect(
+            self._download_selected_builtin_model
+        )
+        self.local_delete_button = QPushButton("删除模型")
+        self.local_delete_button.clicked.connect(self._delete_selected_builtin_model)
+        builtin_actions.addWidget(self.local_download_button)
+        builtin_actions.addWidget(self.local_delete_button)
+        builtin_actions.addStretch(1)
+        self.local_download_progress = QProgressBar()
+        self.local_download_progress.setRange(0, 1000)
+        self.local_download_progress.setValue(0)
+        self.local_download_progress.setTextVisible(True)
+        self.local_download_progress.hide()
+        self.local_model_status_label = QLabel()
+        self.local_model_status_label.setObjectName("secondaryText")
+        self.local_model_status_label.setWordWrap(True)
+        builtin_layout.addWidget(self.builtin_model_combo)
+        builtin_layout.addLayout(builtin_actions)
+        builtin_layout.addWidget(self.local_download_progress)
+        builtin_layout.addWidget(self.local_model_status_label)
+        self._builtin_model_widget = builtin_widget
+        translation_form.addRow("内置模型", builtin_widget)
+
         self.server_url_combo = QComboBox()
         self.server_url_combo.setEditable(True)
         self.server_url_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -791,6 +874,7 @@ class LauncherWindow(QMainWindow):
         self.refresh_models_button.clicked.connect(self._refresh_models)
         model_layout.addWidget(self.model_combo, 1)
         model_layout.addWidget(self.refresh_models_button)
+        self._external_model_widget = model_widget
         translation_form.addRow("API 模型", model_widget)
 
         prompt_widget = QWidget()
@@ -826,6 +910,14 @@ class LauncherWindow(QMainWindow):
         )
         translation_form.addRow("LLM 并发", self.max_concurrency_spin)
 
+        self.backend_combo.currentIndexChanged.connect(
+            self._sync_translation_backend_controls
+        )
+        self.builtin_model_combo.currentIndexChanged.connect(
+            self._refresh_local_model_status
+        )
+        self._sync_translation_backend_controls()
+
         recording_widget = QWidget()
         recording_layout = QVBoxLayout(recording_widget)
         recording_layout.setContentsMargins(0, 0, 0, 0)
@@ -851,9 +943,7 @@ class LauncherWindow(QMainWindow):
         translation_form.addRow("OBS 录制", recording_widget)
         translation_layout.addLayout(translation_form)
         self.service_status_label = QLabel(
-            f"当前：{self._config.translation.model} · "
-            f"{self._config.translation.normalized_base_url} · "
-            f"并发 {self._config.translation.max_concurrency} · "
+            f"当前：{self._translation_summary(self._config.translation)} · "
             f"OCR {self._config.ocr.device} · "
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
             f"合并{'开' if self._config.ocr.text_merge_enabled else '关'} · "
@@ -1203,6 +1293,256 @@ class LauncherWindow(QMainWindow):
             tooltip=f"{monitor_text} · 左 {left} · 上 {top} · 宽 {width} · 高 {height}",
         )
 
+    def _selected_translation_backend(self) -> str:
+        backend = self.backend_combo.currentData()
+        if backend not in {"external", "builtin"}:
+            raise ConfigError("当前 LLM 后端选择无效")
+        return str(backend)
+
+    def _selected_builtin_model(self):
+        model_id = self.builtin_model_combo.currentData()
+        if not isinstance(model_id, str):
+            raise ConfigError("当前内置模型选择无效")
+        return get_builtin_model(model_id)
+
+    @staticmethod
+    def _translation_summary(translation) -> str:
+        if translation.backend == "builtin":
+            try:
+                model = get_builtin_model(translation.builtin_model)
+                return f"内置 {model.display_name} · CUDA · 并发 1"
+            except LocalBackendError:
+                return f"内置 {translation.builtin_model} · 配置无效"
+        return (
+            f"外部 {translation.model} · {translation.normalized_base_url} · "
+            f"并发 {translation.max_concurrency}"
+        )
+
+    def _sync_translation_backend_controls(self, *args) -> None:
+        try:
+            builtin = self._selected_translation_backend() == "builtin"
+        except ConfigError:
+            builtin = False
+        for widget in (
+            self.server_url_combo,
+            self.api_key_edit,
+            self._external_model_widget,
+            self.max_concurrency_spin,
+        ):
+            self._translation_form.setRowVisible(widget, not builtin)
+        self._translation_form.setRowVisible(self._builtin_model_widget, builtin)
+        if builtin:
+            self._refresh_local_model_status()
+            return
+        self._set_status_chip(
+            self.llm_status_chip,
+            "LLM · 外部 API",
+            tone="neutral",
+            tooltip=(
+                f"{self.model_combo.currentText().strip()}\n"
+                f"{self.server_url_combo.currentText().strip()}"
+            ),
+        )
+
+    def _refresh_local_model_status(self, *args) -> None:
+        try:
+            model = self._selected_builtin_model()
+        except (ConfigError, LocalBackendError) as exc:
+            self.local_model_status_label.setText(str(exc))
+            self.local_download_button.setEnabled(False)
+            self.local_delete_button.setEnabled(False)
+            return
+        root = local_backend_root(self._config_path)
+        model_ready = model_is_ready(root, model)
+        runtime_ready = runtime_is_ready(root)
+        local_model_path = model_path(root, model)
+        model_files_exist = local_model_path.is_file() or local_model_path.with_name(
+            f"{local_model_path.name}.part"
+        ).is_file()
+        downloading = bool(
+            self._local_install_thread is not None
+            and self._local_install_thread.is_alive()
+        )
+        self.local_delete_button.setEnabled(model_files_exist and not downloading)
+        if downloading:
+            self.local_download_button.setText("取消下载")
+            self.local_download_button.setEnabled(True)
+            return
+        if model_ready and runtime_ready:
+            self.local_download_button.setText("已下载")
+            self.local_download_button.setEnabled(False)
+            self.local_model_status_label.setText(
+                f"已校验并可用；llama.cpp {LLAMA_CPP_VERSION} "
+                f"（{LLAMA_CPP_STABLE_VERSION}）CUDA 12.4。"
+            )
+            if self._selected_translation_backend() == "builtin":
+                self._set_status_chip(
+                    self.llm_status_chip,
+                    "LLM · 本地就绪",
+                    tone="success",
+                    tooltip=f"{model.display_name}\n{model_path(root, model)}",
+                )
+            return
+        self.local_download_button.setText("下载并使用")
+        self.local_download_button.setEnabled(True)
+        if model_ready:
+            detail = "模型已校验；仍需下载并安装 CUDA 本地运行时。"
+        elif runtime_ready:
+            detail = f"需下载 {model.size_gib:.2f} GiB 模型；支持断点续传。"
+        else:
+            detail = (
+                f"需下载 {model.size_gib:.2f} GiB 模型及 CUDA 本地运行时；"
+                "支持断点续传。"
+            )
+        self.local_model_status_label.setText(detail)
+        if self._selected_translation_backend() == "builtin":
+            self._set_status_chip(
+                self.llm_status_chip,
+                "LLM · 需下载",
+                tone="neutral",
+                tooltip=detail,
+            )
+
+    def _download_selected_builtin_model(self) -> None:
+        thread = self._local_install_thread
+        if thread is not None and thread.is_alive():
+            self._local_install_cancel.set()
+            self.local_download_button.setEnabled(False)
+            self.local_download_button.setText("正在取消……")
+            return
+        try:
+            model = self._selected_builtin_model()
+            if not self._save_translation_settings(announce=False):
+                return
+        except (ConfigError, LocalBackendError) as exc:
+            self._show_error("无法下载内置模型", exc)
+            return
+
+        self._local_install_cancel = threading.Event()
+        self._local_install_events = queue.SimpleQueue()
+        root = local_backend_root(self._config_path)
+
+        def progress(phase: str, label: str, completed: int, total: int) -> None:
+            self._local_install_events.put(
+                ("progress", phase, label, completed, total)
+            )
+
+        def install() -> None:
+            try:
+                install_local_backend(
+                    root,
+                    model.model_id,
+                    progress=progress,
+                    cancel=self._local_install_cancel,
+                )
+            except LocalBackendDownloadCancelled:
+                self._local_install_events.put(("cancelled",))
+            except Exception as exc:
+                # Always unlock the GUI even if an unexpected installer error escapes.
+                self._local_install_events.put(("error", str(exc)))
+            else:
+                self._local_install_events.put(("done",))
+
+        self._local_install_thread = threading.Thread(
+            target=install,
+            name="local-llm-installer",
+            daemon=True,
+        )
+        self._local_install_thread.start()
+        self.local_download_progress.setRange(0, 1000)
+        self.local_download_progress.setValue(0)
+        self.local_download_progress.show()
+        self.local_download_button.setText("取消下载")
+        self.local_delete_button.setEnabled(False)
+        self.builtin_model_combo.setEnabled(False)
+        self.backend_combo.setEnabled(False)
+        self.local_model_status_label.setText(
+            f"正在准备 {model.display_name}；可随时取消并保留断点。"
+        )
+        self._local_install_monitor.start()
+
+    def _check_local_install_events(self) -> None:
+        terminal_event: tuple | None = None
+        while True:
+            try:
+                event = self._local_install_events.get_nowait()
+            except queue.Empty:
+                break
+            if event[0] == "progress":
+                _, phase, label, completed, total = event
+                value = 0 if total <= 0 else round(completed / total * 1000)
+                self.local_download_progress.setValue(max(0, min(1000, value)))
+                action = {
+                    "download": "正在下载",
+                    "verify": "正在校验",
+                    "extract": "正在安装",
+                    "ready": "已完成",
+                }.get(phase, "正在处理")
+                self.local_download_progress.setFormat(
+                    f"{action} {label} · %p%"
+                )
+                if phase == "extract":
+                    detail = f"{action} {label}……"
+                else:
+                    detail = (
+                        f"{action} {label}："
+                        f"{completed / (1024**2):.1f} / "
+                        f"{total / (1024**2):.1f} MiB"
+                    )
+                self.local_model_status_label.setText(detail)
+            else:
+                terminal_event = event
+        if terminal_event is None:
+            return
+        self._local_install_monitor.stop()
+        self._local_install_thread = None
+        self.builtin_model_combo.setEnabled(True)
+        self.backend_combo.setEnabled(True)
+        if terminal_event[0] == "done":
+            self.local_download_progress.setValue(1000)
+            self.statusBar().showMessage("内置本地模型已下载、校验并安装", 8000)
+        elif terminal_event[0] == "cancelled":
+            self.local_download_progress.hide()
+            self.statusBar().showMessage("下载已取消；断点已保留", 6000)
+        else:
+            self.local_download_progress.hide()
+            self._show_error(
+                "内置模型下载失败",
+                LocalBackendError(str(terminal_event[1])),
+            )
+        self._refresh_local_model_status()
+
+    def _delete_selected_builtin_model(self) -> None:
+        try:
+            model = self._selected_builtin_model()
+        except (ConfigError, LocalBackendError) as exc:
+            self._show_error("无法删除内置模型", exc)
+            return
+        answer = QMessageBox.question(
+            self,
+            "删除内置模型",
+            f"确定删除 {model.display_name}？\n"
+            "已下载文件和断点都会删除，以后再次使用时需要重新下载。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            released = remove_builtin_model(
+                local_backend_root(self._config_path),
+                model.model_id,
+            )
+        except OSError as exc:
+            self._show_error("删除内置模型失败", exc)
+            return
+        self.local_download_progress.hide()
+        self._refresh_local_model_status()
+        self.statusBar().showMessage(
+            f"已删除 {model.display_name}，释放 {released / (1024**3):.2f} GiB",
+            8000,
+        )
+
     def _translation_candidate(self, *, require_model: bool = True):
         base_url = self.server_url_combo.currentText().strip()
         model = self.model_combo.currentText().strip()
@@ -1210,6 +1550,8 @@ class LauncherWindow(QMainWindow):
             model = self._config.translation.model
         return replace(
             self._config.translation,
+            backend=self._selected_translation_backend(),
+            builtin_model=self._selected_builtin_model().model_id,
             base_url=base_url,
             model=model,
             api_key=self.api_key_edit.text(),
@@ -1495,6 +1837,8 @@ class LauncherWindow(QMainWindow):
                 self._config_path,
                 base_url=translation.base_url,
                 model=translation.model,
+                backend=translation.backend,
+                builtin_model=translation.builtin_model,
                 api_key=translation.api_key,
                 ocr_device=ocr.device,
                 max_concurrency=translation.max_concurrency,
@@ -1521,6 +1865,14 @@ class LauncherWindow(QMainWindow):
         except (ConfigError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("保存运行设置失败", exc)
             return False
+        backend_index = self.backend_combo.findData(self._config.translation.backend)
+        if backend_index >= 0:
+            self.backend_combo.setCurrentIndex(backend_index)
+        builtin_index = self.builtin_model_combo.findData(
+            self._config.translation.builtin_model
+        )
+        if builtin_index >= 0:
+            self.builtin_model_combo.setCurrentIndex(builtin_index)
         self.server_url_combo.setCurrentText(self._config.translation.base_url)
         self.model_combo.setCurrentText(self._config.translation.model)
         self.api_key_edit.setText(self._config.translation.api_key)
@@ -1557,10 +1909,9 @@ class LauncherWindow(QMainWindow):
         self.roi_response_target_spin.setValue(
             self._config.live.dynamic_roi_response_target_ms
         )
+        self._sync_translation_backend_controls()
         self.service_status_label.setText(
-            f"当前：{self._config.translation.model} · "
-            f"{self._config.translation.normalized_base_url} · "
-            f"并发 {self._config.translation.max_concurrency} · "
+            f"当前：{self._translation_summary(self._config.translation)} · "
             f"OCR {self._config.ocr.device} · "
             f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
             f"合并{'开' if self._config.ocr.text_merge_enabled else '关'} · "
@@ -1851,6 +2202,21 @@ class LauncherWindow(QMainWindow):
             self._show_error("实时翻译已在运行", RuntimeError("请先关闭现有翻译进程"))
             return
         try:
+            backend = self._selected_translation_backend()
+            builtin_model = self._selected_builtin_model()
+        except (ConfigError, LocalBackendError) as exc:
+            self._show_error("LLM 后端配置无效", exc)
+            return
+        if backend == "builtin" and not local_backend_is_ready(
+            local_backend_root(self._config_path),
+            builtin_model.model_id,
+        ):
+            self._show_error(
+                "内置模型尚未准备好",
+                LocalBackendError("请先点击“下载并使用”，等待下载和校验完成"),
+            )
+            return
+        try:
             selected_device = self._ocr_candidate().device
             self.statusBar().showMessage(f"正在检查 OCR 设备 {selected_device}……")
             QApplication.processEvents()
@@ -1904,13 +2270,16 @@ class LauncherWindow(QMainWindow):
             self._show_error("启动失败", exc)
             return
         self._live_process = process
+        self._live_waiting_for_ready = self._config.translation.backend == "builtin"
         self._live_monitor.start()
         # The launcher itself does not use SetWindowDisplayAffinity: that API
         # can block in some Windows graphics/remote-session configurations.
         # Minimize after the child is created so it does not enter OCR.
-        self.showMinimized()
+        if not self._live_waiting_for_ready:
+            self.showMinimized()
         self.statusBar().showMessage(
-            f"实时翻译正在启动（进程 {process.pid}，{runtime_description}）；"
+            f"实时翻译正在启动（进程 {process.pid}，{runtime_description}）"
+            f"{'；正在加载内置模型' if self._live_waiting_for_ready else ''}；"
             f"诊断日志：{self._live_log_path}",
             10000,
         )
@@ -1922,9 +2291,26 @@ class LauncherWindow(QMainWindow):
             return
         exit_code = process.poll()
         if exit_code is None:
+            if self._live_waiting_for_ready:
+                log = _log_tail(self._live_log_path)
+                if f"[{PRODUCT_NAME} Live] ready" in log:
+                    self._live_waiting_for_ready = False
+                    self.showMinimized()
+                    self.statusBar().showMessage("实时翻译已就绪", 5000)
+                elif "managed local model ready:" in log:
+                    self.statusBar().showMessage(
+                        "内置模型已加载，正在启动屏幕捕获……"
+                    )
+                elif "starting managed local model:" in log:
+                    self.statusBar().showMessage(
+                        "正在将内置模型加载到 NVIDIA GPU……"
+                    )
+                elif "initializing OCR on" in log:
+                    self.statusBar().showMessage("正在初始化 CUDA OCR……")
             return
         self._live_monitor.stop()
         self._live_process = None
+        self._live_waiting_for_ready = False
         if exit_code == 0:
             self.statusBar().showMessage("实时翻译已关闭", 5000)
             return

@@ -37,6 +37,8 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
 
     assert config.translation.normalized_base_url == "http://127.0.0.1:1234/v1/"
     assert config.translation.max_concurrency == 3
+    assert config.translation.backend == "external"
+    assert config.translation.builtin_model == "Hy-MT2-1.8B-Q8_0.gguf"
     assert config.translation.api_key == ""
     assert config.translation.api_key_env == "REFRA_TRANSLATOR_API_KEY"
     assert config.ocr.language == "japan"
@@ -300,6 +302,53 @@ capture_fps = 12
     assert "temperature = 0.25" in text
     assert "[live]" in text
     assert "capture_fps = 12" in text
+
+
+def test_save_runtime_selection_keeps_external_api_while_selecting_builtin(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, 'api_key = "external-secret"\n')
+
+    saved = save_runtime_selection(
+        path,
+        backend="builtin",
+        builtin_model="Hy-MT2-7B-Q4_K_M.gguf",
+        base_url="http://127.0.0.1:1234/v1",
+        model="external-model",
+        api_key="external-secret",
+        ocr_device="gpu:0",
+    )
+
+    assert saved.translation.backend == "builtin"
+    assert saved.translation.builtin_model == "Hy-MT2-7B-Q4_K_M.gguf"
+    assert saved.translation.base_url == "http://127.0.0.1:1234/v1"
+    assert saved.translation.model == "external-model"
+    assert saved.translation.api_key == "external-secret"
+    text = path.read_text(encoding="utf-8")
+    assert 'backend = "builtin"' in text
+    assert 'builtin_model = "Hy-MT2-7B-Q4_K_M.gguf"' in text
+
+
+@pytest.mark.parametrize("backend", ["local", "cuda", ""])
+def test_translation_config_rejects_unknown_backend(backend: str) -> None:
+    with pytest.raises(ConfigError, match="backend"):
+        TranslationConfig(
+            provider="openai_compatible",
+            backend=backend,
+            base_url="http://127.0.0.1:1234/v1",
+            model="model",
+        )
+
+
+def test_translation_config_rejects_non_string_builtin_model() -> None:
+    with pytest.raises(ConfigError, match="builtin_model"):
+        TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://127.0.0.1:1234/v1",
+            model="model",
+            builtin_model=123,  # type: ignore[arg-type]
+        )
 
 
 def test_live_capture_fps_follows_change_poll_frequency(tmp_path: Path) -> None:
