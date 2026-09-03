@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication
 from game_screen_translator.config import load_config
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.gui.launcher import LauncherWindow
-from game_screen_translator.gui.theme import THEME_DARK
+from game_screen_translator.gui.theme import THEME_DARK, THEME_LIGHT
 from game_screen_translator.profiles import (
     ProfileCaptureSettings,
     create_game_profile,
@@ -24,14 +24,15 @@ def main() -> int:
     project_root = Path(__file__).resolve().parents[1]
     output_dir = project_root / "output"
     output_dir.mkdir(exist_ok=True)
-    output_path = output_dir / "launcher_preview.png"
+    dark_output_path = output_dir / "launcher_preview.png"
+    light_output_path = output_dir / "launcher_preview_light.png"
     with tempfile.TemporaryDirectory(dir=output_dir) as temporary_dir:
         config_path = Path(temporary_dir) / "config.toml"
         config_path.write_text(
             """
 [translation]
 provider = "openai_compatible"
-backend = "builtin"
+backend = "external"
 builtin_model = "Hy-MT2-1.8B-Q8_0.gguf"
 base_url = "http://127.0.0.1:1234/v1"
 model = "hy-mt1.5-7b"
@@ -65,16 +66,26 @@ target_language = "简体中文"
         )
 
         app = QApplication.instance() or QApplication([])
-        window = LauncherWindow(config_path, probe_ocr_devices=False)
-        window.theme_combo.setCurrentIndex(window.theme_combo.findData(THEME_DARK))
-        window.resize(1080, 980)
-        window.show()
-        app.processEvents()
-        if not window.grab().save(str(output_path)):
-            raise RuntimeError(f"无法保存启动器预览：{output_path}")
-        window.close()
-        app.processEvents()
-    print(output_path)
+
+        def render(theme: str, output_path: Path) -> None:
+            window = LauncherWindow(config_path, probe_ocr_devices=False)
+            window.theme_combo.setCurrentIndex(window.theme_combo.findData(theme))
+            window.resize(1440, 960)
+            window.show()
+            app.processEvents()
+            if not window.grab().save(str(output_path)):
+                raise RuntimeError(f"无法保存启动器预览：{output_path}")
+            window.close()
+            app.processEvents()
+
+        render(THEME_DARK, dark_output_path)
+        save_profile_capture_settings(
+            profile,
+            ProfileCaptureSettings(monitor_index=0, region=(0, 0, 0, 0)),
+        )
+        render(THEME_LIGHT, light_output_path)
+    print(dark_output_path)
+    print(light_output_path)
     return 0
 
 

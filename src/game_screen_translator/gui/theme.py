@@ -65,51 +65,51 @@ class ThemeColors:
 
 
 _LIGHT_COLORS = ThemeColors(
-    window="#f4f6f8",
+    window="#f5f6f8",
     panel="#ffffff",
-    input="#ffffff",
-    alternate="#f7f9fb",
-    text="#20242a",
-    muted="#5d6874",
-    disabled="#929aa3",
-    border="#c8d0d9",
-    tab="#e8edf2",
-    button="#f7f9fb",
-    button_hover="#e9eef4",
-    accent="#1677ff",
-    accent_hover="#095fc7",
-    selection="#b8d8ff",
-    selected_text="#101820",
-    success="#137a4e",
-    success_background="#e9f8f0",
-    warning="#9a6700",
-    warning_background="#fff4d6",
-    danger="#c73535",
-    danger_background="#fdecec",
+    input="#f7f8fa",
+    alternate="#eef1f5",
+    text="#181b20",
+    muted="#667085",
+    disabled="#98a2b3",
+    border="#e5e7eb",
+    tab="#eef2f6",
+    button="#eef1f5",
+    button_hover="#e4e8ee",
+    accent="#3b82f6",
+    accent_hover="#2563eb",
+    selection="#dbeafe",
+    selected_text="#14213d",
+    success="#1f9d6b",
+    success_background="#eaf8f1",
+    warning="#c47a14",
+    warning_background="#fff5e5",
+    danger="#dc4c4c",
+    danger_background="#feeeee",
 )
 
 _DARK_COLORS = ThemeColors(
-    window="#171a21",
-    panel="#20242d",
-    input="#151820",
-    alternate="#1b1f27",
-    text="#f2f4f7",
-    muted="#aeb7c2",
-    disabled="#737d89",
-    border="#414a57",
-    tab="#292f39",
-    button="#2a303a",
-    button_hover="#353d49",
-    accent="#3b8cff",
-    accent_hover="#69a6ff",
-    selection="#275f99",
+    window="#0f1115",
+    panel="#191d24",
+    input="#101319",
+    alternate="#14171d",
+    text="#f3f5f7",
+    muted="#9ba4b0",
+    disabled="#626b77",
+    border="#2a3038",
+    tab="#20252d",
+    button="#242a33",
+    button_hover="#2d3540",
+    accent="#4c8dff",
+    accent_hover="#6da3ff",
+    selection="#203b64",
     selected_text="#ffffff",
-    success="#5bd6a0",
-    success_background="#173c30",
-    warning="#f5c451",
-    warning_background="#443718",
-    danger="#ff7b7b",
-    danger_background="#472526",
+    success="#32c48d",
+    success_background="#173329",
+    warning="#e7a23b",
+    warning_background="#3d2e17",
+    danger="#ef5b5b",
+    danger_background="#402123",
 )
 
 
@@ -237,103 +237,166 @@ def theme_stylesheet(theme: str) -> str:
             background-color: {colors.window};
             color: {colors.text};
         }}
-        QWidget {{ color: {colors.text}; }}
+        QWidget {{
+            color: {colors.text};
+            font-size: 13px;
+        }}
         QWidget#launcherCentral {{ background-color: {colors.window}; }}
+        QWidget#contentHost, QWidget#workspacePage {{
+            background-color: {colors.window};
+        }}
         QWidget#launchContent {{ background-color: transparent; }}
         QLabel {{ background-color: transparent; }}
         QLabel#secondaryText {{ color: {colors.muted}; }}
         QLabel#brandTitle {{
             color: {colors.text};
-            font-size: 17px;
+            font-size: 18px;
             font-weight: 700;
         }}
         QLabel#brandSubtitle, QLabel#cardDescription,
-        QLabel#detectionQualityDetail {{
+        QLabel#detectionQualityDetail, QLabel#pageDescription {{
             color: {colors.muted};
         }}
-        QLabel#brandSubtitle {{ font-size: 11px; }}
+        QLabel#brandSubtitle {{ font-size: 12px; }}
+        QLabel#currentConfigLabel {{
+            color: {colors.muted};
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        QLabel#pageTitle {{
+            color: {colors.text};
+            font-size: 20px;
+            font-weight: 650;
+        }}
+        QLabel#pageDescription {{ font-size: 13px; }}
         QLabel#cardTitle {{
             color: {colors.text};
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 650;
         }}
         QLabel#scopeBadge {{
-            color: {colors.accent};
-            background-color: {colors.selection};
-            border-radius: 8px;
-            padding: 2px 7px;
+            color: {colors.muted};
+            background-color: transparent;
+            padding: 1px 2px;
             font-size: 11px;
         }}
-        QLabel#statusChip {{
+        QLabel#advancedSectionTitle {{
+            color: {colors.text};
+            font-size: 12px;
+            font-weight: 650;
+        }}
+        QLabel#diagnosticText {{
+            color: {colors.text};
+            line-height: 1.5;
+        }}
+        QLabel#statusChip, QLabel#runStatusChip {{
             color: {colors.muted};
-            background-color: {colors.alternate};
-            border: 1px solid {colors.border};
-            border-radius: 10px;
-            padding: 3px 9px;
+            background-color: transparent;
+            border: 0;
+            padding: 3px 2px;
             font-weight: 600;
         }}
-        QLabel#statusChip[tone="success"] {{
+        QLabel#statusChip[tone="success"], QLabel#runStatusChip[tone="success"] {{
             color: {colors.success};
-            background-color: {colors.success_background};
-            border-color: {colors.success};
         }}
-        QLabel#statusChip[tone="warning"] {{
+        QLabel#statusChip[tone="warning"], QLabel#runStatusChip[tone="warning"] {{
             color: {colors.warning};
-            background-color: {colors.warning_background};
-            border-color: {colors.warning};
         }}
-        QLabel#statusChip[tone="error"] {{
+        QLabel#statusChip[tone="error"], QLabel#runStatusChip[tone="error"] {{
             color: {colors.danger};
-            background-color: {colors.danger_background};
-            border-color: {colors.danger};
         }}
-        QFrame#topBar, QFrame#statusStrip, QFrame#actionBar,
+        QFrame#topBar {{
+            background-color: {colors.panel};
+            border: 0;
+            border-bottom: 1px solid {colors.border};
+        }}
+        QFrame#workspace {{
+            background-color: {colors.window};
+            border: 0;
+        }}
+        QFrame#sideBar {{
+            background-color: {colors.alternate};
+            border: 0;
+            border-right: 1px solid {colors.border};
+        }}
+        QFrame#actionBar {{
+            background-color: {colors.panel};
+            border: 0;
+            border-top: 1px solid {colors.border};
+        }}
         QFrame#settingsCard {{
             background-color: {colors.panel};
-            border: 1px solid {colors.border};
+            border: 0;
+            border-radius: 10px;
+        }}
+        QFrame#inlinePanel, QFrame#segmentedControl,
+        QFrame#appearanceControl {{
+            background-color: {colors.alternate};
+            border: 0;
             border-radius: 8px;
         }}
-        QFrame#statusStrip {{ background-color: {colors.alternate}; }}
-        QFrame#actionBar {{ border-radius: 7px; }}
+        QLabel#settingsIcon {{
+            color: {colors.muted};
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        QLabel#navSectionLabel {{
+            color: {colors.muted};
+            font-size: 11px;
+            font-weight: 650;
+            padding: 3px 10px 5px 10px;
+        }}
+        QToolButton[navItem="true"] {{
+            color: {colors.muted};
+            background-color: transparent;
+            border: 0;
+            border-left: 3px solid transparent;
+            border-radius: 6px;
+            padding: 10px 12px;
+            text-align: left;
+            font-size: 14px;
+        }}
+        QToolButton[navItem="true"]:hover {{
+            color: {colors.text};
+            background-color: {colors.button_hover};
+        }}
+        QToolButton[navItem="true"]:checked {{
+            color: {colors.accent};
+            background-color: {colors.selection};
+            border-left-color: {colors.accent};
+            font-weight: 650;
+        }}
+        QToolButton[navItem="true"]:disabled {{ color: {colors.disabled}; }}
         QScrollArea#launchScroll {{
             background-color: transparent;
             border: 0;
         }}
-        QTabWidget::pane {{
-            border: 1px solid {colors.border};
-            background-color: {colors.panel};
-            border-radius: 7px;
-            top: -1px;
-        }}
-        QTabBar::tab {{
-            padding: 9px 18px;
-            margin-right: 3px;
-            color: {colors.muted};
-            background-color: {colors.tab};
-            border: 1px solid {colors.border};
-            border-bottom: 0;
-            border-top-left-radius: 6px;
-            border-top-right-radius: 6px;
-        }}
-        QTabBar::tab:selected {{
-            color: {colors.accent};
-            background-color: {colors.panel};
-        }}
-        QTabBar::tab:disabled {{ color: {colors.disabled}; }}
-        QLineEdit, QComboBox, QSpinBox, QTableWidget, QAbstractItemView {{
+        QLineEdit, QComboBox, QSpinBox, QPlainTextEdit,
+        QTableWidget, QAbstractItemView {{
             color: {colors.text};
             background-color: {colors.input};
             selection-background-color: {colors.selection};
             selection-color: {colors.selected_text};
             border: 1px solid {colors.border};
-            border-radius: 3px;
+            border-radius: 6px;
         }}
         QLineEdit, QComboBox, QSpinBox {{
-            padding: 4px 7px;
-            min-height: 25px;
+            padding: 5px 9px;
+            min-height: 27px;
         }}
-        QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTableWidget:focus {{
+        QPlainTextEdit {{
+            padding: 9px;
+        }}
+        QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
+        QPlainTextEdit:focus, QTableWidget:focus {{
             border-color: {colors.accent};
+        }}
+        QLineEdit:read-only {{ color: {colors.muted}; }}
+        QComboBox::drop-down {{ border: 0; width: 24px; }}
+        QComboBox#themeCombo {{
+            background-color: transparent;
+            border: 0;
+            padding-left: 4px;
         }}
         QComboBox QAbstractItemView {{
             background-color: {colors.input};
@@ -355,20 +418,20 @@ def theme_stylesheet(theme: str) -> str:
         QPushButton {{
             color: {colors.text};
             background-color: {colors.button};
-            border: 1px solid {colors.border};
-            border-radius: 5px;
-            padding: 7px 13px;
+            border: 0;
+            border-radius: 6px;
+            padding: 8px 14px;
         }}
         QPushButton:hover {{ background-color: {colors.button_hover}; }}
-        QPushButton:pressed {{ border-color: {colors.accent}; }}
+        QPushButton:pressed {{ background-color: {colors.selection}; }}
         QPushButton:disabled {{ color: {colors.disabled}; }}
         QPushButton#applyButton {{
-            color: {colors.accent};
-            background-color: {colors.panel};
-            border-color: {colors.accent};
+            color: {colors.text};
+            background-color: {colors.button};
             font-weight: 600;
+            padding: 10px 18px;
         }}
-        QPushButton#applyButton:hover {{ background-color: {colors.selection}; }}
+        QPushButton#applyButton:hover {{ background-color: {colors.button_hover}; }}
         QPushButton#startButton {{
             background-color: {colors.accent};
             color: white;
@@ -379,6 +442,50 @@ def theme_stylesheet(theme: str) -> str:
             font-weight: 700;
         }}
         QPushButton#startButton:hover {{ background-color: {colors.accent_hover}; }}
+        QPushButton#startButton[running="true"] {{
+            background-color: {colors.danger};
+        }}
+        QPushButton#textActionButton {{
+            color: {colors.accent};
+            background-color: transparent;
+            padding: 6px 8px;
+            font-weight: 600;
+        }}
+        QPushButton#textActionButton:hover {{ background-color: {colors.selection}; }}
+        QPushButton#backendOption {{
+            color: {colors.muted};
+            background-color: transparent;
+            padding: 8px 18px;
+        }}
+        QPushButton#backendOption:hover {{
+            color: {colors.text};
+            background-color: {colors.button_hover};
+        }}
+        QPushButton#backendOption:checked {{
+            color: {colors.accent};
+            background-color: {colors.panel};
+            font-weight: 650;
+        }}
+        QToolButton#profileAction {{
+            color: {colors.text};
+            background-color: {colors.button};
+            border: 0;
+            border-radius: 6px;
+            padding: 8px 10px;
+        }}
+        QToolButton#profileAction:hover {{ background-color: {colors.button_hover}; }}
+        QToolButton#iconButton {{
+            color: {colors.muted};
+            background-color: transparent;
+            border: 0;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 12px;
+        }}
+        QToolButton#iconButton:hover {{
+            color: {colors.text};
+            background-color: {colors.button_hover};
+        }}
         QToolButton#advancedToggle {{
             color: {colors.accent};
             background-color: transparent;
@@ -409,6 +516,7 @@ def theme_stylesheet(theme: str) -> str:
             background-color: {colors.selection};
             border-color: {colors.accent_hover};
         }}
+        QRadioButton {{ spacing: 7px; background-color: transparent; }}
         QCheckBox {{ spacing: 7px; background-color: transparent; }}
         QCheckBox::indicator {{
             width: 16px;
@@ -433,8 +541,8 @@ def theme_stylesheet(theme: str) -> str:
         }}
         QStatusBar {{
             color: {colors.muted};
-            background-color: {colors.window};
-            border-top: 1px solid {colors.border};
+            background-color: {colors.alternate};
+            border: 0;
         }}
         QStatusBar::item {{ border: 0; }}
         QToolTip {{

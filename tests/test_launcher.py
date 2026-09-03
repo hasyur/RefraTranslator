@@ -295,7 +295,45 @@ def test_launcher_starts_live_with_same_isolated_interpreter(
     assert saved.live.dynamic_roi_response_target_ms == 650
     assert saved.recording.browser_overlay_enabled is True
     assert saved.recording.browser_overlay_port == 47831
+    assert window.start_button.text() == "停止翻译"
+    assert "正在翻译" in window.run_status_chip.text()
     window._live_monitor.stop()
+    window.close()
+    app.processEvents()
+
+
+def test_launcher_stop_action_restores_primary_control(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(config_path, load_config(config_path), "game")
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+
+    class StoppableProcess:
+        def __init__(self) -> None:
+            self.terminated = False
+
+        def poll(self):
+            return 1 if self.terminated else None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    process = StoppableProcess()
+    window._live_process = process
+    window._set_run_state("正在翻译", tone="success", running=True)
+
+    window._toggle_live()
+
+    assert process.terminated
+    assert window._live_stop_requested
+    assert not window.start_button.isEnabled()
+    window._check_live_process()
+    assert window._live_process is None
+    assert not window._live_stop_requested
+    assert window.start_button.isEnabled()
+    assert window.start_button.text() == "开始翻译"
+    assert "已停止" in window.run_status_chip.text()
     window.close()
     app.processEvents()
 
@@ -352,8 +390,8 @@ def test_launcher_theme_switch_has_contrast_and_persists_project_locally(
     app.processEvents()
 
     assert window.property("effectiveTheme") == THEME_DARK
-    assert window.palette().color(QPalette.ColorRole.Window).name() == "#171a21"
-    assert window.palette().color(QPalette.ColorRole.WindowText).name() == "#f2f4f7"
+    assert window.palette().color(QPalette.ColorRole.Window).name() == "#0f1115"
+    assert window.palette().color(QPalette.ColorRole.WindowText).name() == "#f3f5f7"
     assert load_gui_preferences(config_path).theme == THEME_DARK
     assert settings_path.is_file()
     window.close()
@@ -364,8 +402,8 @@ def test_launcher_theme_switch_has_contrast_and_persists_project_locally(
     assert restored.property("effectiveTheme") == THEME_DARK
     restored.theme_combo.setCurrentIndex(restored.theme_combo.findData(THEME_LIGHT))
     app.processEvents()
-    assert restored.palette().color(QPalette.ColorRole.Window).name() == "#f4f6f8"
-    assert restored.palette().color(QPalette.ColorRole.WindowText).name() == "#20242a"
+    assert restored.palette().color(QPalette.ColorRole.Window).name() == "#f5f6f8"
+    assert restored.palette().color(QPalette.ColorRole.WindowText).name() == "#181b20"
     assert load_gui_preferences(config_path).theme == THEME_LIGHT
     restored.close()
     app.processEvents()
@@ -455,6 +493,8 @@ def test_launcher_switches_builtin_backend_without_overwriting_external_api(
     )
     window._refresh_local_model_status()
 
+    assert window.builtin_backend_button.isChecked()
+    assert not window.external_backend_button.isChecked()
     assert window._translation_form.isRowVisible(window._builtin_model_widget)
     assert not window._translation_form.isRowVisible(window.server_url_combo)
     assert window.local_download_button.text() == "已下载"
@@ -469,6 +509,8 @@ def test_launcher_switches_builtin_backend_without_overwriting_external_api(
     assert saved.translation.api_key == "external-secret"
 
     window.backend_combo.setCurrentIndex(window.backend_combo.findData("external"))
+    assert not window.builtin_backend_button.isChecked()
+    assert window.external_backend_button.isChecked()
     assert not window._translation_form.isRowVisible(window._builtin_model_widget)
     assert window._translation_form.isRowVisible(window.server_url_combo)
     assert window.server_url_combo.currentText() == "https://external.test/v1"
@@ -804,11 +846,11 @@ def test_light_theme_checkbox_uses_a_contrasting_checked_indicator() -> None:
     stylesheet = theme_stylesheet(THEME_LIGHT)
 
     assert "QCheckBox::indicator:checked" in stylesheet
-    assert "background-color: #1677ff" in stylesheet
+    assert "background-color: #3b82f6" in stylesheet
     assert "checkmark.svg" in stylesheet
 
 
-def test_launcher_uses_configuration_wording_and_collapsible_cards(
+def test_launcher_uses_workbench_navigation_and_collapsible_cards(
     tmp_path: Path,
 ) -> None:
     app = QApplication.instance() or QApplication([])
@@ -821,13 +863,36 @@ def test_launcher_uses_configuration_wording_and_collapsible_cards(
     current_label = window.findChild(QLabel, "currentConfigLabel")
     assert current_label is not None
     assert current_label.text() == "当前配置"
-    assert window.tabs.tabText(0) == "实时翻译"
-    assert window.tabs.tabText(3) == "数据与诊断"
+    assert window._page_titles == ("实时翻译", "术语表", "人工修订", "数据与诊断")
+    assert window.pages.count() == 4
+    assert [button.text() for button in window._nav_buttons] == [
+        "●  实时翻译",
+        "术语表",
+        "人工修订",
+        "数据与诊断",
+    ]
+    assert window._nav_buttons[0].isChecked()
+    assert window.pages.maximumWidth() == 1180
+    assert window.start_button.text() == "开始翻译"
+    assert window.apply_button.text() == "保存更改"
     assert not window.advanced_settings_content.isVisible()
     assert window.advanced_settings_button.text() == "展开高级参数"
 
     window.show()
+    window._nav_buttons[1].click()
+    assert window.pages.currentIndex() == 1
+    window._nav_buttons[0].click()
+    assert window.pages.currentIndex() == 0
     assert window.detection_quality_slider.isVisible()
+    assert window.custom_region_radio.isChecked()
+    assert window.custom_region_panel.isVisible()
+    window.full_screen_radio.setChecked(True)
+    app.processEvents()
+    assert window._current_region() == (0, 0, 0, 0)
+    assert not window.custom_region_panel.isVisible()
+    window.custom_region_radio.setChecked(True)
+    app.processEvents()
+    assert window.custom_region_panel.isVisible()
     assert window.detection_quality_slider.tickInterval() == 1
     assert (
         window.detection_quality_slider.tickPosition()
@@ -838,18 +903,18 @@ def test_launcher_uses_configuration_wording_and_collapsible_cards(
     assert window.advanced_settings_content.isVisible()
     assert window.advanced_settings_button.text() == "收起高级参数"
 
-    window.resize(820, 620)
+    window.resize(960, 680)
     app.processEvents()
     launch_scroll = window.findChild(QScrollArea, "launchScroll")
     assert launch_scroll is not None
     assert window._launch_cards_compact is True
     assert launch_scroll.horizontalScrollBar().maximum() == 0
 
-    window.resize(1080, 760)
+    window.resize(1280, 820)
     app.processEvents()
     assert window._launch_cards_compact is False
     capture_card, ocr_card, _translation_card, _advanced_card = window._launch_cards
-    assert ocr_card.width() > capture_card.width()
+    assert abs(ocr_card.width() - capture_card.width()) <= 4
 
     window.close()
     app.processEvents()

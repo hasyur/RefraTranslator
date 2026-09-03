@@ -110,6 +110,7 @@ try:
     from PySide6.QtWidgets import (
         QAbstractItemView,
         QApplication,
+        QButtonGroup,
         QCheckBox,
         QComboBox,
         QDialog,
@@ -126,10 +127,11 @@ try:
         QPlainTextEdit,
         QProgressBar,
         QPushButton,
+        QRadioButton,
         QScrollArea,
         QSlider,
         QSpinBox,
-        QTabWidget,
+        QStackedWidget,
         QTableWidget,
         QTableWidgetItem,
         QToolButton,
@@ -149,8 +151,8 @@ def _settings_card(
     card = QFrame()
     card.setObjectName("settingsCard")
     layout = QVBoxLayout(card)
-    layout.setContentsMargins(18, 16, 18, 16)
-    layout.setSpacing(12)
+    layout.setContentsMargins(22, 20, 22, 20)
+    layout.setSpacing(14)
 
     heading = QHBoxLayout()
     heading.setSpacing(8)
@@ -173,7 +175,7 @@ def _settings_card(
 
 
 def _status_chip(text: str, *, tone: str = "neutral") -> QLabel:
-    label = QLabel(text)
+    label = QLabel(text if text.lstrip().startswith("●") else f"● {text}")
     label.setObjectName("statusChip")
     label.setProperty("tone", tone)
     return label
@@ -385,6 +387,7 @@ class LauncherWindow(QMainWindow):
         self._model_reply: QNetworkReply | None = None
         self._live_process: subprocess.Popen | None = None
         self._live_waiting_for_ready = False
+        self._live_stop_requested = False
         self._live_log_path = self._config_path.parent / "output" / "live.log"
         self._live_monitor = QTimer(self)
         self._live_monitor.setInterval(500)
@@ -401,8 +404,8 @@ class LauncherWindow(QMainWindow):
         self._local_install_monitor.setInterval(100)
         self._local_install_monitor.timeout.connect(self._check_local_install_events)
         self.setWindowTitle(PRODUCT_NAME)
-        self.resize(1080, 760)
-        self.setMinimumSize(820, 620)
+        self.resize(1280, 820)
+        self.setMinimumSize(960, 680)
         self._apply_theme()
         if app is not None:
             app.styleHints().colorSchemeChanged.connect(self._system_theme_changed)
@@ -411,72 +414,135 @@ class LauncherWindow(QMainWindow):
         central = QWidget()
         central.setObjectName("launcherCentral")
         root = QVBoxLayout(central)
-        root.setContentsMargins(16, 14, 16, 12)
-        root.setSpacing(12)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         top_bar = QFrame()
         top_bar.setObjectName("topBar")
         top_bar_layout = QHBoxLayout(top_bar)
-        top_bar_layout.setContentsMargins(16, 12, 16, 12)
-        top_bar_layout.setSpacing(10)
+        top_bar_layout.setContentsMargins(26, 14, 24, 14)
+        top_bar_layout.setSpacing(18)
 
         brand_layout = QVBoxLayout()
-        brand_layout.setSpacing(0)
+        brand_layout.setSpacing(2)
         brand_title = QLabel(PRODUCT_NAME)
         brand_title.setObjectName("brandTitle")
-        brand_subtitle = QLabel("实时屏幕翻译控制台")
+        brand_subtitle = QLabel("实时屏幕翻译")
         brand_subtitle.setObjectName("brandSubtitle")
         brand_layout.addWidget(brand_title)
         brand_layout.addWidget(brand_subtitle)
         top_bar_layout.addLayout(brand_layout)
         top_bar_layout.addStretch(1)
 
-        profile_row = QHBoxLayout()
-        profile_row.setSpacing(8)
+        profile_block = QVBoxLayout()
+        profile_block.setSpacing(4)
         current_config_label = QLabel("当前配置")
         current_config_label.setObjectName("currentConfigLabel")
-        profile_row.addWidget(current_config_label)
+        profile_block.addWidget(current_config_label)
+
+        profile_row = QHBoxLayout()
+        profile_row.setSpacing(6)
         self.profile_combo = QComboBox()
-        self.profile_combo.setMinimumWidth(270)
+        self.profile_combo.setObjectName("profileCombo")
+        self.profile_combo.setMinimumWidth(220)
+        self.profile_combo.setMaximumWidth(290)
         self.profile_combo.currentIndexChanged.connect(self._load_selected_profile)
-        new_profile_button = QPushButton("新建配置")
-        refresh_button = QPushButton("刷新")
+        new_profile_button = QToolButton()
+        new_profile_button.setObjectName("profileAction")
+        new_profile_button.setText("＋ 新建")
+        new_profile_button.setToolTip("新建配置")
+        refresh_button = QToolButton()
+        refresh_button.setObjectName("iconButton")
+        refresh_button.setText("刷新")
+        refresh_button.setToolTip("刷新配置列表")
         new_profile_button.clicked.connect(self._create_profile)
         refresh_button.clicked.connect(lambda: self.refresh_profiles())
         profile_row.addWidget(self.profile_combo, 1)
         profile_row.addWidget(new_profile_button)
         profile_row.addWidget(refresh_button)
-        profile_row.addSpacing(6)
-        profile_row.addWidget(QLabel("主题"))
+        profile_block.addLayout(profile_row)
+        top_bar_layout.addLayout(profile_block)
+
+        appearance_control = QFrame()
+        appearance_control.setObjectName("appearanceControl")
+        appearance_layout = QHBoxLayout(appearance_control)
+        appearance_layout.setContentsMargins(9, 4, 5, 4)
+        appearance_layout.setSpacing(4)
+        appearance_icon = QLabel("外观")
+        appearance_icon.setObjectName("settingsIcon")
+        appearance_icon.setToolTip("应用外观")
+        appearance_layout.addWidget(appearance_icon)
         self.theme_combo = QComboBox()
-        self.theme_combo.setMinimumWidth(105)
+        self.theme_combo.setObjectName("themeCombo")
+        self.theme_combo.setMinimumWidth(88)
+        self.theme_combo.setMaximumWidth(108)
         for value, label in THEME_OPTIONS:
             self.theme_combo.addItem(label, value)
         theme_index = self.theme_combo.findData(self._theme_preference)
         self.theme_combo.setCurrentIndex(max(theme_index, 0))
         self.theme_combo.currentIndexChanged.connect(self._theme_changed)
-        profile_row.addWidget(self.theme_combo)
-        top_bar_layout.addLayout(profile_row)
+        appearance_layout.addWidget(self.theme_combo)
+        top_bar_layout.addWidget(appearance_control)
         root.addWidget(top_bar)
 
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_launch_tab(), "实时翻译")
+        action_bar = self._build_action_bar()
+        self.pages = QStackedWidget()
+        self.pages.setObjectName("workspacePages")
+        self.pages.setMaximumWidth(1180)
+
+        launch_page = self._build_launch_tab()
         self._glossary_editor = PairTableEditor(
             left_header="识别原文",
             right_header="固定译名",
             save_text="保存术语表",
             save_callback=self._save_glossary,
         )
-        self.tabs.addTab(self._glossary_editor, "术语表")
+        glossary_page = self._build_editor_page(
+            "术语表",
+            "统一人名、地点和专有名词的译法，实时翻译会优先采用这里的固定译名。",
+            self._glossary_editor,
+        )
         self._correction_editor = PairTableEditor(
             left_header="OCR 原文",
             right_header="人工译文（最高优先级）",
             save_text="保存人工修订",
             save_callback=self._save_corrections,
         )
-        self.tabs.addTab(self._correction_editor, "人工修订")
-        self.tabs.addTab(self._build_info_tab(), "数据与诊断")
-        root.addWidget(self.tabs, 1)
+        correction_page = self._build_editor_page(
+            "人工修订",
+            "覆盖自动翻译结果；相同 OCR 原文再次出现时会直接使用人工译文。",
+            self._correction_editor,
+        )
+        info_page = self._build_info_tab()
+        self._page_titles = ("实时翻译", "术语表", "人工修订", "数据与诊断")
+        self._page_widgets = (
+            launch_page,
+            glossary_page,
+            correction_page,
+            info_page,
+        )
+        for page in self._page_widgets:
+            self.pages.addWidget(page)
+
+        workspace = QFrame()
+        workspace.setObjectName("workspace")
+        workspace_layout = QHBoxLayout(workspace)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(0)
+        workspace_layout.addWidget(self._build_sidebar())
+
+        content_host = QWidget()
+        content_host.setObjectName("contentHost")
+        content_host_layout = QHBoxLayout(content_host)
+        content_host_layout.setContentsMargins(24, 20, 24, 20)
+        content_host_layout.setSpacing(0)
+        content_host_layout.addStretch(1)
+        content_host_layout.addWidget(self.pages, 100)
+        content_host_layout.addStretch(1)
+        workspace_layout.addWidget(content_host, 1)
+
+        root.addWidget(workspace, 1)
+        root.addWidget(action_bar)
         self.setCentralWidget(central)
         self.statusBar().showMessage("正在读取配置……")
         self.refresh_profiles()
@@ -548,13 +614,134 @@ class LauncherWindow(QMainWindow):
             return True
         return super().eventFilter(watched, event)
 
+    @staticmethod
+    def _add_page_intro(layout: QVBoxLayout, title: str, description: str) -> None:
+        intro = QWidget()
+        intro.setObjectName("pageIntro")
+        intro_layout = QVBoxLayout(intro)
+        intro_layout.setContentsMargins(2, 0, 2, 4)
+        intro_layout.setSpacing(5)
+        title_label = QLabel(title)
+        title_label.setObjectName("pageTitle")
+        description_label = QLabel(description)
+        description_label.setObjectName("pageDescription")
+        description_label.setWordWrap(True)
+        intro_layout.addWidget(title_label)
+        intro_layout.addWidget(description_label)
+        layout.addWidget(intro)
+
+    def _build_editor_page(
+        self,
+        title: str,
+        description: str,
+        editor: QWidget,
+    ) -> QWidget:
+        page = QWidget()
+        page.setObjectName("workspacePage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        self._add_page_intro(layout, title, description)
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 20, 20, 20)
+        card_layout.addWidget(editor)
+        layout.addWidget(card, 1)
+        return page
+
+    def _build_sidebar(self) -> QFrame:
+        sidebar = QFrame()
+        sidebar.setObjectName("sideBar")
+        sidebar.setMinimumWidth(204)
+        sidebar.setMaximumWidth(204)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(14, 22, 14, 18)
+        layout.setSpacing(5)
+
+        self._navigation_group = QButtonGroup(sidebar)
+        self._navigation_group.setExclusive(True)
+        self._nav_buttons: list[QToolButton] = []
+
+        def add_section(text: str) -> None:
+            label = QLabel(text)
+            label.setObjectName("navSectionLabel")
+            layout.addWidget(label)
+
+        def add_page(text: str, index: int, object_name: str) -> None:
+            button = QToolButton()
+            button.setObjectName(object_name)
+            button.setProperty("navItem", True)
+            button.setText(text)
+            button.setCheckable(True)
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            button.clicked.connect(
+                lambda _checked=False, page_index=index: self._select_page(page_index)
+            )
+            self._navigation_group.addButton(button, index)
+            self._nav_buttons.append(button)
+            layout.addWidget(button)
+
+        add_section("运行")
+        add_page("●  实时翻译", 0, "navRealtime")
+        layout.addSpacing(12)
+        add_section("翻译")
+        add_page("术语表", 1, "navGlossary")
+        add_page("人工修订", 2, "navCorrections")
+        layout.addStretch(1)
+        add_section("开发")
+        add_page("数据与诊断", 3, "navDiagnostics")
+        self._nav_buttons[0].setChecked(True)
+        return sidebar
+
+    def _select_page(self, index: int) -> None:
+        if not 0 <= index < self.pages.count():
+            return
+        self.pages.setCurrentIndex(index)
+        if index < len(self._nav_buttons):
+            self._nav_buttons[index].setChecked(True)
+
+    def _build_action_bar(self) -> QFrame:
+        action_bar = QFrame()
+        action_bar.setObjectName("actionBar")
+        action_layout = QHBoxLayout(action_bar)
+        action_layout.setContentsMargins(22, 11, 22, 11)
+        action_layout.setSpacing(16)
+
+        self.run_status_chip = _status_chip("待启动")
+        self.run_status_chip.setObjectName("runStatusChip")
+        self.llm_status_chip = _status_chip("LLM · 已配置")
+        self.llm_status_chip.setToolTip(
+            f"{self._config.translation.model}\n"
+            f"{self._config.translation.normalized_base_url}"
+        )
+        self.ocr_status_chip = _status_chip("OCR · 检测中")
+        self.region_status_chip = _status_chip("捕获 · 等待配置")
+        action_layout.addWidget(self.run_status_chip)
+        action_layout.addWidget(self.ocr_status_chip)
+        action_layout.addWidget(self.llm_status_chip)
+        action_layout.addWidget(self.region_status_chip)
+        action_layout.addStretch(1)
+
+        self.apply_button = QPushButton("保存更改")
+        self.apply_button.setObjectName("applyButton")
+        self.apply_button.clicked.connect(self._apply_all_settings)
+        action_layout.addWidget(self.apply_button)
+        self.start_button = QPushButton("开始翻译")
+        self.start_button.setObjectName("startButton")
+        self.start_button.setMinimumHeight(44)
+        self.start_button.setMinimumWidth(150)
+        self.start_button.clicked.connect(self._toggle_live)
+        action_layout.addWidget(self.start_button)
+        return action_bar
+
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt callback name
         super().resizeEvent(event)
         if hasattr(self, "_launch_card_grid"):
             self._relayout_launch_cards(event.size().width())
 
     def _relayout_launch_cards(self, width: int) -> None:
-        compact = width < 980
+        compact = width < 1180
         if getattr(self, "_launch_cards_compact", None) is compact:
             return
         grid = self._launch_card_grid
@@ -572,62 +759,56 @@ class LauncherWindow(QMainWindow):
             grid.addWidget(ocr_card, 0, 1)
             grid.addWidget(translation_card, 1, 0, 1, 2)
             grid.addWidget(advanced_card, 2, 0, 1, 2)
-            grid.setColumnStretch(0, 2)
-            grid.setColumnStretch(1, 3)
+            grid.setColumnStretch(0, 1)
+            grid.setColumnStretch(1, 1)
         self._launch_cards_compact = compact
 
     def _build_launch_tab(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("workspacePage")
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(10)
-
-        status_strip = QFrame()
-        status_strip.setObjectName("statusStrip")
-        status_layout = QHBoxLayout(status_strip)
-        status_layout.setContentsMargins(12, 8, 12, 8)
-        status_layout.setSpacing(8)
-        self.llm_status_chip = _status_chip("LLM · 已配置")
-        self.llm_status_chip.setToolTip(
-            f"{self._config.translation.model}\n"
-            f"{self._config.translation.normalized_base_url}"
-        )
-        self.ocr_status_chip = _status_chip("OCR · 检测中")
-        self.region_status_chip = _status_chip("区域 · 等待配置")
-        status_layout.addWidget(self.llm_status_chip)
-        status_layout.addWidget(self.ocr_status_chip)
-        status_layout.addWidget(self.region_status_chip)
-        status_layout.addStretch(1)
-        status_hint = QLabel("启动时会自动保存当前页面设置")
-        status_hint.setObjectName("secondaryText")
-        status_layout.addWidget(status_hint)
-        page_layout.addWidget(status_strip)
+        page_layout.setSpacing(0)
 
         scroll = QScrollArea()
         scroll.setObjectName("launchScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setAlignment(
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
+        )
         content = QWidget()
         content.setObjectName("launchContent")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(2, 2, 2, 8)
-        content_layout.setSpacing(12)
+        content_layout.setContentsMargins(0, 0, 0, 12)
+        content_layout.setSpacing(18)
+        self._add_page_intro(
+            content_layout,
+            "实时翻译",
+            "配置捕获、文字识别与翻译服务，然后从下方开始运行。",
+        )
+
         card_grid = QGridLayout()
         card_grid.setContentsMargins(0, 0, 0, 0)
-        card_grid.setHorizontalSpacing(12)
-        card_grid.setVerticalSpacing(12)
-        card_grid.setColumnStretch(0, 2)
-        card_grid.setColumnStretch(1, 3)
+        card_grid.setHorizontalSpacing(16)
+        card_grid.setVerticalSpacing(16)
+        card_grid.setColumnStretch(0, 1)
+        card_grid.setColumnStretch(1, 1)
 
         capture_card, capture_layout = _settings_card(
             "捕获区域",
-            "指定要识别的显示器和字幕范围，设置只属于当前配置。",
+            "选择画面来源；只有自定义字幕区域时才显示坐标。",
             scope="此配置",
         )
         capture_form = QFormLayout()
         capture_form.setHorizontalSpacing(14)
-        capture_form.setVerticalSpacing(10)
+        capture_form.setVerticalSpacing(12)
+        capture_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        capture_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.monitor_combo = QComboBox()
+        self.monitor_combo.setMaximumWidth(560)
         self.monitor_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
@@ -643,50 +824,81 @@ class LauncherWindow(QMainWindow):
         capture_form.addRow("显示器", self.monitor_combo)
 
         region_widget = QWidget()
-        region_layout = QGridLayout(region_widget)
-        region_layout.setContentsMargins(0, 0, 0, 0)
-        region_layout.setHorizontalSpacing(6)
-        region_layout.setVerticalSpacing(6)
+        region_widget.setMaximumWidth(700)
+        region_widget_layout = QVBoxLayout(region_widget)
+        region_widget_layout.setContentsMargins(0, 0, 0, 0)
+        region_widget_layout.setSpacing(10)
+        region_mode_layout = QHBoxLayout()
+        region_mode_layout.setContentsMargins(0, 0, 0, 0)
+        region_mode_layout.setSpacing(18)
+        self.full_screen_radio = QRadioButton("整个显示器")
+        self.custom_region_radio = QRadioButton("自定义区域")
+        self.region_mode_group = QButtonGroup(region_widget)
+        self.region_mode_group.addButton(self.full_screen_radio)
+        self.region_mode_group.addButton(self.custom_region_radio)
+        region_mode_layout.addWidget(self.full_screen_radio)
+        region_mode_layout.addWidget(self.custom_region_radio)
+        region_mode_layout.addStretch(1)
+        region_widget_layout.addLayout(region_mode_layout)
+
+        self.custom_region_panel = QFrame()
+        self.custom_region_panel.setObjectName("inlinePanel")
+        custom_region_layout = QVBoxLayout(self.custom_region_panel)
+        custom_region_layout.setContentsMargins(12, 12, 12, 12)
+        custom_region_layout.setSpacing(10)
+        region_buttons = QHBoxLayout()
+        select_button = QPushButton("在屏幕上框选")
+        select_button.setObjectName("textActionButton")
+        select_button.clicked.connect(self._select_region)
+        region_buttons.addWidget(select_button)
+        region_buttons.addStretch(1)
+        custom_region_layout.addLayout(region_buttons)
+
+        region_grid = QGridLayout()
+        region_grid.setContentsMargins(0, 0, 0, 0)
+        region_grid.setHorizontalSpacing(8)
+        region_grid.setVerticalSpacing(8)
         self.region_spins: list[QSpinBox] = []
         for index, label in enumerate(("左", "上", "宽", "高")):
             row = index // 2
             column = (index % 2) * 2
-            region_layout.addWidget(QLabel(label), row, column)
+            region_grid.addWidget(QLabel(label), row, column)
             spin = QSpinBox()
             spin.setRange(0, 100_000)
             spin.setAccelerated(True)
             spin.valueChanged.connect(self._update_region_status_chip)
             self.region_spins.append(spin)
-            region_layout.addWidget(spin, row, column + 1)
-            region_layout.setColumnStretch(column + 1, 1)
-        capture_form.addRow("字幕区域", region_widget)
+            region_grid.addWidget(spin, row, column + 1)
+            region_grid.setColumnStretch(column + 1, 1)
+        custom_region_layout.addLayout(region_grid)
+        region_widget_layout.addWidget(self.custom_region_panel)
+        capture_form.addRow("识别范围", region_widget)
         capture_layout.addLayout(capture_form)
 
-        region_buttons = QHBoxLayout()
-        select_button = QPushButton("框选字幕区域")
-        full_button = QPushButton("使用整个显示器")
-        select_button.clicked.connect(self._select_region)
-        full_button.clicked.connect(self._use_full_screen)
-        region_buttons.addWidget(select_button)
-        region_buttons.addWidget(full_button)
-        region_buttons.addStretch(1)
-        capture_layout.addLayout(region_buttons)
-        capture_note = QLabel(
-            "宽和高同时为 0 表示识别整个显示器；框选字幕区域可减少无关 OCR 和翻译请求。"
+        initial_custom_region = bool(
+            self._config.live.width > 0 and self._config.live.height > 0
         )
-        capture_note.setObjectName("cardDescription")
-        capture_note.setWordWrap(True)
-        capture_layout.addWidget(capture_note)
+        self.custom_region_radio.setChecked(initial_custom_region)
+        self.full_screen_radio.setChecked(not initial_custom_region)
+        self.custom_region_panel.setVisible(initial_custom_region)
+        self.full_screen_radio.toggled.connect(self._region_mode_changed)
+        self.custom_region_radio.toggled.connect(self._region_mode_changed)
+        capture_layout.addStretch(1)
 
         ocr_card, ocr_layout = _settings_card(
-            "OCR 与画面",
-            "调整文字检测质量、结果整理和译文背景。",
+            "OCR",
+            "选择识别设备、检测质量和常用的画面处理方式。",
             scope="全局",
         )
         ocr_form = QFormLayout()
         ocr_form.setHorizontalSpacing(14)
-        ocr_form.setVerticalSpacing(10)
+        ocr_form.setVerticalSpacing(12)
+        ocr_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        ocr_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.ocr_device_combo = QComboBox()
+        self.ocr_device_combo.setMaximumWidth(620)
         configured_device = self._config.ocr.device
         self.ocr_device_combo.addItem(
             f"{configured_device}（正在检测 NVIDIA GPU……）",
@@ -703,6 +915,7 @@ class LauncherWindow(QMainWindow):
         ocr_form.addRow("OCR 设备", self.ocr_device_combo)
 
         detection_widget = QWidget()
+        detection_widget.setMaximumWidth(620)
         detection_layout = QVBoxLayout(detection_widget)
         detection_layout.setContentsMargins(0, 0, 0, 0)
         detection_layout.setSpacing(5)
@@ -737,8 +950,6 @@ class LauncherWindow(QMainWindow):
             "关闭后，图标、数字、中文和其他非源语言 OCR 文本也会进入跟踪与翻译；"
             "OCR 置信度阈值仍然有效。"
         )
-        ocr_form.addRow("文字过滤", self.ocr_filter_checkbox)
-
         self.ocr_merge_checkbox = QCheckBox("合并连续文字")
         self.ocr_merge_checkbox.setChecked(self._config.ocr.text_merge_enabled)
         self.ocr_merge_checkbox.setToolTip(
@@ -746,9 +957,17 @@ class LauncherWindow(QMainWindow):
             "碎片组成翻译块；分组变化需连续两轮一致。仅在 OCR 检测质量"
             "不低于 50% 时可用。"
         )
-        ocr_form.addRow("文字排版", self.ocr_merge_checkbox)
+        text_processing_widget = QWidget()
+        text_processing_layout = QHBoxLayout(text_processing_widget)
+        text_processing_layout.setContentsMargins(0, 0, 0, 0)
+        text_processing_layout.setSpacing(18)
+        text_processing_layout.addWidget(self.ocr_filter_checkbox)
+        text_processing_layout.addWidget(self.ocr_merge_checkbox)
+        text_processing_layout.addStretch(1)
+        ocr_form.addRow("文字处理", text_processing_widget)
 
         self.blur_mode_combo = QComboBox()
+        self.blur_mode_combo.setMaximumWidth(360)
         self.blur_mode_combo.addItem("黑化模糊", _BLUR_MODE_DARK)
         self.blur_mode_combo.addItem("仅模糊（保留画面亮度）", _BLUR_MODE_ONLY)
         configured_blur_mode = (
@@ -771,32 +990,60 @@ class LauncherWindow(QMainWindow):
             "先用整帧 OCR 建立文字地图，再以低分辨率热图定位变化区域；"
             "Paddle 只识别合并后的最新 ROI。具体调度参数放在高级设置中。"
         )
-        ocr_form.addRow("识别调度", self.dynamic_roi_checkbox)
+        ocr_form.addRow("动态 ROI", self.dynamic_roi_checkbox)
         ocr_layout.addLayout(ocr_form)
+        ocr_layout.addStretch(1)
 
         translation_card, translation_layout = _settings_card(
-            "翻译服务",
-            "使用内置 CUDA 本地模型，或连接自己的 OpenAI-compatible API；"
-            "补充提示词单独属于当前配置。",
+            "翻译",
+            "选择翻译后端并配置模型；补充提示词只属于当前配置。",
             scope="全局 + 此配置",
         )
         translation_form = QFormLayout()
         self._translation_form = translation_form
-        translation_form.setHorizontalSpacing(14)
-        translation_form.setVerticalSpacing(10)
+        translation_form.setHorizontalSpacing(18)
+        translation_form.setVerticalSpacing(12)
+        translation_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        translation_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
 
-        self.backend_combo = QComboBox()
+        self.backend_combo = QComboBox(translation_card)
         self.backend_combo.addItem("内置本地模型（CUDA）", "builtin")
         self.backend_combo.addItem("外部 API", "external")
         backend_index = self.backend_combo.findData(self._config.translation.backend)
         self.backend_combo.setCurrentIndex(max(backend_index, 0))
+        self.backend_combo.hide()
         self.backend_combo.setToolTip(
             "内置模式只监听本机并由实时翻译进程管理；"
             "切换模式不会覆盖外部 API 设置。"
         )
-        translation_form.addRow("LLM 后端", self.backend_combo)
+
+        backend_selector = QFrame()
+        backend_selector.setObjectName("segmentedControl")
+        backend_selector.setMaximumWidth(430)
+        backend_selector_layout = QHBoxLayout(backend_selector)
+        backend_selector_layout.setContentsMargins(3, 3, 3, 3)
+        backend_selector_layout.setSpacing(3)
+        self.backend_button_group = QButtonGroup(backend_selector)
+        self.backend_button_group.setExclusive(True)
+        self.builtin_backend_button = QPushButton("内置 CUDA")
+        self.external_backend_button = QPushButton("外部 API")
+        for button in (self.builtin_backend_button, self.external_backend_button):
+            button.setObjectName("backendOption")
+            button.setCheckable(True)
+            self.backend_button_group.addButton(button)
+            backend_selector_layout.addWidget(button, 1)
+        self.builtin_backend_button.clicked.connect(
+            lambda: self._set_translation_backend("builtin")
+        )
+        self.external_backend_button.clicked.connect(
+            lambda: self._set_translation_backend("external")
+        )
+        translation_form.addRow("后端", backend_selector)
 
         builtin_widget = QWidget()
+        builtin_widget.setMaximumWidth(760)
         builtin_layout = QVBoxLayout(builtin_widget)
         builtin_layout.setContentsMargins(0, 0, 0, 0)
         builtin_layout.setSpacing(6)
@@ -839,6 +1086,7 @@ class LauncherWindow(QMainWindow):
         translation_form.addRow("内置模型", builtin_widget)
 
         self.server_url_combo = QComboBox()
+        self.server_url_combo.setMaximumWidth(640)
         self.server_url_combo.setEditable(True)
         self.server_url_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.server_url_combo.addItem(self._config.translation.base_url)
@@ -849,6 +1097,7 @@ class LauncherWindow(QMainWindow):
         translation_form.addRow("API 服务器", self.server_url_combo)
 
         self.api_key_edit = QLineEdit(self._config.translation.api_key)
+        self.api_key_edit.setMaximumWidth(420)
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_edit.setClearButtonEnabled(True)
         self.api_key_edit.setPlaceholderText(
@@ -861,6 +1110,7 @@ class LauncherWindow(QMainWindow):
         translation_form.addRow("API Key", self.api_key_edit)
 
         model_widget = QWidget()
+        model_widget.setMaximumWidth(760)
         model_layout = QHBoxLayout(model_widget)
         model_layout.setContentsMargins(0, 0, 0, 0)
         model_layout.setSpacing(8)
@@ -870,7 +1120,8 @@ class LauncherWindow(QMainWindow):
         self.model_combo.addItem(self._config.translation.model)
         if self.model_combo.lineEdit() is not None:
             self.model_combo.lineEdit().setPlaceholderText("输入模型 ID 或读取服务器列表")
-        self.refresh_models_button = QPushButton("测试连接并读取模型")
+        self.refresh_models_button = QPushButton("测试连接")
+        self.refresh_models_button.setObjectName("textActionButton")
         self.refresh_models_button.clicked.connect(self._refresh_models)
         model_layout.addWidget(self.model_combo, 1)
         model_layout.addWidget(self.refresh_models_button)
@@ -878,6 +1129,7 @@ class LauncherWindow(QMainWindow):
         translation_form.addRow("API 模型", model_widget)
 
         prompt_widget = QWidget()
+        prompt_widget.setMaximumWidth(820)
         prompt_layout = QVBoxLayout(prompt_widget)
         prompt_layout.setContentsMargins(0, 0, 0, 0)
         prompt_layout.setSpacing(6)
@@ -886,21 +1138,23 @@ class LauncherWindow(QMainWindow):
             "用一两句话描述当前游戏、网页或翻译风格。\n"
             "例如：这是一款近未来题材 RPG，角色对话偏口语。"
         )
-        self.custom_prompt_edit.setMaximumHeight(88)
+        self.custom_prompt_edit.setMaximumHeight(112)
         self.custom_prompt_edit.setTabChangesFocus(True)
         prompt_actions = QHBoxLayout()
         prompt_actions.setContentsMargins(0, 0, 0, 0)
-        prompt_hint = QLabel("切换配置时自动加载；应用设置或启动时也会保存。")
+        prompt_hint = QLabel("留空时使用内置默认提示词。")
         prompt_hint.setObjectName("secondaryText")
-        self.save_custom_prompt_button = QPushButton("保存到当前配置")
-        self.save_custom_prompt_button.clicked.connect(self._save_custom_prompt)
+        self.reset_custom_prompt_button = QPushButton("恢复默认")
+        self.reset_custom_prompt_button.setObjectName("textActionButton")
+        self.reset_custom_prompt_button.clicked.connect(self._reset_custom_prompt)
         prompt_actions.addWidget(prompt_hint, 1)
-        prompt_actions.addWidget(self.save_custom_prompt_button)
+        prompt_actions.addWidget(self.reset_custom_prompt_button)
         prompt_layout.addWidget(self.custom_prompt_edit)
         prompt_layout.addLayout(prompt_actions)
-        translation_form.addRow("配置提示词", prompt_widget)
+        translation_form.addRow("翻译提示词", prompt_widget)
 
         self.max_concurrency_spin = QSpinBox()
+        self.max_concurrency_spin.setMaximumWidth(110)
         self.max_concurrency_spin.setRange(1, 32)
         self.max_concurrency_spin.setValue(self._config.translation.max_concurrency)
         self.max_concurrency_spin.setSuffix(" 路")
@@ -908,7 +1162,7 @@ class LauncherWindow(QMainWindow):
             "同时处理的翻译批次数。实际并发还受 LLM 后端限制；"
             "过高可能增加显存占用和单批延迟。"
         )
-        translation_form.addRow("LLM 并发", self.max_concurrency_spin)
+        translation_form.addRow("并发请求", self.max_concurrency_spin)
 
         self.backend_combo.currentIndexChanged.connect(
             self._sync_translation_backend_controls
@@ -917,48 +1171,11 @@ class LauncherWindow(QMainWindow):
             self._refresh_local_model_status
         )
         self._sync_translation_backend_controls()
-
-        recording_widget = QWidget()
-        recording_layout = QVBoxLayout(recording_widget)
-        recording_layout.setContentsMargins(0, 0, 0, 0)
-        recording_layout.setSpacing(5)
-        self.browser_overlay_checkbox = QCheckBox("启用透明 Browser Source")
-        self.browser_overlay_checkbox.setChecked(
-            self._config.recording.browser_overlay_enabled
-        )
-        self.browser_overlay_checkbox.setToolTip(
-            "启动实时翻译后，仅在本机提供带坐标的译文网页；"
-            "将它作为 OBS Browser Source 叠在游戏画面之上。"
-        )
-        self.browser_overlay_url_edit = QLineEdit(
-            self._config.recording.browser_overlay_url
-        )
-        self.browser_overlay_url_edit.setReadOnly(True)
-        self.browser_overlay_url_edit.setToolTip(
-            "在 OBS 中新增 Browser Source 并粘贴此地址；"
-            "宽高应与所选显示器的物理分辨率一致。"
-        )
-        recording_layout.addWidget(self.browser_overlay_checkbox)
-        recording_layout.addWidget(self.browser_overlay_url_edit)
-        translation_form.addRow("OBS 录制", recording_widget)
         translation_layout.addLayout(translation_form)
-        self.service_status_label = QLabel(
-            f"当前：{self._translation_summary(self._config.translation)} · "
-            f"OCR {self._config.ocr.device} · "
-            f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
-            f"合并{'开' if self._config.ocr.text_merge_enabled else '关'} · "
-            f"背景 {self._background_summary(self._config.preview.overlay_opacity)} · "
-            f"OBS 译文源"
-            f"{'开' if self._config.recording.browser_overlay_enabled else '关'} · "
-            f"{self._scheduling_summary(self._config.live)}"
-        )
-        self.service_status_label.setObjectName("secondaryText")
-        self.service_status_label.setWordWrap(True)
-        translation_layout.addWidget(self.service_status_label)
 
         advanced_card, advanced_layout = _settings_card(
-            "高级 OCR 调度",
-            "只有在需要平衡响应速度、漏扫和负载时才需要调整。",
+            "高级设置",
+            "OCR 调度、OBS 输出和调试工具；日常使用无需展开。",
             scope="全局",
         )
         self.advanced_settings_button = QToolButton()
@@ -971,9 +1188,16 @@ class LauncherWindow(QMainWindow):
         )
         advanced_layout.addWidget(self.advanced_settings_button)
         self.advanced_settings_content = QWidget()
-        self._service_form = QFormLayout(self.advanced_settings_content)
+        advanced_content_layout = QVBoxLayout(self.advanced_settings_content)
+        advanced_content_layout.setContentsMargins(0, 4, 0, 0)
+        advanced_content_layout.setSpacing(14)
+        scheduling_title = QLabel("OCR 调度")
+        scheduling_title.setObjectName("advancedSectionTitle")
+        advanced_content_layout.addWidget(scheduling_title)
+        self._service_form = QFormLayout()
         self._service_form.setHorizontalSpacing(18)
         self._service_form.setVerticalSpacing(10)
+        self._service_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
 
         self.change_poll_spin = QSpinBox()
         self.change_poll_spin.setRange(1, MAX_CHANGE_POLL_FPS)
@@ -1047,6 +1271,62 @@ class LauncherWindow(QMainWindow):
         )
         self._service_form.addRow("OCR 冷却", self.ocr_cooldown_spin)
 
+        advanced_content_layout.addLayout(self._service_form)
+        recording_title = QLabel("录制与诊断")
+        recording_title.setObjectName("advancedSectionTitle")
+        advanced_content_layout.addWidget(recording_title)
+
+        recording_form = QFormLayout()
+        recording_form.setHorizontalSpacing(18)
+        recording_form.setVerticalSpacing(10)
+        recording_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        recording_widget = QWidget()
+        recording_widget.setMaximumWidth(760)
+        recording_layout = QVBoxLayout(recording_widget)
+        recording_layout.setContentsMargins(0, 0, 0, 0)
+        recording_layout.setSpacing(7)
+        self.browser_overlay_checkbox = QCheckBox("启用透明 Browser Source")
+        self.browser_overlay_checkbox.setChecked(
+            self._config.recording.browser_overlay_enabled
+        )
+        self.browser_overlay_checkbox.setToolTip(
+            "启动实时翻译后，仅在本机提供带坐标的译文网页；"
+            "将它作为 OBS Browser Source 叠在游戏画面之上。"
+        )
+        self.browser_overlay_url_edit = QLineEdit(
+            self._config.recording.browser_overlay_url
+        )
+        self.browser_overlay_url_edit.setReadOnly(True)
+        self.browser_overlay_url_edit.setToolTip(
+            "在 OBS 中新增 Browser Source 并粘贴此地址；"
+            "宽高应与所选显示器的物理分辨率一致。"
+        )
+        recording_layout.addWidget(self.browser_overlay_checkbox)
+        recording_layout.addWidget(self.browser_overlay_url_edit)
+        recording_form.addRow("OBS 译文源", recording_widget)
+
+        self.debug_checkbox = QCheckBox("显示 OCR / ROI 调试边框")
+        self.debug_checkbox.setToolTip(
+            "绿色=变化，黄色=候选，青色=局部 OCR，红色=整帧回退，紫色=译文框；"
+            "同时记录到 output/live.log"
+        )
+        recording_form.addRow("画面调试", self.debug_checkbox)
+        advanced_content_layout.addLayout(recording_form)
+
+        self.service_status_label = QLabel(
+            f"当前：{self._translation_summary(self._config.translation)} · "
+            f"OCR {self._config.ocr.device} · "
+            f"过滤{'开' if self._config.ocr.text_filter_enabled else '关'} · "
+            f"合并{'开' if self._config.ocr.text_merge_enabled else '关'} · "
+            f"背景 {self._background_summary(self._config.preview.overlay_opacity)} · "
+            f"OBS 译文源"
+            f"{'开' if self._config.recording.browser_overlay_enabled else '关'} · "
+            f"{self._scheduling_summary(self._config.live)}"
+        )
+        self.service_status_label.setObjectName("secondaryText")
+        self.service_status_label.setWordWrap(True)
+        advanced_content_layout.addWidget(self.service_status_label)
+
         advanced_layout.addWidget(self.advanced_settings_content)
         self.advanced_settings_content.setVisible(False)
         self.advanced_settings_button.toggled.connect(
@@ -1080,29 +1360,6 @@ class LauncherWindow(QMainWindow):
         content_layout.addStretch(1)
         scroll.setWidget(content)
         page_layout.addWidget(scroll, 1)
-
-        action_bar = QFrame()
-        action_bar.setObjectName("actionBar")
-        action_layout = QHBoxLayout(action_bar)
-        action_layout.setContentsMargins(14, 10, 14, 10)
-        action_layout.setSpacing(10)
-        self.debug_checkbox = QCheckBox("显示 OCR/ROI 调试边框")
-        self.debug_checkbox.setToolTip(
-            "绿色=变化，黄色=候选，青色=局部 OCR，红色=整帧回退，紫色=译文框；"
-            "同时记录到 output/live.log"
-        )
-        action_layout.addWidget(self.debug_checkbox)
-        action_layout.addStretch(1)
-        self.apply_button = QPushButton("应用设置")
-        self.apply_button.setObjectName("applyButton")
-        self.apply_button.clicked.connect(self._apply_all_settings)
-        action_layout.addWidget(self.apply_button)
-        self.start_button = QPushButton("启动实时翻译")
-        self.start_button.setObjectName("startButton")
-        self.start_button.setMinimumHeight(44)
-        self.start_button.clicked.connect(self._start_live)
-        action_layout.addWidget(self.start_button)
-        page_layout.addWidget(action_bar)
         return page
 
     def _start_ocr_device_probe(self) -> None:
@@ -1235,7 +1492,7 @@ class LauncherWindow(QMainWindow):
         tone: str,
         tooltip: str | None = None,
     ) -> None:
-        label.setText(text)
+        label.setText(text if text.lstrip().startswith("●") else f"● {text}")
         label.setProperty("tone", tone)
         if tooltip is not None:
             label.setToolTip(tooltip)
@@ -1266,6 +1523,29 @@ class LauncherWindow(QMainWindow):
             tooltip=self.ocr_device_combo.currentText(),
         )
 
+    def _region_mode_changed(self, checked: bool) -> None:
+        if not checked:
+            return
+        custom = self.custom_region_radio.isChecked()
+        self.custom_region_panel.setVisible(custom)
+        if not custom:
+            for spin in self.region_spins:
+                spin.setValue(0)
+        self._update_region_status_chip()
+
+    def _sync_region_mode_from_values(self) -> None:
+        if not hasattr(self, "custom_region_panel"):
+            return
+        _left, _top, width, height = self._current_region()
+        custom = width > 0 and height > 0
+        for button in (self.full_screen_radio, self.custom_region_radio):
+            button.blockSignals(True)
+        self.custom_region_radio.setChecked(custom)
+        self.full_screen_radio.setChecked(not custom)
+        for button in (self.full_screen_radio, self.custom_region_radio):
+            button.blockSignals(False)
+        self.custom_region_panel.setVisible(custom)
+
     def _update_region_status_chip(self, *args) -> None:
         if not hasattr(self, "region_status_chip") or not hasattr(
             self,
@@ -1275,7 +1555,7 @@ class LauncherWindow(QMainWindow):
         if self._profile is None:
             self._set_status_chip(
                 self.region_status_chip,
-                "区域 · 等待配置",
+                "捕获 · 等待配置",
                 tone="neutral",
             )
             return
@@ -1288,10 +1568,15 @@ class LauncherWindow(QMainWindow):
             summary = f"{width}×{height}"
         self._set_status_chip(
             self.region_status_chip,
-            f"区域 · {summary}",
+            f"捕获 · {summary}",
             tone="success",
             tooltip=f"{monitor_text} · 左 {left} · 上 {top} · 宽 {width} · 高 {height}",
         )
+
+    def _set_translation_backend(self, backend: str) -> None:
+        index = self.backend_combo.findData(backend)
+        if index >= 0:
+            self.backend_combo.setCurrentIndex(index)
 
     def _selected_translation_backend(self) -> str:
         backend = self.backend_combo.currentData()
@@ -1323,6 +1608,8 @@ class LauncherWindow(QMainWindow):
             builtin = self._selected_translation_backend() == "builtin"
         except ConfigError:
             builtin = False
+        self.builtin_backend_button.setChecked(builtin)
+        self.external_backend_button.setChecked(not builtin)
         for widget in (
             self.server_url_combo,
             self.api_key_edit,
@@ -1763,7 +2050,7 @@ class LauncherWindow(QMainWindow):
             return
         self._model_reply = None
         self.refresh_models_button.setEnabled(True)
-        self.refresh_models_button.setText("测试连接并读取模型")
+        self.refresh_models_button.setText("测试连接")
         try:
             if reply.error() != QNetworkReply.NetworkError.NoError:
                 status = reply.attribute(
@@ -1941,15 +2228,34 @@ class LauncherWindow(QMainWindow):
 
     def _build_info_tab(self) -> QWidget:
         widget = QWidget()
+        widget.setObjectName("workspacePage")
         layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        self._add_page_intro(
+            layout,
+            "数据与诊断",
+            "查看当前配置的存储位置、翻译缓存与人工修订统计。",
+        )
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(22, 20, 22, 20)
+        card_layout.setSpacing(16)
         self.info_label = QLabel()
+        self.info_label.setObjectName("diagnosticText")
         self.info_label.setWordWrap(True)
         self.info_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         refresh_button = QPushButton("刷新统计")
+        refresh_button.setObjectName("textActionButton")
         refresh_button.clicked.connect(self._reload_current_profile)
-        layout.addWidget(self.info_label)
-        layout.addStretch(1)
-        layout.addWidget(refresh_button)
+        refresh_row = QHBoxLayout()
+        refresh_row.addStretch(1)
+        refresh_row.addWidget(refresh_button)
+        card_layout.addWidget(self.info_label)
+        card_layout.addStretch(1)
+        card_layout.addLayout(refresh_row)
+        layout.addWidget(card, 1)
         return widget
 
     def refresh_profiles(self, select_profile_id: str | None = None) -> None:
@@ -1995,8 +2301,13 @@ class LauncherWindow(QMainWindow):
             self.statusBar().showMessage("请先新建一个配置")
 
     def _set_profile_enabled(self, enabled: bool) -> None:
-        for index in range(self.tabs.count()):
-            self.tabs.setTabEnabled(index, enabled)
+        for page in self._page_widgets:
+            page.setEnabled(enabled)
+        for button in self._nav_buttons:
+            button.setEnabled(enabled)
+        self.apply_button.setEnabled(enabled)
+        if self._live_process is None or self._live_process.poll() is not None:
+            self.start_button.setEnabled(enabled)
 
     def _create_profile(self) -> None:
         dialog = NewProfileDialog(self)
@@ -2052,6 +2363,7 @@ class LauncherWindow(QMainWindow):
         )
         for spin, value in zip(self.region_spins, region):
             spin.setValue(value)
+        self._sync_region_mode_from_values()
         self._glossary_editor.set_pairs(
             (entry.source, entry.target) for entry in profile.glossary
         )
@@ -2065,6 +2377,10 @@ class LauncherWindow(QMainWindow):
     def _reload_current_profile(self) -> None:
         if self._profile is not None:
             self.refresh_profiles(self._profile.profile_id)
+
+    def _reset_custom_prompt(self) -> None:
+        self.custom_prompt_edit.clear()
+        self.statusBar().showMessage("已恢复内置默认提示词；保存更改后生效", 5000)
 
     def _save_custom_prompt(self, *, announce: bool = True) -> bool:
         profile = self._require_profile()
@@ -2156,6 +2472,7 @@ class LauncherWindow(QMainWindow):
         except (ProfileError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("保存区域失败", exc)
             return False
+        self._sync_region_mode_from_values()
         self._update_info()
         self._update_region_status_chip()
         self.statusBar().showMessage(
@@ -2187,12 +2504,48 @@ class LauncherWindow(QMainWindow):
             return
         for spin, value in zip(self.region_spins, selector.selected_region):
             spin.setValue(value)
+        self.custom_region_radio.setChecked(True)
         self._save_capture_settings()
 
     def _use_full_screen(self) -> None:
+        self.full_screen_radio.setChecked(True)
         for spin in self.region_spins:
             spin.setValue(0)
         self._save_capture_settings()
+
+    def _set_run_state(self, text: str, *, tone: str, running: bool) -> None:
+        self._set_status_chip(self.run_status_chip, text, tone=tone)
+        self.start_button.setText("停止翻译" if running else "开始翻译")
+        self.start_button.setProperty("running", running)
+        self.start_button.setEnabled(True)
+        style = self.start_button.style()
+        style.unpolish(self.start_button)
+        style.polish(self.start_button)
+
+    def _toggle_live(self) -> None:
+        process = self._live_process
+        if process is not None and process.poll() is None:
+            self._stop_live()
+            return
+        self._start_live()
+
+    def _stop_live(self) -> None:
+        process = self._live_process
+        if process is None or process.poll() is not None:
+            self._live_process = None
+            self._live_stop_requested = False
+            self._set_run_state("已停止", tone="neutral", running=False)
+            return
+        try:
+            process.terminate()
+        except OSError as exc:
+            self._show_error("停止实时翻译失败", exc)
+            return
+        self._live_stop_requested = True
+        self._live_waiting_for_ready = False
+        self._set_run_state("正在停止", tone="warning", running=True)
+        self.start_button.setEnabled(False)
+        self.statusBar().showMessage("正在停止实时翻译……")
 
     def _start_live(self) -> None:
         profile = self._require_profile()
@@ -2270,6 +2623,7 @@ class LauncherWindow(QMainWindow):
             self._show_error("启动失败", exc)
             return
         self._live_process = process
+        self._live_stop_requested = False
         self._live_waiting_for_ready = self._config.translation.backend == "builtin"
         self._live_monitor.start()
         # The launcher itself does not use SetWindowDisplayAffinity: that API
@@ -2277,6 +2631,9 @@ class LauncherWindow(QMainWindow):
         # Minimize after the child is created so it does not enter OCR.
         if not self._live_waiting_for_ready:
             self.showMinimized()
+            self._set_run_state("正在翻译", tone="success", running=True)
+        else:
+            self._set_run_state("正在启动", tone="warning", running=True)
         self.statusBar().showMessage(
             f"实时翻译正在启动（进程 {process.pid}，{runtime_description}）"
             f"{'；正在加载内置模型' if self._live_waiting_for_ready else ''}；"
@@ -2295,6 +2652,7 @@ class LauncherWindow(QMainWindow):
                 log = _log_tail(self._live_log_path)
                 if f"[{PRODUCT_NAME} Live] ready" in log:
                     self._live_waiting_for_ready = False
+                    self._set_run_state("正在翻译", tone="success", running=True)
                     self.showMinimized()
                     self.statusBar().showMessage("实时翻译已就绪", 5000)
                 elif "managed local model ready:" in log:
@@ -2311,9 +2669,13 @@ class LauncherWindow(QMainWindow):
         self._live_monitor.stop()
         self._live_process = None
         self._live_waiting_for_ready = False
-        if exit_code == 0:
+        stop_requested = self._live_stop_requested
+        self._live_stop_requested = False
+        if exit_code == 0 or stop_requested:
+            self._set_run_state("已停止", tone="neutral", running=False)
             self.statusBar().showMessage("实时翻译已关闭", 5000)
             return
+        self._set_run_state("异常退出", tone="error", running=False)
         self.showNormal()
         self.raise_()
         self.activateWindow()
