@@ -21,7 +21,15 @@ from typing import Any
 
 import httpx
 
-from game_screen_translator.config import AppConfig, TranslationConfig
+from game_screen_translator.config import (
+    AppConfig,
+    BUILTIN_CONTEXT_PER_SLOT,
+    BUILTIN_CUDA_DEVICE_FOLLOW_OCR,
+    BUILTIN_KV_CACHE_TYPES,
+    BUILTIN_MAX_OUTPUT_TOKENS,
+    BUILTIN_PARALLEL_MAX,
+    TranslationConfig,
+)
 
 
 LLAMA_CPP_VERSION = "b10621"
@@ -620,15 +628,53 @@ class ManagedLocalServer:
         model_id: str,
         ocr_device: str,
         *,
+        cuda_device: str = BUILTIN_CUDA_DEVICE_FOLLOW_OCR,
+        parallel: int = 1,
+        kv_cache_type: str = "f16",
+        temperature: float = 0.2,
         startup_timeout_seconds: float = 180.0,
     ) -> None:
         self.root = root.resolve()
         self.model = get_builtin_model(model_id)
         self.ocr_device = ocr_device
+        self.cuda_device = cuda_device
+        self.parallel = parallel
+        self.kv_cache_type = kv_cache_type
+        self.temperature = temperature
         self.startup_timeout_seconds = startup_timeout_seconds
         self.port: int | None = None
         self.api_key = secrets.token_urlsafe(32)
         self.process: subprocess.Popen[bytes] | None = None
+
+        if not 1 <= self.parallel <= BUILTIN_PARALLEL_MAX:
+            raise LocalBackendError(
+                f"内置 CUDA 并发必须在 1 到 {BUILTIN_PARALLEL_MAX} 之间"
+            )
+        if self.kv_cache_type not in BUILTIN_KV_CACHE_TYPES:
+            raise LocalBackendError("内置 CUDA KV 缓存类型必须是 f16 或 q8_0")
+        if not 0 <= self.temperature <= 2:
+            raise LocalBackendError("内置 CUDA 温度必须在 0 到 2 之间")
+
+    @property
+    def total_context(self) -> int:
+        return self.parallel * BUILTIN_CONTEXT_PER_SLOT
+
+    @property
+    def max_output_tokens(self) -> int:
+        return BUILTIN_MAX_OUTPUT_TOKENS
+
+    def _physical_cuda_device(self) -> str:
+        device = (
+            self.ocr_device
+            if self.cuda_device == BUILTIN_CUDA_DEVICE_FOLLOW_OCR
+            else self.cuda_device
+        )
+        prefix, separator, index = device.partition(":")
+        if prefix != "gpu" or separator != ":" or not index.isdigit():
+            raise LocalBackendError(
+                "内置 CUDA 设备必须跟随 OCR 或指定为 gpu:N"
+            )
+        return device
 
     @property
     def command(self) -> tuple[str, ...]:
@@ -653,13 +699,20 @@ class ManagedLocalServer:
             "--jinja",
             "--offline",
             "--parallel",
-            "1",
+            str(self.parallel),
             "--device",
             "CUDA0",
             "--gpu-layers",
             "all",
             "--ctx-size",
-            "8192",
+            str(self.total_context),
+            "--no-kv-unified",
+            "--cache-ram",
+            "0",
+            "--cache-type-k",
+            self.kv_cache_type,
+            "--cache-type-v",
+            self.kv_cache_type,
             "--fit",
             "on",
             "--fit-target",
@@ -668,8 +721,12 @@ class ManagedLocalServer:
             "none",
             "--main-gpu",
             "0",
+            "--spec-type",
+            "none",
+            "--reasoning",
+            "off",
             "--temp",
-            "0.7",
+            str(self.temperature),
             "--top-k",
             "20",
             "--top-p",
@@ -682,12 +739,8 @@ class ManagedLocalServer:
         assert_supported_platform()
         if self.process is not None:
             raise LocalBackendError("内置本地模型服务已经启动")
-        if not self.ocr_device.startswith("gpu:"):
-            raise LocalBackendError("内置本地模型需要与 NVIDIA OCR 使用同一张 GPU")
-        try:
-            gpu_index = int(self.ocr_device.split(":", 1)[1])
-        except ValueError as exc:
-            raise LocalBackendError(f"无效的 OCR GPU：{self.ocr_device}") from exc
+        physical_cuda_device = self._physical_cuda_device()
+        gpu_index = int(physical_cuda_device.split(":", 1)[1])
 
         self.port = _free_loopback_port()
         executable = runtime_executable(self.root)
@@ -763,9 +816,9 @@ class ManagedLocalServer:
             base_url=f"http://127.0.0.1:{self.port}/v1",
             model=self.model.model_id,
             timeout_seconds=max(original.timeout_seconds, 60.0),
-            max_concurrency=1,
-            max_output_tokens=4096,
-            temperature=0.7,
+            max_concurrency=self.parallel,
+            max_output_tokens=self.max_output_tokens,
+            temperature=self.temperature,
             top_p=0.6,
             api_key=self.api_key,
         )
@@ -803,6 +856,10 @@ def managed_translation_backend(
         root,
         config.translation.builtin_model,
         config.ocr.device,
+        cuda_device=config.translation.builtin_cuda_device,
+        parallel=config.translation.builtin_parallel,
+        kv_cache_type=config.translation.builtin_kv_cache_type,
+        temperature=config.translation.builtin_temperature,
     )
     with server:
         yield replace(

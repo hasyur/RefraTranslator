@@ -13,6 +13,10 @@ from pathlib import Path
 from game_screen_translator.branding import GUI_PROCESS_NAME, PRODUCT_NAME
 from game_screen_translator.config import (
     AppConfig,
+    BUILTIN_CONTEXT_PER_SLOT,
+    BUILTIN_CUDA_DEVICE_FOLLOW_OCR,
+    BUILTIN_MAX_OUTPUT_TOKENS,
+    BUILTIN_PARALLEL_MAX,
     CAPTURE_FPS_PER_CHANGE_POLL,
     ConfigError,
     DEFAULT_DARK_OVERLAY_OPACITY,
@@ -1078,10 +1082,104 @@ class LauncherWindow(QMainWindow):
         self.local_model_status_label = QLabel()
         self.local_model_status_label.setObjectName("secondaryText")
         self.local_model_status_label.setWordWrap(True)
+
+        self.builtin_advanced_button = QToolButton()
+        self.builtin_advanced_button.setObjectName("advancedToggle")
+        self.builtin_advanced_button.setText("展开内置 CUDA 参数")
+        self.builtin_advanced_button.setCheckable(True)
+        self.builtin_advanced_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.builtin_advanced_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+
+        self.builtin_advanced_content = QWidget()
+        builtin_advanced_layout = QVBoxLayout(self.builtin_advanced_content)
+        builtin_advanced_layout.setContentsMargins(0, 4, 0, 0)
+        builtin_advanced_layout.setSpacing(8)
+        self._builtin_advanced_form = QFormLayout()
+        self._builtin_advanced_form.setHorizontalSpacing(18)
+        self._builtin_advanced_form.setVerticalSpacing(8)
+        self._builtin_advanced_form.setRowWrapPolicy(
+            QFormLayout.RowWrapPolicy.WrapLongRows
+        )
+
+        self.builtin_cuda_device_combo = QComboBox()
+        self.builtin_cuda_device_combo.setMaximumWidth(620)
+        self.builtin_cuda_device_combo.addItem(
+            "跟随 OCR 设备（推荐）",
+            BUILTIN_CUDA_DEVICE_FOLLOW_OCR,
+        )
+        configured_builtin_device = self._config.translation.builtin_cuda_device
+        if configured_builtin_device != BUILTIN_CUDA_DEVICE_FOLLOW_OCR:
+            self.builtin_cuda_device_combo.addItem(
+                f"{configured_builtin_device}（正在检测 NVIDIA GPU……）",
+                configured_builtin_device,
+            )
+        self.builtin_cuda_device_combo.setCurrentIndex(
+            max(self.builtin_cuda_device_combo.findData(configured_builtin_device), 0)
+        )
+        self.builtin_cuda_device_combo.setToolTip(
+            "只限制 llama.cpp 子进程；跟随 OCR 时二者使用同一张物理显卡，"
+            "也可以为翻译单独选择另一张显卡。"
+        )
+        self._builtin_advanced_form.addRow(
+            "翻译 GPU",
+            self.builtin_cuda_device_combo,
+        )
+
+        self.builtin_parallel_spin = QSpinBox()
+        self.builtin_parallel_spin.setRange(1, BUILTIN_PARALLEL_MAX)
+        self.builtin_parallel_spin.setValue(
+            self._config.translation.builtin_parallel
+        )
+        self.builtin_parallel_spin.setSuffix(" 路")
+        self.builtin_parallel_spin.setMaximumWidth(140)
+        self.builtin_parallel_spin.setToolTip(
+            "llama.cpp 服务槽位数；该值同时成为程序向内置后端发送请求的并发上限。"
+        )
+        self._builtin_advanced_form.addRow(
+            "并发槽位",
+            self.builtin_parallel_spin,
+        )
+
+        self.builtin_context_summary_label = QLabel()
+        self.builtin_context_summary_label.setObjectName("secondaryText")
+        self.builtin_context_summary_label.setWordWrap(True)
+        self._builtin_advanced_form.addRow(
+            "上下文",
+            self.builtin_context_summary_label,
+        )
+
+        self.builtin_kv_cache_combo = QComboBox()
+        self.builtin_kv_cache_combo.addItem("f16（质量优先）", "f16")
+        self.builtin_kv_cache_combo.addItem("q8_0（降低显存）", "q8_0")
+        self.builtin_kv_cache_combo.setCurrentIndex(
+            max(
+                self.builtin_kv_cache_combo.findData(
+                    self._config.translation.builtin_kv_cache_type
+                ),
+                0,
+            )
+        )
+        self.builtin_kv_cache_combo.setMaximumWidth(280)
+        self._builtin_advanced_form.addRow("KV 缓存精度", self.builtin_kv_cache_combo)
+
+        builtin_fixed_label = QLabel(
+            "固定参数：split-mode=none · cache-ram=0 · spec-type=none · "
+            "reasoning=off · 非 unified KV"
+        )
+        builtin_fixed_label.setObjectName("secondaryText")
+        builtin_fixed_label.setWordWrap(True)
+        builtin_advanced_layout.addLayout(self._builtin_advanced_form)
+        builtin_advanced_layout.addWidget(builtin_fixed_label)
+        self.builtin_advanced_content.hide()
+
         builtin_layout.addWidget(self.builtin_model_combo)
         builtin_layout.addLayout(builtin_actions)
         builtin_layout.addWidget(self.local_download_progress)
         builtin_layout.addWidget(self.local_model_status_label)
+        builtin_layout.addWidget(self.builtin_advanced_button)
+        builtin_layout.addWidget(self.builtin_advanced_content)
         self._builtin_model_widget = builtin_widget
         translation_form.addRow("内置模型", builtin_widget)
 
@@ -1170,6 +1268,13 @@ class LauncherWindow(QMainWindow):
         self.builtin_model_combo.currentIndexChanged.connect(
             self._refresh_local_model_status
         )
+        self.builtin_advanced_button.toggled.connect(
+            self._toggle_builtin_advanced_settings
+        )
+        self.builtin_parallel_spin.valueChanged.connect(
+            self._refresh_builtin_context_summary
+        )
+        self._refresh_builtin_context_summary()
         self._sync_translation_backend_controls()
         translation_layout.addLayout(translation_form)
 
@@ -1462,6 +1567,7 @@ class LauncherWindow(QMainWindow):
                     item.setEnabled(False)
         self.ocr_device_combo.setCurrentIndex(selected_index)
         self.ocr_device_combo.blockSignals(False)
+        self._set_builtin_cuda_device_choices(devices, error=error)
 
         if error:
             self.ocr_device_combo.setToolTip(
@@ -1483,6 +1589,53 @@ class LauncherWindow(QMainWindow):
         self._update_ocr_status_from_selection(
             tone="error" if error else ("warning" if unavailable else "success")
         )
+
+    def _set_builtin_cuda_device_choices(
+        self,
+        devices: tuple[tuple[str, str], ...],
+        *,
+        error: str | None = None,
+    ) -> None:
+        current = self.builtin_cuda_device_combo.currentData()
+        if not isinstance(current, str):
+            current = self._config.translation.builtin_cuda_device
+        self.builtin_cuda_device_combo.blockSignals(True)
+        self.builtin_cuda_device_combo.clear()
+        self.builtin_cuda_device_combo.addItem(
+            "跟随 OCR 设备（推荐）",
+            BUILTIN_CUDA_DEVICE_FOLLOW_OCR,
+        )
+        for device, label in devices:
+            self.builtin_cuda_device_combo.addItem(label, device)
+
+        selected_index = self.builtin_cuda_device_combo.findData(current)
+        if selected_index < 0 and current != BUILTIN_CUDA_DEVICE_FOLLOW_OCR:
+            self.builtin_cuda_device_combo.addItem(
+                f"{current}（当前不可用）",
+                current,
+            )
+            selected_index = self.builtin_cuda_device_combo.count() - 1
+            item_getter = getattr(
+                self.builtin_cuda_device_combo.model(),
+                "item",
+                None,
+            )
+            if callable(item_getter):
+                item = item_getter(selected_index)
+                if item is not None:
+                    item.setEnabled(False)
+        self.builtin_cuda_device_combo.setCurrentIndex(max(selected_index, 0))
+        self.builtin_cuda_device_combo.blockSignals(False)
+        if error:
+            self.builtin_cuda_device_combo.setToolTip(
+                f"GPU 检测失败：{error}\n"
+                "当前保留原配置；跟随 OCR 仍会使用启动时通过校验的 OCR 显卡。"
+            )
+        else:
+            self.builtin_cuda_device_combo.setToolTip(
+                "只限制 llama.cpp 子进程；跟随 OCR 时二者使用同一张物理显卡，"
+                "也可以为翻译单独选择另一张显卡。"
+            )
 
     @staticmethod
     def _set_status_chip(
@@ -1590,12 +1743,43 @@ class LauncherWindow(QMainWindow):
             raise ConfigError("当前内置模型选择无效")
         return get_builtin_model(model_id)
 
+    def _selected_builtin_cuda_device(self) -> str:
+        device = self.builtin_cuda_device_combo.currentData()
+        if not isinstance(device, str):
+            raise ConfigError("当前内置 CUDA 显卡选择无效")
+        return device
+
+    def _selected_builtin_kv_cache_type(self) -> str:
+        cache_type = self.builtin_kv_cache_combo.currentData()
+        if not isinstance(cache_type, str):
+            raise ConfigError("当前内置 CUDA KV 缓存精度无效")
+        return cache_type
+
+    def _refresh_builtin_context_summary(self, *args) -> None:
+        parallel = self.builtin_parallel_spin.value()
+        total = parallel * BUILTIN_CONTEXT_PER_SLOT
+        self.builtin_context_summary_label.setText(
+            f"每槽固定 {BUILTIN_CONTEXT_PER_SLOT} tokens；"
+            f"llama.cpp 总 ctx-size：{total}；"
+            f"每路最大输出固定 {BUILTIN_MAX_OUTPUT_TOKENS} tokens"
+        )
+
     @staticmethod
     def _translation_summary(translation) -> str:
         if translation.backend == "builtin":
             try:
                 model = get_builtin_model(translation.builtin_model)
-                return f"内置 {model.display_name} · CUDA · 并发 1"
+                device = (
+                    "跟随 OCR"
+                    if translation.builtin_cuda_device
+                    == BUILTIN_CUDA_DEVICE_FOLLOW_OCR
+                    else translation.builtin_cuda_device
+                )
+                return (
+                    f"内置 {model.display_name} · {device} · "
+                    f"并发 {translation.builtin_parallel} · "
+                    f"每槽 {BUILTIN_CONTEXT_PER_SLOT}"
+                )
             except LocalBackendError:
                 return f"内置 {translation.builtin_model} · 配置无效"
         return (
@@ -1839,6 +2023,9 @@ class LauncherWindow(QMainWindow):
             self._config.translation,
             backend=self._selected_translation_backend(),
             builtin_model=self._selected_builtin_model().model_id,
+            builtin_cuda_device=self._selected_builtin_cuda_device(),
+            builtin_parallel=self.builtin_parallel_spin.value(),
+            builtin_kv_cache_type=self._selected_builtin_kv_cache_type(),
             base_url=base_url,
             model=model,
             api_key=self.api_key_edit.text(),
@@ -1966,6 +2153,15 @@ class LauncherWindow(QMainWindow):
         self._service_form.setRowVisible(
             self.roi_response_target_spin,
             dynamic_roi_enabled,
+        )
+
+    def _toggle_builtin_advanced_settings(self, expanded: bool) -> None:
+        self.builtin_advanced_content.setVisible(expanded)
+        self.builtin_advanced_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+        self.builtin_advanced_button.setText(
+            "收起内置 CUDA 参数" if expanded else "展开内置 CUDA 参数"
         )
 
     def _toggle_advanced_settings(self, expanded: bool) -> None:
@@ -2126,6 +2322,9 @@ class LauncherWindow(QMainWindow):
                 model=translation.model,
                 backend=translation.backend,
                 builtin_model=translation.builtin_model,
+                builtin_cuda_device=translation.builtin_cuda_device,
+                builtin_parallel=translation.builtin_parallel,
+                builtin_kv_cache_type=translation.builtin_kv_cache_type,
                 api_key=translation.api_key,
                 ocr_device=ocr.device,
                 max_concurrency=translation.max_concurrency,
@@ -2160,6 +2359,25 @@ class LauncherWindow(QMainWindow):
         )
         if builtin_index >= 0:
             self.builtin_model_combo.setCurrentIndex(builtin_index)
+        builtin_device_index = self.builtin_cuda_device_combo.findData(
+            self._config.translation.builtin_cuda_device
+        )
+        if builtin_device_index < 0:
+            self.builtin_cuda_device_combo.addItem(
+                f"{self._config.translation.builtin_cuda_device}（当前不可用）",
+                self._config.translation.builtin_cuda_device,
+            )
+            builtin_device_index = self.builtin_cuda_device_combo.count() - 1
+        self.builtin_cuda_device_combo.setCurrentIndex(builtin_device_index)
+        self.builtin_parallel_spin.setValue(
+            self._config.translation.builtin_parallel
+        )
+        builtin_cache_index = self.builtin_kv_cache_combo.findData(
+            self._config.translation.builtin_kv_cache_type
+        )
+        if builtin_cache_index >= 0:
+            self.builtin_kv_cache_combo.setCurrentIndex(builtin_cache_index)
+        self._refresh_builtin_context_summary()
         self.server_url_combo.setCurrentText(self._config.translation.base_url)
         self.model_combo.setCurrentText(self._config.translation.model)
         self.api_key_edit.setText(self._config.translation.api_key)

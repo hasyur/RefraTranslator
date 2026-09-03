@@ -287,16 +287,29 @@ def test_managed_server_is_loopback_only_cuda_scoped_and_ephemeral(
         tmp_path,
         "Hy-MT2-1.8B-Q8_0.gguf",
         "gpu:2",
+        cuda_device="gpu:1",
+        parallel=4,
+        kv_cache_type="q8_0",
+        temperature=0.2,
     )
     server.start()
 
     command, kwargs = process_calls[0]
     assert command[command.index("--host") + 1] == "127.0.0.1"
     assert command[command.index("--port") + 1] == "54321"
-    assert command[command.index("--parallel") + 1] == "1"
+    assert command[command.index("--parallel") + 1] == "4"
     assert command[command.index("--device") + 1] == "CUDA0"
     assert command[command.index("--gpu-layers") + 1] == "all"
     assert command[command.index("--ctx-size") + 1] == "8192"
+    assert "--no-kv-unified" in command
+    assert command[command.index("--cache-ram") + 1] == "0"
+    assert command[command.index("--cache-type-k") + 1] == "q8_0"
+    assert command[command.index("--cache-type-v") + 1] == "q8_0"
+    assert command[command.index("--split-mode") + 1] == "none"
+    assert command[command.index("--main-gpu") + 1] == "0"
+    assert command[command.index("--spec-type") + 1] == "none"
+    assert command[command.index("--reasoning") + 1] == "off"
+    assert command[command.index("--temp") + 1] == "0.2"
     assert "--no-webui" in command
     assert "--offline" in command
     assert "--jinja" in command
@@ -304,7 +317,7 @@ def test_managed_server_is_loopback_only_cuda_scoped_and_ephemeral(
     assert "--top-k" in command
     assert server.api_key not in command
     assert kwargs["env"]["LLAMA_API_KEY"] == server.api_key
-    assert kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "2"
+    assert kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "1"
 
     effective = server.effective_translation(
         TranslationConfig(
@@ -318,11 +331,23 @@ def test_managed_server_is_loopback_only_cuda_scoped_and_ephemeral(
     )
     assert effective.base_url == "http://127.0.0.1:54321/v1"
     assert effective.model == "Hy-MT2-1.8B-Q8_0.gguf"
-    assert effective.max_concurrency == 1
-    assert effective.max_output_tokens == 4096
-    assert effective.temperature == 0.7
+    assert effective.max_concurrency == 4
+    assert effective.max_output_tokens == 512
+    assert effective.temperature == 0.2
     assert effective.top_p == 0.6
     assert effective.api_key == server.api_key
 
     server.close()
     assert process.terminated
+
+
+def test_managed_server_cuda_device_follows_ocr_by_default(tmp_path: Path) -> None:
+    server = ManagedLocalServer(
+        tmp_path,
+        "Hy-MT2-1.8B-Q8_0.gguf",
+        "gpu:3",
+    )
+
+    assert server._physical_cuda_device() == "gpu:3"
+    assert server.total_context == 2048
+    assert server.max_output_tokens == 512

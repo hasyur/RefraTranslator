@@ -20,6 +20,11 @@ DEFAULT_BROWSER_OVERLAY_PORT = 47831
 CAPTURE_FPS_PER_CHANGE_POLL = 2
 MAX_CAPTURE_FPS = 240
 MAX_CHANGE_POLL_FPS = MAX_CAPTURE_FPS // CAPTURE_FPS_PER_CHANGE_POLL
+BUILTIN_CUDA_DEVICE_FOLLOW_OCR = "follow_ocr"
+BUILTIN_CONTEXT_PER_SLOT = 2048
+BUILTIN_MAX_OUTPUT_TOKENS = 512
+BUILTIN_PARALLEL_MAX = 32
+BUILTIN_KV_CACHE_TYPES = frozenset({"f16", "q8_0"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +42,10 @@ class TranslationConfig:
     api_key_env: str = API_KEY_ENV
     backend: str = "external"
     builtin_model: str = "Hy-MT2-1.8B-Q8_0.gguf"
+    builtin_cuda_device: str = BUILTIN_CUDA_DEVICE_FOLLOW_OCR
+    builtin_parallel: int = 1
+    builtin_kv_cache_type: str = "f16"
+    builtin_temperature: float = 0.2
 
     def __post_init__(self) -> None:
         if self.provider != "openai_compatible":
@@ -48,6 +57,35 @@ class TranslationConfig:
             raise ConfigError("translation.backend 必须是 external 或 builtin")
         if not isinstance(self.builtin_model, str) or not self.builtin_model.strip():
             raise ConfigError("translation.builtin_model 不能为空")
+        if not isinstance(self.builtin_cuda_device, str) or (
+            self.builtin_cuda_device != BUILTIN_CUDA_DEVICE_FOLLOW_OCR
+            and re.fullmatch(r"gpu:\d+", self.builtin_cuda_device) is None
+        ):
+            raise ConfigError(
+                "translation.builtin_cuda_device 必须是 follow_ocr 或 gpu:N"
+            )
+        if (
+            not isinstance(self.builtin_parallel, int)
+            or isinstance(self.builtin_parallel, bool)
+            or not 1 <= self.builtin_parallel <= BUILTIN_PARALLEL_MAX
+        ):
+            raise ConfigError(
+                "translation.builtin_parallel 必须在 "
+                f"1 到 {BUILTIN_PARALLEL_MAX} 之间"
+            )
+        if (
+            not isinstance(self.builtin_kv_cache_type, str)
+            or self.builtin_kv_cache_type not in BUILTIN_KV_CACHE_TYPES
+        ):
+            raise ConfigError(
+                "translation.builtin_kv_cache_type 必须是 f16 或 q8_0"
+            )
+        if not isinstance(self.builtin_temperature, (int, float)) or isinstance(
+            self.builtin_temperature, bool
+        ):
+            raise ConfigError("translation.builtin_temperature 必须是数字")
+        if not 0 <= self.builtin_temperature <= 2:
+            raise ConfigError("translation.builtin_temperature 必须在 0 到 2 之间")
         if not self.base_url.startswith(("http://", "https://")):
             raise ConfigError("translation.base_url 必须以 http:// 或 https:// 开头")
         if not self.model.strip():
@@ -69,6 +107,24 @@ class TranslationConfig:
         object.__setattr__(self, "api_key", self.api_key.strip())
         object.__setattr__(self, "api_key_env", self.api_key_env.strip())
         object.__setattr__(self, "builtin_model", self.builtin_model.strip())
+        object.__setattr__(
+            self,
+            "builtin_cuda_device",
+            self.builtin_cuda_device.strip(),
+        )
+        object.__setattr__(
+            self,
+            "builtin_kv_cache_type",
+            self.builtin_kv_cache_type.strip(),
+        )
+
+    @property
+    def builtin_total_context(self) -> int:
+        return self.builtin_parallel * BUILTIN_CONTEXT_PER_SLOT
+
+    @property
+    def builtin_max_output_tokens(self) -> int:
+        return BUILTIN_MAX_OUTPUT_TOKENS
 
     @property
     def normalized_base_url(self) -> str:
@@ -326,7 +382,9 @@ _TOML_SECTION_RE = re.compile(
 )
 _TRANSLATION_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
-    r"backend|builtin_model|base_url|model|max_concurrency|api_key)[ \t]*="
+    r"backend|builtin_model|builtin_cuda_device|builtin_parallel|"
+    r"builtin_kv_cache_type|builtin_temperature|"
+    r"base_url|model|max_concurrency|api_key)[ \t]*="
 )
 _OCR_VALUE_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<key>"
@@ -363,6 +421,10 @@ def save_translation_selection(
         model=model,
         backend=None,
         builtin_model=None,
+        builtin_cuda_device=None,
+        builtin_parallel=None,
+        builtin_kv_cache_type=None,
+        builtin_temperature=None,
         api_key=api_key,
         max_concurrency=None,
         ocr_device=None,
@@ -393,6 +455,10 @@ def save_runtime_selection(
     ocr_device: str,
     backend: str | None = None,
     builtin_model: str | None = None,
+    builtin_cuda_device: str | None = None,
+    builtin_parallel: int | None = None,
+    builtin_kv_cache_type: str | None = None,
+    builtin_temperature: float | None = None,
     api_key: str | None = None,
     max_concurrency: int | None = None,
     ocr_detection_max_side: int | None = None,
@@ -419,6 +485,10 @@ def save_runtime_selection(
         model=model,
         backend=backend,
         builtin_model=builtin_model,
+        builtin_cuda_device=builtin_cuda_device,
+        builtin_parallel=builtin_parallel,
+        builtin_kv_cache_type=builtin_kv_cache_type,
+        builtin_temperature=builtin_temperature,
         api_key=api_key,
         max_concurrency=max_concurrency,
         ocr_device=ocr_device,
@@ -448,6 +518,10 @@ def _save_selected_values(
     model: str,
     backend: str | None,
     builtin_model: str | None,
+    builtin_cuda_device: str | None,
+    builtin_parallel: int | None,
+    builtin_kv_cache_type: str | None,
+    builtin_temperature: float | None,
     api_key: str | None,
     max_concurrency: int | None,
     ocr_device: str | None,
@@ -479,6 +553,26 @@ def _save_selected_values(
             current.translation.builtin_model
             if builtin_model is None
             else builtin_model.strip()
+        ),
+        builtin_cuda_device=(
+            current.translation.builtin_cuda_device
+            if builtin_cuda_device is None
+            else builtin_cuda_device.strip()
+        ),
+        builtin_parallel=(
+            current.translation.builtin_parallel
+            if builtin_parallel is None
+            else builtin_parallel
+        ),
+        builtin_kv_cache_type=(
+            current.translation.builtin_kv_cache_type
+            if builtin_kv_cache_type is None
+            else builtin_kv_cache_type.strip()
+        ),
+        builtin_temperature=(
+            current.translation.builtin_temperature
+            if builtin_temperature is None
+            else builtin_temperature
         ),
         base_url=base_url.strip(),
         model=model.strip(),
@@ -604,6 +698,16 @@ def _save_selected_values(
         values["backend"] = candidate_translation.backend
     if builtin_model is not None:
         values["builtin_model"] = candidate_translation.builtin_model
+    if builtin_cuda_device is not None:
+        values["builtin_cuda_device"] = candidate_translation.builtin_cuda_device
+    if builtin_parallel is not None:
+        values["builtin_parallel"] = candidate_translation.builtin_parallel
+    if builtin_kv_cache_type is not None:
+        values["builtin_kv_cache_type"] = (
+            candidate_translation.builtin_kv_cache_type
+        )
+    if builtin_temperature is not None:
+        values["builtin_temperature"] = candidate_translation.builtin_temperature
     if api_key is not None:
         values["api_key"] = candidate_translation.api_key
     for index, line in enumerate(lines):
@@ -650,6 +754,31 @@ def _save_selected_values(
             "builtin_model",
             candidate_translation.builtin_model,
         )
+
+    for key, requested, value in (
+        (
+            "builtin_cuda_device",
+            builtin_cuda_device,
+            candidate_translation.builtin_cuda_device,
+        ),
+        (
+            "builtin_parallel",
+            builtin_parallel,
+            candidate_translation.builtin_parallel,
+        ),
+        (
+            "builtin_kv_cache_type",
+            builtin_kv_cache_type,
+            candidate_translation.builtin_kv_cache_type,
+        ),
+        (
+            "builtin_temperature",
+            builtin_temperature,
+            candidate_translation.builtin_temperature,
+        ),
+    ):
+        if requested is not None and key not in replaced_keys:
+            _upsert_translation_value(lines, key, value)
 
     if api_key is not None and "api_key" not in replaced_keys:
         _upsert_translation_api_key(lines, candidate_translation.api_key)

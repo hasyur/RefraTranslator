@@ -88,6 +88,15 @@ def test_launcher_loads_profile_tables_and_saved_region(tmp_path: Path) -> None:
     assert "REFRA_TRANSLATOR_API_KEY" in window.api_key_edit.placeholderText()
     assert window.model_combo.currentText() == "hy-mt1.5-7b"
     assert window.max_concurrency_spin.value() == 2
+    assert window.builtin_cuda_device_combo.currentData() == "follow_ocr"
+    assert window.builtin_parallel_spin.value() == 1
+    assert window.builtin_kv_cache_combo.currentData() == "f16"
+    assert not hasattr(window, "builtin_temperature_mode_combo")
+    assert not hasattr(window, "builtin_temperature_spin")
+    assert not window.builtin_advanced_content.isVisible()
+    assert "每槽固定 2048" in window.builtin_context_summary_label.text()
+    assert "总 ctx-size：2048" in window.builtin_context_summary_label.text()
+    assert "最大输出固定 512" in window.builtin_context_summary_label.text()
     assert window.ocr_device_combo.currentData() == "gpu:0"
     assert window.ocr_filter_checkbox.isChecked()
     assert window.ocr_merge_checkbox.isChecked()
@@ -519,6 +528,52 @@ def test_launcher_switches_builtin_backend_without_overwriting_external_api(
     app.processEvents()
 
 
+def test_launcher_saves_and_restores_builtin_cuda_settings(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(config_path, load_config(config_path), "game")
+    window = LauncherWindow(config_path, probe_ocr_devices=False)
+    window._set_ocr_device_choices(
+        (
+            ("gpu:0", "GPU 0 · NVIDIA RTX 4070"),
+            ("gpu:1", "GPU 1 · NVIDIA RTX 4090"),
+        )
+    )
+
+    window.backend_combo.setCurrentIndex(window.backend_combo.findData("builtin"))
+    window.builtin_cuda_device_combo.setCurrentIndex(
+        window.builtin_cuda_device_combo.findData("gpu:1")
+    )
+    window.builtin_parallel_spin.setValue(4)
+    window.builtin_kv_cache_combo.setCurrentIndex(
+        window.builtin_kv_cache_combo.findData("q8_0")
+    )
+    assert "总 ctx-size：8192" in window.builtin_context_summary_label.text()
+    assert "最大输出固定 512" in window.builtin_context_summary_label.text()
+    assert window._save_translation_settings(announce=False)
+
+    saved = load_config(config_path)
+    assert saved.translation.backend == "builtin"
+    assert saved.translation.builtin_cuda_device == "gpu:1"
+    assert saved.translation.builtin_parallel == 4
+    assert saved.translation.builtin_total_context == 8192
+    assert saved.translation.builtin_max_output_tokens == 512
+    assert saved.translation.builtin_kv_cache_type == "q8_0"
+    assert saved.translation.builtin_temperature == 0.2
+    window.close()
+    app.processEvents()
+
+    restored = LauncherWindow(config_path, probe_ocr_devices=False)
+    assert restored.builtin_cuda_device_combo.currentData() == "gpu:1"
+    assert restored.builtin_parallel_spin.value() == 4
+    assert restored.builtin_kv_cache_combo.currentData() == "q8_0"
+    assert not hasattr(restored, "builtin_temperature_mode_combo")
+    assert not hasattr(restored, "builtin_temperature_spin")
+    restored.close()
+    app.processEvents()
+
+
 def test_launcher_refuses_to_start_missing_builtin_model_before_ocr_probe(
     tmp_path: Path,
     monkeypatch,
@@ -806,6 +861,9 @@ def test_launcher_lists_only_gpu_devices_reported_by_paddle(tmp_path: Path) -> N
     assert window.ocr_device_combo.findData("gpu:0") >= 0
     assert window.ocr_device_combo.findData("gpu:1") < 0
     assert "RTX 4070 Laptop GPU" in window.ocr_device_combo.itemText(0)
+    assert window.builtin_cuda_device_combo.findData("follow_ocr") >= 0
+    assert window.builtin_cuda_device_combo.findData("gpu:0") >= 0
+    assert window.builtin_cuda_device_combo.findData("gpu:1") < 0
     window.close()
     app.processEvents()
 

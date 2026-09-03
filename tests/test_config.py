@@ -39,6 +39,12 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.translation.max_concurrency == 3
     assert config.translation.backend == "external"
     assert config.translation.builtin_model == "Hy-MT2-1.8B-Q8_0.gguf"
+    assert config.translation.builtin_cuda_device == "follow_ocr"
+    assert config.translation.builtin_parallel == 1
+    assert config.translation.builtin_total_context == 2048
+    assert config.translation.builtin_max_output_tokens == 512
+    assert config.translation.builtin_kv_cache_type == "f16"
+    assert config.translation.builtin_temperature == 0.2
     assert config.translation.api_key == ""
     assert config.translation.api_key_env == "REFRA_TRANSLATOR_API_KEY"
     assert config.ocr.language == "japan"
@@ -314,6 +320,10 @@ def test_save_runtime_selection_keeps_external_api_while_selecting_builtin(
         path,
         backend="builtin",
         builtin_model="Hy-MT2-7B-Q4_K_M.gguf",
+        builtin_cuda_device="gpu:1",
+        builtin_parallel=4,
+        builtin_kv_cache_type="q8_0",
+        builtin_temperature=0.35,
         base_url="http://127.0.0.1:1234/v1",
         model="external-model",
         api_key="external-secret",
@@ -322,12 +332,22 @@ def test_save_runtime_selection_keeps_external_api_while_selecting_builtin(
 
     assert saved.translation.backend == "builtin"
     assert saved.translation.builtin_model == "Hy-MT2-7B-Q4_K_M.gguf"
+    assert saved.translation.builtin_cuda_device == "gpu:1"
+    assert saved.translation.builtin_parallel == 4
+    assert saved.translation.builtin_total_context == 8192
+    assert saved.translation.builtin_max_output_tokens == 512
+    assert saved.translation.builtin_kv_cache_type == "q8_0"
+    assert saved.translation.builtin_temperature == 0.35
     assert saved.translation.base_url == "http://127.0.0.1:1234/v1"
     assert saved.translation.model == "external-model"
     assert saved.translation.api_key == "external-secret"
     text = path.read_text(encoding="utf-8")
     assert 'backend = "builtin"' in text
     assert 'builtin_model = "Hy-MT2-7B-Q4_K_M.gguf"' in text
+    assert 'builtin_cuda_device = "gpu:1"' in text
+    assert "builtin_parallel = 4" in text
+    assert 'builtin_kv_cache_type = "q8_0"' in text
+    assert "builtin_temperature = 0.35" in text
 
 
 @pytest.mark.parametrize("backend", ["local", "cuda", ""])
@@ -348,6 +368,31 @@ def test_translation_config_rejects_non_string_builtin_model() -> None:
             base_url="http://127.0.0.1:1234/v1",
             model="model",
             builtin_model=123,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("builtin_cuda_device", "CUDA0", "builtin_cuda_device"),
+        ("builtin_parallel", 0, "builtin_parallel"),
+        ("builtin_parallel", 33, "builtin_parallel"),
+        ("builtin_kv_cache_type", "q4_0", "builtin_kv_cache_type"),
+        ("builtin_temperature", -0.1, "builtin_temperature"),
+        ("builtin_temperature", 2.1, "builtin_temperature"),
+    ],
+)
+def test_translation_config_rejects_invalid_builtin_cuda_setting(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    with pytest.raises(ConfigError, match=message):
+        TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://127.0.0.1:1234/v1",
+            model="model",
+            **{field: value},
         )
 
 

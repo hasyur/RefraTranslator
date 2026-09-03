@@ -4,6 +4,14 @@ provider = "openai_compatible"
 backend = "external"
 # 切换后端不会覆盖下面的外部 API 地址、模型或 API Key。
 builtin_model = "Hy-MT2-1.8B-Q8_0.gguf"
+# follow_ocr 跟随 OCR；也可以独立指定 gpu:0、gpu:1 等单张物理显卡。
+builtin_cuda_device = "follow_ocr"
+# 内置 llama.cpp 的服务槽位数；每槽固定 2048，上下文总量为 2048 × 槽位数。
+builtin_parallel = 1
+# f16 更稳妥；q8_0 可以降低长上下文的 KV 显存占用。
+builtin_kv_cache_type = "f16"
+# 0.2 偏稳定；Hy-MT2 官方推荐值为 0.7。
+builtin_temperature = 0.2
 base_url = "http://127.0.0.1:1234/v1"
 model = "hy-mt1.5-7b"
 # 可在启动器中填写；非空值会明文保存在本机 config.toml（该文件已被 Git 忽略）。
