@@ -1,136 +1,88 @@
 # RefraTranslator
 
-RefraTranslator 是一款 Alpha 阶段的 Windows 游戏屏幕实时翻译工具。它截取指定屏幕区域，使用 PaddleOCR 识别日文或英文，通过内置本地模型或用户自己的 OpenAI-compatible LLM 翻译，并将中文译文覆盖回原文字位置。
+RefraTranslator 是一款 Windows 游戏屏幕翻译工具：它自动识别画面中的日文或英文，并把中文译文显示在原文字附近。
 
-程序不会注入游戏进程。内置后端由程序按需下载并管理；不选择内置后端时，不会下载 LLM 运行时或模型。
+程序不会修改或注入游戏。目前仍是 Alpha 版本，建议先在普通窗口或无边框窗口中试用。
 
-## 主要功能
+> [!IMPORTANT]
+> 当前版本只支持 Windows 10/11 和 NVIDIA 显卡。没有可用的 NVIDIA 显卡时，实时翻译无法启动。
 
-- 可选的内置 CUDA 本地模型，自动下载、断点续传和 SHA-256 校验；
-- 图形化切换内置模型或外部 API，并配置 OCR 设备、字幕区域和每游戏 Profile；
-- 使用 NVIDIA GPU 加速 OCR，翻译并发数可调；
-- 多行文字默认由快速规则链分组，仅在局部断链、候选边近似平局、菜单/句子冲突时排队调用 LLM 仲裁；
-- 每个配置独立保存补充提示词、术语表、人工修订和翻译缓存；
-- 原文字区域可选择“黑化模糊”或“仅模糊”，覆盖层鼠标穿透且不会被再次 OCR；
-- 可向 OBS 提供仅限本机访问的透明 Browser Source，在录制画面中单独叠加译文；
-- 变化检测减少无效 OCR，并提供默认关闭的实验性动态 ROI 模式。
+## 最快上手
 
-## 快速开始
+整个过程不需要输入命令，按照下面的顺序双击和点击即可。
 
-需要：
+### 1. 准备电脑
+
+你需要：
 
 - 64 位 Windows 10 或 Windows 11；
-- 64 位 Python 3.11、3.12 或 3.13，并可在终端运行 `python`；
-- 支持 CUDA 的 NVIDIA GPU，并安装可用的 NVIDIA 驱动；
-- 使用外部 API 时，需要一个提供 `/v1/models` 和 `/v1/chat/completions` 的 OpenAI-compatible 翻译服务。
+- 支持 CUDA 的 NVIDIA 显卡，以及可用的 NVIDIA 驱动；
+- 64 位 Python 3.11、3.12 或 3.13；
+- 首次安装和下载模型时可用的网络，以及数 GB 磁盘空间。
 
-下载或克隆源码，并放到较短的目录（例如 `C:\RefraTranslator`）；不要让 GitHub ZIP 的长目录名重复嵌套，Paddle 在 Windows 下包含很深的文件路径。然后双击 `install.bat`。安装器会直接安装 NVIDIA GPU OCR 运行时。
+安装 Python 时，请勾选 **Add python.exe to PATH**。如果已经安装，可以在 PowerShell 中输入 `python --version` 检查版本。
 
-所有 Python 包都安装到项目内的 `.venv`，不会污染系统环境；首次使用 GPU OCR 会下载数 GB 的运行库。
+### 2. 安装 RefraTranslator
 
-安装完成后使用内置本地模型：
+1. 在 GitHub 页面点击 **Code → Download ZIP** 下载源码（会用 Git 的用户也可以直接克隆仓库）；
+2. 把项目放到较短的路径，例如 `C:\RefraTranslator`；
+3. 双击 `install.bat`；
+4. 等到窗口显示 `Installation completed successfully`。
+
+依赖会安装到项目自己的 `.venv` 目录中，不会混入系统 Python。安装和首次运行可能需要下载较大的 OCR 运行库及模型，请耐心等待，不要直接关闭窗口。
+
+### 3. 第一次启动
 
 1. 双击 `start_gui.bat`；
-2. 在“LLM 后端”选择“内置本地模型（CUDA）”；
-3. 选择模型并点击“下载并使用”，等待下载、校验和安装完成；
-4. 创建配置，填写可选的场景提示词，选择显示器并框选字幕区域；
-5. 点击“启动实时翻译”。程序会先初始化 CUDA OCR，再在所选翻译 GPU 上加载模型；默认跟随 OCR 使用同一张显卡。
+2. 点击窗口上方的 **＋ 新建**，输入游戏名称；
+3. 在 **实时翻译 → 捕获区域** 中选择游戏所在的显示器；
+4. 选择 **自定义区域**，点击 **在屏幕上框选**，只框住经常出现字幕的位置；
+5. 等待 OCR 区域显示检测到的 NVIDIA 显卡，只有一张显卡时保持默认即可；
+6. 在 **翻译** 中选择 **内置本地模型（CUDA）**；
+7. 第一次建议选择 **Hy-MT2 1.8B · Q8_0**，点击 **下载并使用**，等待下载和校验完成；
+8. 打开游戏并让字幕出现在刚才框选的区域，然后点击底部的 **开始翻译**。
 
-首发内置两档模型：
+看到中文覆盖在原文字附近，就说明已经运行成功。需要结束时，从任务栏恢复启动器并点击 **停止翻译**。
 
-| 档位 | 模型 | 下载大小 | 来源 |
-| --- | --- | ---: | --- |
-| 低显存 / 快速 | `Hy-MT2-1.8B-Q8_0.gguf` | 1.78 GiB | [ModelScope 官方仓库](https://www.modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B-GGUF/files) |
-| 高显存 / 质量 | `Hy-MT2-7B-Q4_K_M.gguf` | 4.31 GiB | [ModelScope 官方仓库](https://www.modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-7B-GGUF/files) |
+以后使用时，只需双击 `start_gui.bat`，选择已经保存的游戏配置，再点击 **开始翻译**。
 
-程序还会从 llama.cpp 官方发布页下载约 0.60 GiB 的 Windows x64 CUDA 12.4 运行时。当前固定使用与稳定版 `v0.3.0` 相同提交的 `b10621`，不会在用户机器上自动追踪未验证的新构建。运行库和模型保存在 `.cache\local-llm`；无需安装 CUDA Toolkit，但需要可用且兼容 CUDA 12 的 NVIDIA 驱动。第一次运行 OCR 时还会将 PaddleOCR 模型下载到 `.cache\paddlex`。
+## 常见问题
 
-内置 `llama-server` 只监听 `127.0.0.1`，每次启动生成临时 API Key，关闭实时翻译时一并结束。显存不足、驱动不兼容或模型服务启动失败都会明确报错，不会静默切换到外部 API、CPU 或 Vulkan。
+| 现象 | 先这样检查 |
+| --- | --- |
+| `install.bat` 提示找不到 Python | 确认安装的是 64 位 Python 3.11～3.13，并已加入 PATH |
+| 没有检测到显卡 | 确认电脑使用 NVIDIA 显卡并已安装驱动；当前版本不能改用 CPU OCR |
+| 双击后启动器没有打开 | 查看 `output\launcher.log` |
+| 点击开始后退出，或一直没有译文 | 查看 `output\live.log`，并确认框选区域内确实有日文或英文 |
+| 内置模型显存不足 | 先使用 1.8B 模型，并把高级设置中的并发槽位保持为 1 |
+| 看不到控制框或译文 | 先用本机有线显示器和窗口化游戏测试；部分无线投屏、虚拟显示器或捕获链路不兼容 |
 
-“内置 CUDA 参数”中可以独立选择翻译 GPU、并发槽位和 KV 缓存精度。每槽上下文固定为 2048，程序按“2048 × 并发槽位”计算传给 llama.cpp 的总 `ctx-size`；例如 4 路会启动为 `--ctx-size 8192 --parallel 4`。每路最大输出固定为 512 tokens。llama.cpp 子进程只会看到所选的一张物理显卡，因此进程内统一使用 `CUDA0` 并固定 `split-mode=none`；这不代表只能选择电脑中的第 0 张显卡。
+安装或下载中断后，可以直接重新运行 `install.bat` 或再次点击 **下载并使用**。模型下载支持断点续传。
 
-如需使用自己的服务，在“LLM 后端”选择“外部 API”，填写 API 地址、API Key 并读取模型列表。切换后端不会覆盖已经保存的外部设置。模板中的 `http://127.0.0.1:1234/v1` 只是外部 API 示例地址。
+## 使用外部 API（可选）
 
-API Key 在启动器中以密码框显示，填写后会明文保存在仅供本机使用、已被 Git 忽略的 `config.toml`。不希望写入配置文件时可将输入框留空，并通过 `REFRA_TRANSLATOR_API_KEY` 环境变量提供。
+如果你已经有 OpenAI-compatible 翻译服务：
 
-## OBS 录制译文
+1. 在 **翻译** 中选择 **外部 API**；
+2. 填写 API 地址和 API Key；
+3. 读取并选择模型，然后点击 **开始翻译**。
 
-基础版录制叠加使用半透明深色文本框，不包含屏幕覆盖层的模糊背景：
-
-1. 在启动器的“OBS 录制”中启用透明 Browser Source，并启动实时翻译；
-2. 在 OBS 场景中先添加游戏或显示器捕获，再在它上方添加“浏览器”来源；
-3. URL 使用启动器显示的本机地址，默认是 `http://127.0.0.1:47831/overlay`；
-4. 浏览器来源的宽高设置为所选显示器的物理分辨率，并与底层画面使用相同的缩放和裁剪。
-
-该网页只监听 `127.0.0.1`，不会开放给局域网。屏幕上的正常译文覆盖层仍被排除出捕获，OBS 通过独立网页重新叠加译文，因此不会让翻译器 OCR 自己。如果 OBS 在实时翻译启动前已经加载该地址，请在启动后刷新浏览器来源。
+服务需要提供 `/v1/models` 和 `/v1/chat/completions`。API Key 会明文保存在本机的 `config.toml` 中；如果不想保存，可以留空并使用 `REFRA_TRANSLATOR_API_KEY` 环境变量。
 
 ## 更新
 
-如果首次使用 `git clone` 获取源码，关闭 RefraTranslator 后双击 `update.bat` 即可从 `origin/main` 增量更新。已有 `.venv`、OCR 模型、配置、Profile、日志和翻译缓存都会保留；只有 `pyproject.toml` 发生变化时才会更新 Python 环境。旧版克隆如果仍使用本地 `master` 分支，更新器也会安全地将它快进到 `origin/main`。
+如果最初使用 `git clone` 下载项目，关闭 RefraTranslator 后双击 `update.bat` 即可更新。配置、Profile、模型、日志和翻译缓存会保留。
 
-GitHub ZIP 不包含 Git 历史，因此无法使用增量更新。希望长期更新时，建议只进行一次 Git 克隆和安装，之后始终保留同一个目录：
+ZIP 下载的项目不能使用增量更新；想长期更新，建议使用下面的方式只克隆一次：
 
 ```powershell
 git clone https://github.com/hasyur/RefraTranslator.git C:\RefraTranslator
 ```
 
-更新器发现非 `main`/旧版 `master` 分支、detached HEAD 或尚未提交的源码改动时会安全停止，不会覆盖本机数据。
-
-默认安装 CUDA 12.9 运行时；需要匹配其他驱动环境时，可以显式指定受支持的 CUDA 包：
-
-```powershell
-.\bootstrap.ps1 -WithGui -GpuCuda cu126
-```
-
-## 使用建议
-
-- 尽量只框选字幕区域，这是降低 OCR 延迟和无关翻译最有效的方法；
-- 普通窗口和无边框窗口兼容性最好，独占全屏暂不保证可用；
-- “实验性动态 ROI”默认关闭，适合在具体游戏中对比测试；
-- LLM 并发只控制客户端请求数，实际速度仍取决于翻译后端与显存；
-- 配置会隔离不同游戏或网页的提示词、术语表、人工修订和缓存；
-- 当前不会识别说话人，也不会为不同人物自动生成不同语气。
-
-动态 ROI 的设计、限制和测试结果见 [全屏动态 ROI 实验](docs/dynamic-roi-experiment.md)。所有配置项及默认值见 [config.example.toml](config.example.toml)。
-
-## 排查问题
-
-检查当前所选翻译后端与模型（选择内置后端时会临时启动本地模型）：
-
-```powershell
-.\.venv\Scripts\python.exe -m game_screen_translator --config config.toml doctor
-```
-
-常用日志：
-
-- GUI 无法启动：`output\launcher.log`；
-- 实时翻译异常退出或没有译文：`output\live.log`。
-
-如果看不到控制框或译文，请先使用本机屏幕或有线显示器测试；部分无线投屏、虚拟显示器和捕获链路无法正确显示或排除覆盖层。
-
-安装脚本成功后会清理 `.cache\pip` 下载缓存，但保留 OCR 和内置 LLM 模型。内置模型可在 GUI 中单独删除；不要为了清理空间直接删除整个 `.cache`，否则下次需要重新下载相关模型。
-
-## 开发与测试
-
-安装开发环境并运行离线测试：
-
-```powershell
-.\bootstrap.ps1 -WithDev -WithGui
-.\.venv\Scripts\python.exe -m pytest
-```
-
-仓库还提供不调用翻译程序的循环字幕靶场，可双击 `start_test_scenes.bat`；场景与按键见 [测试靶场说明](tests/manual/README.md)。
-
-GitHub Actions 会在 Python 3.11、3.12 和 3.13 上运行离线测试，不会下载 OCR 模型或连接 LLM 服务。
-
 ## 当前限制
-
-- 每次运行只有一个捕获区域，游戏窗口移动后需要重新框选；
-- OCR 仅支持 NVIDIA GPU，没有可用 NVIDIA GPU 时无法启动实时翻译；
-- 内置 LLM 后端仅支持 Windows x64 + NVIDIA CUDA，不提供 CPU 或 Vulkan 回退；
-- 动态复杂背景可能使实验性 ROI 回退到整帧 OCR；
-- 项目仍处于 Alpha 阶段，建议先在非关键环境测试。
+- 内置模型只支持 Windows x64 + NVIDIA CUDA，不会回退到 CPU 或 Vulkan；
+- 项目仍处于 Alpha 阶段，请先在非关键环境中试用。
 
 ## 许可证
 
-RefraTranslator 源代码采用 [Apache License 2.0](LICENSE)。按需下载的 llama.cpp、NVIDIA CUDA 运行库、Hy-MT2 模型及其他第三方依赖仍采用各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+RefraTranslator 源代码采用 [Apache License 2.0](LICENSE)。按需下载的 llama.cpp、NVIDIA CUDA 运行库、Hy-MT2 模型及其他第三方依赖使用各自的许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
