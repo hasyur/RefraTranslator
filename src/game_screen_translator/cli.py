@@ -2,36 +2,24 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
+
+# NumPy/OpenBLAS sizes its worker pool when NumPy is first imported. The hot
+# inference path is GPU-backed, so keep the host BLAS pool to one thread before
+# any command-specific module can import NumPy. Child processes (live runtime
+# probes and the managed translation backend) inherit the same setting.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 from game_screen_translator.branding import PRODUCT_NAME, PROJECT_SLUG
-from game_screen_translator.config import ConfigError, load_config
-from game_screen_translator.domain import SourceText, TranslationBatch
-from game_screen_translator.ocr.layout import merge_ocr_text_blocks
-from game_screen_translator.ocr.paddle import OcrDependencyError, OcrResultError, PaddleOcrEngine
-from game_screen_translator.ocr.text_filter import OcrTextFilter
-from game_screen_translator.preview.renderer import render_preview
-from game_screen_translator.profiles import (
-    GameProfile,
-    ProfileError,
-    apply_profile_capture_settings,
-    create_game_profile,
-    load_game_profile,
-)
-from game_screen_translator.translation.cached import CachedTranslationService
-from game_screen_translator.translation.hy_mt import (
-    HyMtPromptBuilder,
-    TranslationProtocolError,
-)
-from game_screen_translator.translation.local_backend import managed_translation_backend
-from game_screen_translator.translation.service import TranslationService
-from game_screen_translator.translation.transport import (
-    OpenAICompatibleTransport,
-    TranslationTransportError,
-)
+from game_screen_translator.config import load_config
+
+if TYPE_CHECKING:
+    from game_screen_translator.domain import SourceText
+    from game_screen_translator.profiles import GameProfile
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -140,6 +128,11 @@ def _parse_region(value: str) -> tuple[int, int, int, int]:
 
 
 async def _doctor(config_path: Path) -> int:
+    from game_screen_translator.translation.local_backend import (
+        managed_translation_backend,
+    )
+    from game_screen_translator.translation.transport import OpenAICompatibleTransport
+
     config = load_config(config_path)
     with managed_translation_backend(config, config_path) as runtime_config:
         async with OpenAICompatibleTransport(runtime_config.translation) as transport:
@@ -163,6 +156,8 @@ def _optional_profile(
 ) -> GameProfile | None:
     if profile_id is None:
         return None
+    from game_screen_translator.profiles import load_game_profile
+
     return load_game_profile(config_path, config, profile_id)
 
 
@@ -171,6 +166,15 @@ async def _translate(
     source: SourceText,
     profile_id: str | None = None,
 ) -> str:
+    from game_screen_translator.domain import TranslationBatch
+    from game_screen_translator.translation.cached import CachedTranslationService
+    from game_screen_translator.translation.hy_mt import HyMtPromptBuilder
+    from game_screen_translator.translation.local_backend import (
+        managed_translation_backend,
+    )
+    from game_screen_translator.translation.service import TranslationService
+    from game_screen_translator.translation.transport import OpenAICompatibleTransport
+
     config = load_config(config_path)
     profile = _optional_profile(config_path, config, profile_id)
     with managed_translation_backend(config, config_path) as runtime_config:
@@ -204,6 +208,19 @@ async def _preview(
     output_path: Path,
     profile_id: str | None = None,
 ) -> Path:
+    from game_screen_translator.domain import SourceText, TranslationBatch
+    from game_screen_translator.ocr.layout import merge_ocr_text_blocks
+    from game_screen_translator.ocr.paddle import PaddleOcrEngine
+    from game_screen_translator.ocr.text_filter import OcrTextFilter
+    from game_screen_translator.preview.renderer import render_preview
+    from game_screen_translator.translation.cached import CachedTranslationService
+    from game_screen_translator.translation.hy_mt import HyMtPromptBuilder
+    from game_screen_translator.translation.local_backend import (
+        managed_translation_backend,
+    )
+    from game_screen_translator.translation.service import TranslationService
+    from game_screen_translator.translation.transport import OpenAICompatibleTransport
+
     config = load_config(config_path)
     profile = _optional_profile(config_path, config, profile_id)
     engine = PaddleOcrEngine(
@@ -287,6 +304,12 @@ async def _preview(
 
 
 def _profile_command(config_path: Path, args: argparse.Namespace) -> int:
+    from game_screen_translator.profiles import (
+        ProfileError,
+        create_game_profile,
+        load_game_profile,
+    )
+
     config = load_config(config_path)
     if args.profile_command == "init":
         profile = create_game_profile(
@@ -347,6 +370,8 @@ async def _run(args: argparse.Namespace) -> int:
     if args.command == "doctor":
         return await _doctor(args.config)
     if args.command == "translate":
+        from game_screen_translator.domain import SourceText
+
         result = await _translate(
             args.config,
             SourceText(args.zone_id, args.track_id, args.revision, args.text),
@@ -372,6 +397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_launcher(args.config, duration_seconds=args.duration)
         if args.command == "live":
             from game_screen_translator.live.runtime import run_live
+            from game_screen_translator.profiles import apply_profile_capture_settings
 
             config = load_config(args.config)
             profile = _optional_profile(args.config, config, args.profile_id)
@@ -404,17 +430,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("已取消。", file=sys.stderr)
         return 130
-    except (
-        ConfigError,
-        ProfileError,
-        FileNotFoundError,
-        OcrDependencyError,
-        OcrResultError,
-        TranslationProtocolError,
-        TranslationTransportError,
-        RuntimeError,
-        ValueError,
-    ) as exc:
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
 

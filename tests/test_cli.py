@@ -1,4 +1,7 @@
 import argparse
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,6 +13,45 @@ from game_screen_translator.profiles import (
     create_game_profile,
     save_profile_capture_settings,
 )
+
+
+def test_cli_configures_openblas_before_command_specific_imports() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment.pop("OPENBLAS_NUM_THREADS", None)
+    existing_python_path = environment.get("PYTHONPATH")
+    python_paths = [str(project_root / "src")]
+    if existing_python_path:
+        python_paths.append(existing_python_path)
+    environment["PYTHONPATH"] = os.pathsep.join(python_paths)
+
+    script = """
+import os
+import sys
+
+import game_screen_translator.cli
+
+assert os.environ["OPENBLAS_NUM_THREADS"] == "1"
+unexpected = {
+    "numpy",
+    "game_screen_translator.ocr.paddle",
+    "game_screen_translator.preview.renderer",
+    "game_screen_translator.translation.local_backend",
+    "game_screen_translator.translation.transport",
+}.intersection(sys.modules)
+assert not unexpected, sorted(unexpected)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=project_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_parse_region() -> None:
