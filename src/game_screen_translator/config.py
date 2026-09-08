@@ -687,54 +687,36 @@ def _save_selected_values(
 
     with config_path.open("r", encoding="utf-8", newline="") as handle:
         lines = handle.readlines()
-    current_section: str | None = None
-    replaced_keys: set[str] = set()
-    values = {
+    translation_values = {
         "base_url": candidate_translation.base_url,
         "model": candidate_translation.model,
-        "max_concurrency": candidate_translation.max_concurrency,
     }
+    if max_concurrency is not None:
+        translation_values["max_concurrency"] = candidate_translation.max_concurrency
     if backend is not None:
-        values["backend"] = candidate_translation.backend
+        translation_values["backend"] = candidate_translation.backend
     if builtin_model is not None:
-        values["builtin_model"] = candidate_translation.builtin_model
+        translation_values["builtin_model"] = candidate_translation.builtin_model
     if builtin_cuda_device is not None:
-        values["builtin_cuda_device"] = candidate_translation.builtin_cuda_device
+        translation_values["builtin_cuda_device"] = candidate_translation.builtin_cuda_device
     if builtin_parallel is not None:
-        values["builtin_parallel"] = candidate_translation.builtin_parallel
+        translation_values["builtin_parallel"] = candidate_translation.builtin_parallel
     if builtin_kv_cache_type is not None:
-        values["builtin_kv_cache_type"] = (
+        translation_values["builtin_kv_cache_type"] = (
             candidate_translation.builtin_kv_cache_type
         )
     if builtin_temperature is not None:
-        values["builtin_temperature"] = candidate_translation.builtin_temperature
+        translation_values["builtin_temperature"] = candidate_translation.builtin_temperature
     if api_key is not None:
-        values["api_key"] = candidate_translation.api_key
-    for index, line in enumerate(lines):
-        if line.endswith("\r\n"):
-            body, ending = line[:-2], "\r\n"
-        elif line.endswith("\n"):
-            body, ending = line[:-1], "\n"
-        else:
-            body, ending = line, ""
-        section_match = _TOML_SECTION_RE.fullmatch(body)
-        if section_match is not None:
-            current_section = section_match.group(1).strip()
-            continue
-        if current_section != "translation":
-            continue
-        value_match = _TRANSLATION_VALUE_RE.match(body)
-        if value_match is None:
-            continue
-        key = value_match.group("key")
-        if key not in values:
-            continue
-        lines[index] = (
-            f'{value_match.group("indent")}{key} = '
-            f'{json.dumps(values[key], ensure_ascii=False)}{ending}'
-        )
-        replaced_keys.add(key)
+        translation_values["api_key"] = candidate_translation.api_key
 
+    replaced_keys = _update_toml_section(
+        lines,
+        section="translation",
+        value_pattern=_TRANSLATION_VALUE_RE,
+        values=translation_values,
+        create_section=False,
+    )
     missing = {"base_url", "model"} - replaced_keys
     if missing:
         raise ConfigError(
@@ -742,95 +724,77 @@ def _save_selected_values(
             + ", ".join(sorted(missing))
         )
 
-    if max_concurrency is not None and "max_concurrency" not in replaced_keys:
-        _upsert_translation_concurrency(lines, candidate_translation.max_concurrency)
-
-    if backend is not None and "backend" not in replaced_keys:
-        _upsert_translation_value(lines, "backend", candidate_translation.backend)
-
-    if builtin_model is not None and "builtin_model" not in replaced_keys:
-        _upsert_translation_value(
-            lines,
-            "builtin_model",
-            candidate_translation.builtin_model,
-        )
-
-    for key, requested, value in (
-        (
-            "builtin_cuda_device",
-            builtin_cuda_device,
-            candidate_translation.builtin_cuda_device,
-        ),
-        (
-            "builtin_parallel",
-            builtin_parallel,
-            candidate_translation.builtin_parallel,
-        ),
-        (
-            "builtin_kv_cache_type",
-            builtin_kv_cache_type,
-            candidate_translation.builtin_kv_cache_type,
-        ),
-        (
-            "builtin_temperature",
-            builtin_temperature,
-            candidate_translation.builtin_temperature,
-        ),
-    ):
-        if requested is not None and key not in replaced_keys:
-            _upsert_translation_value(lines, key, value)
-
-    if api_key is not None and "api_key" not in replaced_keys:
-        _upsert_translation_api_key(lines, candidate_translation.api_key)
-
     if (
         ocr_device is not None
         or ocr_detection_max_side is not None
         or ocr_text_filter_enabled is not None
         or ocr_text_merge_enabled is not None
     ):
-        _upsert_ocr_values(
+        _update_toml_section(
             lines,
-            device=candidate_ocr.device if ocr_device is not None else None,
-            detection_max_side=(
-                candidate_ocr.detection_max_side
-                if ocr_detection_max_side is not None
-                else None
-            ),
-            text_filter_enabled=(
-                candidate_ocr.text_filter_enabled
-                if ocr_text_filter_enabled is not None
-                else None
-            ),
-            text_merge_enabled=(
-                candidate_ocr.text_merge_enabled
-                if ocr_text_merge_enabled is not None
-                else None
-            ),
+            section="ocr",
+            value_pattern=_OCR_VALUE_RE,
+            values={
+                key: value
+                for key, value in (
+                    ("device", candidate_ocr.device if ocr_device is not None else None),
+                    (
+                        "detection_max_side",
+                        candidate_ocr.detection_max_side
+                        if ocr_detection_max_side is not None
+                        else None,
+                    ),
+                    (
+                        "text_filter_enabled",
+                        candidate_ocr.text_filter_enabled
+                        if ocr_text_filter_enabled is not None
+                        else None,
+                    ),
+                    (
+                        "text_merge_enabled",
+                        candidate_ocr.text_merge_enabled
+                        if ocr_text_merge_enabled is not None
+                        else None,
+                    ),
+                )
+                if value is not None
+            },
         )
 
     if preview_overlay_opacity is not None:
-        _upsert_preview_values(
+        _update_toml_section(
             lines,
-            overlay_opacity=candidate_preview.overlay_opacity,
+            section="preview",
+            value_pattern=_PREVIEW_VALUE_RE,
+            values={"overlay_opacity": candidate_preview.overlay_opacity},
         )
 
     if (
         recording_browser_overlay_enabled is not None
         or recording_browser_overlay_port is not None
     ):
-        _upsert_recording_values(
+        _update_toml_section(
             lines,
-            browser_overlay_enabled=(
-                candidate_recording.browser_overlay_enabled
-                if recording_browser_overlay_enabled is not None
-                else None
-            ),
-            browser_overlay_port=(
-                candidate_recording.browser_overlay_port
-                if recording_browser_overlay_port is not None
-                else None
-            ),
+            section="recording",
+            value_pattern=_RECORDING_VALUE_RE,
+            values={
+                key: value
+                for key, value in (
+                    (
+                        "browser_overlay_enabled",
+                        candidate_recording.browser_overlay_enabled
+                        if recording_browser_overlay_enabled is not None
+                        else None,
+                    ),
+                    (
+                        "browser_overlay_port",
+                        candidate_recording.browser_overlay_port
+                        if recording_browser_overlay_port is not None
+                        else None,
+                    ),
+                )
+                if value is not None
+            },
         )
 
     if any(
@@ -848,58 +812,35 @@ def _save_selected_values(
             dynamic_roi_max_coalesce_ms,
         )
     ):
-        _upsert_live_values(
+        _update_toml_section(
             lines,
-            ocr_cooldown_ms=(
-                candidate_live.ocr_cooldown_ms
-                if ocr_cooldown_ms is not None
-                else None
-            ),
-            settle_rescan_ms=(
-                candidate_live.settle_rescan_ms
-                if settle_rescan_ms is not None
-                else None
-            ),
-            idle_rescan_ms=(
-                candidate_live.idle_rescan_ms
-                if idle_rescan_ms is not None
-                else None
-            ),
-            clear_after_ms=(
-                candidate_live.clear_after_ms
-                if clear_after_ms is not None
-                else None
-            ),
-            dynamic_roi_enabled=(
-                candidate_live.dynamic_roi_enabled
-                if dynamic_roi_enabled is not None
-                else None
-            ),
-            change_poll_fps=(
-                candidate_live.change_poll_fps
-                if change_poll_fps is not None
-                else None
-            ),
-            dynamic_roi_response_target_ms=(
-                candidate_live.dynamic_roi_response_target_ms
-                if dynamic_roi_response_target_ms is not None
-                else None
-            ),
-            dynamic_roi_settle_ms=(
-                candidate_live.dynamic_roi_settle_ms
-                if dynamic_roi_settle_ms is not None
-                else None
-            ),
-            dynamic_roi_ocr_interval_ms=(
-                candidate_live.dynamic_roi_ocr_interval_ms
-                if dynamic_roi_ocr_interval_ms is not None
-                else None
-            ),
-            dynamic_roi_max_coalesce_ms=(
-                candidate_live.dynamic_roi_max_coalesce_ms
-                if dynamic_roi_max_coalesce_ms is not None
-                else None
-            ),
+            section="live",
+            value_pattern=_LIVE_VALUE_RE,
+            values={
+                key: value
+                for key, value in (
+                    (
+                        "capture_fps",
+                        change_poll_fps * CAPTURE_FPS_PER_CHANGE_POLL
+                        if change_poll_fps is not None
+                        else None,
+                    ),
+                    ("ocr_cooldown_ms", ocr_cooldown_ms),
+                    ("settle_rescan_ms", settle_rescan_ms),
+                    ("idle_rescan_ms", idle_rescan_ms),
+                    ("clear_after_ms", clear_after_ms),
+                    ("dynamic_roi_enabled", dynamic_roi_enabled),
+                    ("change_poll_fps", change_poll_fps),
+                    (
+                        "dynamic_roi_response_target_ms",
+                        dynamic_roi_response_target_ms,
+                    ),
+                    ("dynamic_roi_settle_ms", dynamic_roi_settle_ms),
+                    ("dynamic_roi_ocr_interval_ms", dynamic_roi_ocr_interval_ms),
+                    ("dynamic_roi_max_coalesce_ms", dynamic_roi_max_coalesce_ms),
+                )
+                if value is not None
+            },
         )
 
     temporary = config_path.with_name(f"{config_path.name}.{os.getpid()}.tmp")
@@ -913,75 +854,41 @@ def _save_selected_values(
     return validated
 
 
-def _upsert_translation_concurrency(lines: list[str], value: int) -> None:
-    _upsert_translation_value(lines, "max_concurrency", value)
-
-
-def _upsert_translation_api_key(lines: list[str], value: str) -> None:
-    _upsert_translation_value(lines, "api_key", value)
-
-
-def _upsert_translation_value(lines: list[str], key: str, value: Any) -> None:
-    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
-    current_section: str | None = None
-    translation_end_index = len(lines)
-    for index, line in enumerate(lines):
-        section_match = _TOML_SECTION_RE.fullmatch(line.rstrip("\r\n"))
-        if section_match is None:
-            continue
-        if current_section == "translation":
-            translation_end_index = index
-            break
-        current_section = section_match.group(1).strip()
-
-    if translation_end_index > 0 and not lines[translation_end_index - 1].endswith(
-        ("\n", "\r")
-    ):
-        lines[translation_end_index - 1] += newline
-    serialized = json.dumps(value, ensure_ascii=False)
-    lines.insert(translation_end_index, f"{key} = {serialized}{newline}")
-
-
-def _upsert_ocr_values(
+def _update_toml_section(
     lines: list[str],
     *,
-    device: str | None,
-    detection_max_side: int | None,
-    text_filter_enabled: bool | None,
-    text_merge_enabled: bool | None,
-) -> None:
+    section: str,
+    value_pattern: re.Pattern[str],
+    values: Mapping[str, Any],
+    create_section: bool = True,
+) -> set[str]:
+    """Update selected TOML keys while retaining the surrounding document."""
     newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
-    values = {
-        key: value
-        for key, value in (
-            ("device", device),
-            ("detection_max_side", detection_max_side),
-            ("text_filter_enabled", text_filter_enabled),
-            ("text_merge_enabled", text_merge_enabled),
-        )
-        if value is not None
-    }
     current_section: str | None = None
-    ocr_header_index: int | None = None
-    ocr_end_index = len(lines)
+    header_index: int | None = None
+    section_end_index = len(lines)
     replaced_keys: set[str] = set()
     for index, line in enumerate(lines):
-        body = line.rstrip("\r\n")
+        if line.endswith("\r\n"):
+            body, ending = line[:-2], "\r\n"
+        elif line.endswith("\n"):
+            body, ending = line[:-1], "\n"
+        else:
+            body, ending = line, ""
         section_match = _TOML_SECTION_RE.fullmatch(body)
         if section_match is not None:
-            if current_section == "ocr" and ocr_end_index == len(lines):
-                ocr_end_index = index
+            if current_section == section and section_end_index == len(lines):
+                section_end_index = index
             current_section = section_match.group(1).strip()
-            if current_section == "ocr":
-                ocr_header_index = index
+            if current_section == section:
+                header_index = index
             continue
-        if current_section != "ocr":
+        if current_section != section:
             continue
-        value_match = _OCR_VALUE_RE.match(body)
+        value_match = value_pattern.match(body)
         if value_match is None or value_match.group("key") not in values:
             continue
         key = value_match.group("key")
-        ending = line[len(body) :]
         lines[index] = (
             f'{value_match.group("indent")}{key} = '
             f'{json.dumps(values[key], ensure_ascii=False)}{ending}'
@@ -990,235 +897,29 @@ def _upsert_ocr_values(
 
     missing_keys = tuple(key for key in values if key not in replaced_keys)
     if not missing_keys:
-        return
-    if ocr_header_index is None:
+        return replaced_keys
+    if header_index is None:
+        if not create_section:
+            return replaced_keys
         if lines and not lines[-1].endswith(("\n", "\r")):
             lines[-1] += newline
         if lines and lines[-1].strip():
             lines.append(newline)
-        lines.append(f"[ocr]{newline}")
+        lines.append(f"[{section}]{newline}")
         lines.extend(
             f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}"
             for key in missing_keys
         )
-        return
+        return replaced_keys
 
-    if ocr_end_index > 0 and not lines[ocr_end_index - 1].endswith(("\n", "\r")):
-        lines[ocr_end_index - 1] += newline
-    for key in missing_keys:
-        lines.insert(
-            ocr_end_index,
-            f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}",
-        )
-        ocr_end_index += 1
-
-
-def _upsert_preview_values(
-    lines: list[str],
-    *,
-    overlay_opacity: float,
-) -> None:
-    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
-    current_section: str | None = None
-    preview_header_index: int | None = None
-    preview_end_index = len(lines)
-    replaced = False
-    for index, line in enumerate(lines):
-        body = line.rstrip("\r\n")
-        section_match = _TOML_SECTION_RE.fullmatch(body)
-        if section_match is not None:
-            if current_section == "preview" and preview_end_index == len(lines):
-                preview_end_index = index
-            current_section = section_match.group(1).strip()
-            if current_section == "preview":
-                preview_header_index = index
-            continue
-        if current_section != "preview":
-            continue
-        value_match = _PREVIEW_VALUE_RE.match(body)
-        if value_match is None:
-            continue
-        ending = line[len(body) :]
-        lines[index] = (
-            f'{value_match.group("indent")}overlay_opacity = '
-            f"{json.dumps(overlay_opacity)}{ending}"
-        )
-        replaced = True
-
-    if replaced:
-        return
-    value_line = f"overlay_opacity = {json.dumps(overlay_opacity)}{newline}"
-    if preview_header_index is None:
-        if lines and not lines[-1].endswith(("\n", "\r")):
-            lines[-1] += newline
-        if lines and lines[-1].strip():
-            lines.append(newline)
-        lines.extend((f"[preview]{newline}", value_line))
-        return
-
-    if preview_end_index > 0 and not lines[preview_end_index - 1].endswith(
+    if section_end_index > 0 and not lines[section_end_index - 1].endswith(
         ("\n", "\r")
     ):
-        lines[preview_end_index - 1] += newline
-    lines.insert(preview_end_index, value_line)
-
-
-def _upsert_recording_values(
-    lines: list[str],
-    *,
-    browser_overlay_enabled: bool | None,
-    browser_overlay_port: int | None,
-) -> None:
-    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
-    values = {
-        key: value
-        for key, value in (
-            ("browser_overlay_enabled", browser_overlay_enabled),
-            ("browser_overlay_port", browser_overlay_port),
-        )
-        if value is not None
-    }
-    current_section: str | None = None
-    recording_header_index: int | None = None
-    recording_end_index = len(lines)
-    replaced_keys: set[str] = set()
-    for index, line in enumerate(lines):
-        body = line.rstrip("\r\n")
-        section_match = _TOML_SECTION_RE.fullmatch(body)
-        if section_match is not None:
-            if current_section == "recording" and recording_end_index == len(lines):
-                recording_end_index = index
-            current_section = section_match.group(1).strip()
-            if current_section == "recording":
-                recording_header_index = index
-            continue
-        if current_section != "recording":
-            continue
-        value_match = _RECORDING_VALUE_RE.match(body)
-        if value_match is None or value_match.group("key") not in values:
-            continue
-        key = value_match.group("key")
-        ending = line[len(body) :]
-        lines[index] = (
-            f'{value_match.group("indent")}{key} = '
-            f'{json.dumps(values[key], ensure_ascii=False)}{ending}'
-        )
-        replaced_keys.add(key)
-
-    missing_keys = tuple(key for key in values if key not in replaced_keys)
-    if not missing_keys:
-        return
-    if recording_header_index is None:
-        if lines and not lines[-1].endswith(("\n", "\r")):
-            lines[-1] += newline
-        if lines and lines[-1].strip():
-            lines.append(newline)
-        lines.append(f"[recording]{newline}")
-        lines.extend(
-            f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}"
-            for key in missing_keys
-        )
-        return
-
-    if recording_end_index > 0 and not lines[recording_end_index - 1].endswith(
-        ("\n", "\r")
-    ):
-        lines[recording_end_index - 1] += newline
+        lines[section_end_index - 1] += newline
     for key in missing_keys:
         lines.insert(
-            recording_end_index,
+            section_end_index,
             f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}",
         )
-        recording_end_index += 1
-
-
-def _upsert_live_values(
-    lines: list[str],
-    *,
-    ocr_cooldown_ms: int | None,
-    settle_rescan_ms: int | None,
-    idle_rescan_ms: int | None,
-    clear_after_ms: int | None,
-    dynamic_roi_enabled: bool | None,
-    change_poll_fps: int | None,
-    dynamic_roi_response_target_ms: int | None,
-    dynamic_roi_settle_ms: int | None,
-    dynamic_roi_ocr_interval_ms: int | None,
-    dynamic_roi_max_coalesce_ms: int | None,
-) -> None:
-    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
-    values = {
-        key: value
-        for key, value in (
-            (
-                "capture_fps",
-                change_poll_fps * CAPTURE_FPS_PER_CHANGE_POLL
-                if change_poll_fps is not None
-                else None,
-            ),
-            ("ocr_cooldown_ms", ocr_cooldown_ms),
-            ("settle_rescan_ms", settle_rescan_ms),
-            ("idle_rescan_ms", idle_rescan_ms),
-            ("clear_after_ms", clear_after_ms),
-            ("dynamic_roi_enabled", dynamic_roi_enabled),
-            ("change_poll_fps", change_poll_fps),
-            (
-                "dynamic_roi_response_target_ms",
-                dynamic_roi_response_target_ms,
-            ),
-            ("dynamic_roi_settle_ms", dynamic_roi_settle_ms),
-            ("dynamic_roi_ocr_interval_ms", dynamic_roi_ocr_interval_ms),
-            ("dynamic_roi_max_coalesce_ms", dynamic_roi_max_coalesce_ms),
-        )
-        if value is not None
-    }
-    current_section: str | None = None
-    live_header_index: int | None = None
-    live_end_index = len(lines)
-    replaced_keys: set[str] = set()
-    for index, line in enumerate(lines):
-        body = line.rstrip("\r\n")
-        section_match = _TOML_SECTION_RE.fullmatch(body)
-        if section_match is not None:
-            if current_section == "live" and live_end_index == len(lines):
-                live_end_index = index
-            current_section = section_match.group(1).strip()
-            if current_section == "live":
-                live_header_index = index
-            continue
-        if current_section != "live":
-            continue
-        value_match = _LIVE_VALUE_RE.match(body)
-        if value_match is None or value_match.group("key") not in values:
-            continue
-        key = value_match.group("key")
-        ending = line[len(body) :]
-        lines[index] = (
-            f'{value_match.group("indent")}{key} = '
-            f'{json.dumps(values[key], ensure_ascii=False)}{ending}'
-        )
-        replaced_keys.add(key)
-
-    missing_keys = tuple(key for key in values if key not in replaced_keys)
-    if not missing_keys:
-        return
-    if live_header_index is None:
-        if lines and not lines[-1].endswith(("\n", "\r")):
-            lines[-1] += newline
-        if lines and lines[-1].strip():
-            lines.append(newline)
-        lines.append(f"[live]{newline}")
-        lines.extend(
-            f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}"
-            for key in missing_keys
-        )
-        return
-
-    if live_end_index > 0 and not lines[live_end_index - 1].endswith(("\n", "\r")):
-        lines[live_end_index - 1] += newline
-    for key in missing_keys:
-        lines.insert(
-            live_end_index,
-            f"{key} = {json.dumps(values[key], ensure_ascii=False)}{newline}",
-        )
-        live_end_index += 1
+        section_end_index += 1
+    return replaced_keys

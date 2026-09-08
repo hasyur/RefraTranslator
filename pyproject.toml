@@ -48,7 +48,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "game_screen_translator.gui" = [
-  "assets/*.svg",
   "qml/*.qml",
   "qml/components/*.qml",
   "qml/pages/*.qml",

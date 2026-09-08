@@ -310,6 +310,115 @@ capture_fps = 12
     assert "capture_fps = 12" in text
 
 
+def test_save_translation_selection_normalizes_targets_and_preserves_other_lines(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    before = (
+        "# keep this document comment\r\n"
+        "[translation]\t# keep section comment\r\n"
+        'provider = "openai_compatible" # keep provider comment\r\n'
+        '  base_url\t=\t"http://old.test/v1"   # keep endpoint comment\r\n'
+        '\tmodel \t= "old-model" \t \r\n'
+        'max_concurrency = 3 # do not rewrite this field\r\n'
+        "[live] # keep the other section\r\n"
+        "capture_fps = 12 # keep live settings\r\n"
+    ).encode("utf-8")
+    path.write_bytes(before)
+
+    saved = save_translation_selection(
+        path,
+        base_url="http://new.test:9000/v1",
+        model="new-model",
+    )
+
+    assert saved.translation.base_url == "http://new.test:9000/v1"
+    assert saved.translation.model == "new-model"
+    expected = (
+        "# keep this document comment\r\n"
+        "[translation]\t# keep section comment\r\n"
+        'provider = "openai_compatible" # keep provider comment\r\n'
+        '  base_url = "http://new.test:9000/v1"\r\n'
+        '\tmodel = "new-model"\r\n'
+        'max_concurrency = 3 # do not rewrite this field\r\n'
+        "[live] # keep the other section\r\n"
+        "capture_fps = 12 # keep live settings\r\n"
+    ).encode("utf-8")
+    assert path.read_bytes() == expected
+
+
+def test_save_translation_selection_replaces_single_line_triple_quoted_values(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    before = (
+        "[translation]\r\n"
+        'provider = "openai_compatible"\r\n'
+        '  base_url = """http://old.test/v1"""   # double triple\r\n'
+        "\tmodel\t=\t'''old-model'''\t \r\n"
+        "max_concurrency = 3\r\n"
+    ).encode("utf-8")
+    path.write_bytes(before)
+
+    saved = save_translation_selection(
+        path,
+        base_url="http://new.test:9000/v1",
+        model="new-model",
+    )
+
+    assert saved.translation.base_url == "http://new.test:9000/v1"
+    assert saved.translation.model == "new-model"
+    expected = (
+        "[translation]\r\n"
+        'provider = "openai_compatible"\r\n'
+        '  base_url = "http://new.test:9000/v1"\r\n'
+        '\tmodel = "new-model"\r\n'
+        "max_concurrency = 3\r\n"
+    ).encode("utf-8")
+    assert path.read_bytes() == expected
+
+
+@pytest.mark.parametrize(
+    "old_model_expression",
+    (
+        '"""old-model""""',
+        '"""old-model"""""',
+        "'''old-model''''",
+        "'''old-model'''''",
+    ),
+)
+def test_save_translation_selection_replaces_legal_extra_closing_quotes(
+    tmp_path: Path,
+    old_model_expression: str,
+) -> None:
+    path = tmp_path / "config.toml"
+    before = (
+        "[translation]\r\n"
+        'provider = "openai_compatible"\r\n'
+        'base_url = "http://old.test/v1"\r\n'
+        f"\tmodel\t=\t{old_model_expression}  # old representation\r\n"
+        "max_concurrency = 3\r\n"
+    ).encode("utf-8")
+    path.write_bytes(before)
+
+    saved = save_translation_selection(
+        path,
+        base_url="http://new.test:9000/v1",
+        model="new-model",
+    )
+
+    assert saved.translation.base_url == "http://new.test:9000/v1"
+    assert saved.translation.model == "new-model"
+    expected = (
+        "[translation]\r\n"
+        'provider = "openai_compatible"\r\n'
+        'base_url = "http://new.test:9000/v1"\r\n'
+        '\tmodel = "new-model"\r\n'
+        "max_concurrency = 3\r\n"
+    ).encode("utf-8")
+    assert path.read_bytes() == expected
+
+
 def test_save_runtime_selection_keeps_external_api_while_selecting_builtin(
     tmp_path: Path,
 ) -> None:
