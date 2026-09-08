@@ -1,1 +1,1 @@
-"""PySide6 graphical launcher and screen-region selection tools."""
+"""Native QML workbench/controller and retained QWidget runtime tools."""

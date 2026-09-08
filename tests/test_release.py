@@ -4,7 +4,10 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import tarfile
 import tomllib
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -25,11 +28,25 @@ SOURCE_RELEASE_FILES = (
     "update.bat",
     "update.ps1",
 )
+QML_SOURCE_FILES = tuple(
+    sorted(
+        (
+            PROJECT_ROOT
+            / "src"
+            / "game_screen_translator"
+            / "gui"
+            / "qml"
+        ).rglob("*.qml")
+    )
+)
 PUBLIC_ENDPOINT_FILES = (
     PROJECT_ROOT / "README.md",
     PROJECT_ROOT / "config.example.toml",
     PROJECT_ROOT / "scripts" / "render_launcher_preview.py",
     PROJECT_ROOT / "src" / "game_screen_translator" / "gui" / "launcher.py",
+    PROJECT_ROOT / "src" / "game_screen_translator" / "gui" / "qml_workbench.py",
+    PROJECT_ROOT / "src" / "game_screen_translator" / "gui" / "workbench_controller.py",
+    *QML_SOURCE_FILES,
 )
 PRIVATE_HTTP_ENDPOINT = re.compile(
     r"https?://(?:"
@@ -48,6 +65,7 @@ def test_public_config_template_is_valid() -> None:
 
 
 def test_public_endpoint_examples_do_not_expose_private_lan_addresses() -> None:
+    assert QML_SOURCE_FILES
     findings = []
     for path in PUBLIC_ENDPOINT_FILES:
         text = path.read_text(encoding="utf-8")
@@ -73,6 +91,80 @@ def test_release_metadata_declares_and_bundles_notices() -> None:
         dependency.startswith("paddlepaddle-gpu")
         for dependency in project["optional-dependencies"]["ocr-gpu"]
     )
+
+
+def test_release_metadata_bundles_the_native_qml_workbench() -> None:
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
+        package_data = tomllib.load(handle)["tool"]["setuptools"]["package-data"]
+
+    gui_data = set(package_data["game_screen_translator.gui"])
+    assert {
+        "qml/*.qml",
+        "qml/components/*.qml",
+        "qml/pages/*.qml",
+    } <= gui_data
+    manifest = (PROJECT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+    assert "recursive-include src/game_screen_translator/gui/qml *.qml" in manifest
+
+
+def test_built_archives_contain_the_exact_native_qml_workbench(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "dist"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "build",
+            "--no-isolation",
+            "--outdir",
+            str(output_dir),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    wheels = list(output_dir.glob("*.whl"))
+    source_archives = list(output_dir.glob("*.tar.gz"))
+    assert len(wheels) == 1
+    assert len(source_archives) == 1
+
+    qml_root = PROJECT_ROOT / "src" / "game_screen_translator" / "gui" / "qml"
+    expected = {
+        path.relative_to(qml_root).as_posix()
+        for path in qml_root.rglob("*.qml")
+    }
+
+    with zipfile.ZipFile(wheels[0]) as archive:
+        wheel_qml = {
+            name.split("game_screen_translator/gui/qml/", 1)[1]
+            for name in archive.namelist()
+            if "game_screen_translator/gui/qml/" in name
+            and name.endswith(".qml")
+        }
+    with tarfile.open(source_archives[0], "r:gz") as archive:
+        sdist_qml = {
+            name.split("game_screen_translator/gui/qml/", 1)[1]
+            for name in archive.getnames()
+            if "game_screen_translator/gui/qml/" in name
+            and name.endswith(".qml")
+        }
+
+    assert wheel_qml == expected
+    assert sdist_qml == expected
+
+
+def test_launcher_preview_uses_the_production_qml_workbench() -> None:
+    preview = (
+        PROJECT_ROOT / "scripts" / "render_launcher_preview.py"
+    ).read_text(encoding="utf-8")
+
+    assert "WorkbenchController" in preview
+    assert "QmlWorkbenchHost" in preview
+    assert "LauncherWindow" not in preview
 
 
 def test_source_release_manifest_includes_first_run_files() -> None:
@@ -148,6 +240,11 @@ def test_gui_batch_preserves_native_crash_diagnostics() -> None:
 
     assert "-X faulthandler" in script
     assert "QApplication([])" in script
+    assert "QQmlApplicationEngine" in script
+    assert "QQuickWindow" in script
+    assert "QQuickStyle" in script
+    assert "game_screen_translator.gui.qml_workbench" in script
+    assert "game_screen_translator.gui.launcher" not in script
     assert "launcher.log" in script
     assert 'set "QT_QPA_PLATFORM=windows"' in script
     assert 'set "QT_PLUGIN_PATH="' in script

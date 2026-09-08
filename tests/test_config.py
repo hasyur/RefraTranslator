@@ -762,6 +762,6 @@ def test_save_runtime_selection_rejects_invalid_overlay_opacity_without_writing(
     assert path.read_bytes() == before
 
 
-def test_preview_config_accepts_the_two_gui_background_opacities() -> None:
-    assert PreviewConfig(overlay_opacity=DEFAULT_DARK_OVERLAY_OPACITY).overlay_opacity > 0
-    assert PreviewConfig(overlay_opacity=0.0).overlay_opacity == 0.0
+def test_preview_config_accepts_continuous_gui_background_opacity_range() -> None:
+    for opacity in (0.0, 0.23, DEFAULT_DARK_OVERLAY_OPACITY):
+        assert PreviewConfig(overlay_opacity=opacity).overlay_opacity == opacity

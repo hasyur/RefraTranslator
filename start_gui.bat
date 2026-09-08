@@ -45,7 +45,7 @@ if not exist "%LOG_DIR%" (
 >> "%LOG_FILE%" echo Working directory: "%CD%"
 
 echo Checking the isolated Python and GUI dependencies...
-"%VENV_PYTHON%" -u -X faulthandler -c "import sys; print('Python:', sys.version, flush=True); print('Executable:', sys.executable, flush=True); import PySide6; print('PySide6:', PySide6.__version__, flush=True); from PySide6.QtWidgets import QApplication; print('QtWidgets import: OK', flush=True); app = QApplication([]); print('Qt platform:', app.platformName(), flush=True); import game_screen_translator.gui.launcher; print('GUI module import: OK', flush=True)" >> "%LOG_FILE%" 2>&1
+"%VENV_PYTHON%" -u -X faulthandler -c "import sys; print('Python:', sys.version, flush=True); print('Executable:', sys.executable, flush=True); import PySide6; print('PySide6:', PySide6.__version__, flush=True); from PySide6.QtWidgets import QApplication; from PySide6.QtQml import QQmlApplicationEngine; from PySide6.QtQuick import QQuickWindow; from PySide6.QtQuickControls2 import QQuickStyle; print('Qt Quick/QML imports: OK', flush=True); app = QApplication([]); print('Qt platform:', app.platformName(), flush=True); import game_screen_translator.gui.qml_workbench; print('QML workbench module import: OK', flush=True)" >> "%LOG_FILE%" 2>&1
 set "launcher_exit=%ERRORLEVEL%"
 if not "%launcher_exit%"=="0" goto :launch_failed
 

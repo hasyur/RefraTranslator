@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2,<2",
   "pytest>=8.4,<10",
   "pytest-asyncio>=1.1,<2",
 ]
@@ -45,7 +46,12 @@ refra-translator = "game_screen_translator.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"game_screen_translator.gui" = ["assets/*.svg"]
+"game_screen_translator.gui" = [
+  "assets/*.svg",
+  "qml/*.qml",
+  "qml/components/*.qml",
+  "qml/pages/*.qml",
+]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

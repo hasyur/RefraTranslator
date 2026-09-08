@@ -2114,6 +2114,81 @@ def _many_visible_sources(controller: LiveController, count: int):
     return controller._tracker.observe(observations, now=1.0).stable_sources
 
 
+def test_close_drain_drops_prior_retry_barrier_but_publishes_later_completed_batch():
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    first, later = _two_visible_sources(controller)
+    pending_submission = live_runtime._TranslationSubmission(
+        TranslationBatch((first,)),
+        (),
+        0,
+        (0,),
+        0.0,
+        0.0,
+        0.0,
+        (None,),
+        controller._session_epoch,
+    )
+    completed_submission = live_runtime._TranslationSubmission(
+        TranslationBatch((later,)),
+        (),
+        0,
+        (1,),
+        0.0,
+        0.0,
+        0.0,
+        (None,),
+        controller._session_epoch,
+    )
+    completed = CachedTranslationOutcome(
+        TranslationOutcome((TranslationResult(later, "后批译文"),), ()),
+        ("model",),
+    )
+    controller._pending_translations.append(pending_submission)
+    controller._translation_retries.append(
+        live_runtime._PendingTranslationRetry(
+            pending_submission.batch,
+            (),
+            0,
+            (0,),
+            0.0,
+            0.0,
+            0.0,
+            pending_submission.source_bounds,
+            2,
+        )
+    )
+    controller._completed_translations[(0, (1,))] = live_runtime._CompletedTranslation(
+        completed_submission,
+        completed,
+    )
+    controller._save_last_run_snapshot = lambda: None
+
+    controller.close()
+
+    assert controller._pending_translations == []
+    assert controller._translation_retries == []
+    assert any(
+        track.text == later.text and track.translated_text == "后批译文"
+        for track in controller._tracker.visible_tracks
+    )
+
+
 def test_translation_scheduler_bounds_pending_work(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(

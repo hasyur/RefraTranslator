@@ -26,6 +26,13 @@ from game_screen_translator.domain import (
 )
 from game_screen_translator.live.change_detector import FrameChangeDetector
 from game_screen_translator.live.latency import LiveLatencyStats
+from game_screen_translator.live.snapshot import (
+    CacheHit,
+    MAX_SNAPSHOT_ENTRIES,
+    SnapshotEntry,
+    new_snapshot,
+    save_snapshot,
+)
 from game_screen_translator.live.tracker import (
     Bounds,
     StableTextTracker,
@@ -267,6 +274,10 @@ class LiveControlWindow(QWidget):
         pause_callback: Callable[[bool], None] | None = None,
     ) -> None:
         super().__init__(None, Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        # Native WM_CLOSE and the existing button path share this callback.
+        # Qt may deliver more than one close event while QApplication exits.
+        self._normal_exit_callback = stop_callback
+        self._close_requested = False
         self._pause_callback = pause_callback
         self._paused = False
         self.setWindowTitle(PRODUCT_NAME)
@@ -329,6 +340,13 @@ class LiveControlWindow(QWidget):
         super().showEvent(event)
         if not exclude_window_from_capture(int(self.winId())):
             print("警告：Windows 未能将控制窗口排除出屏幕采集。")
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt callback name
+        event.accept()
+        if self._close_requested:
+            return
+        self._close_requested = True
+        self._normal_exit_callback()
 
     def set_status(self, status: str, detail: str = "") -> None:
         self._status.setText(status)
@@ -492,6 +510,8 @@ class LiveController:
         self._pending_ocr_triggered_at: float | None = None
         self._pending_ocr_change_started_at: float | None = None
         self._latest_frame: np.ndarray | None = None
+        self._last_effective_entries: tuple[SnapshotEntry, ...] = ()
+        self._last_effective_canvas_size: tuple[int, int] | None = None
         self._source_latency_origins: dict[
             tuple[str, int], _SourceLatencyOrigin
         ] = {}
@@ -512,9 +532,12 @@ class LiveController:
         )
         self._running_detail = ""
         self._shutting_down = False
+        self._finalizing = False
+        self._fatal_error = False
         self._translated_count = 0
         self._manual_hit_count = 0
         self._cache_hit_count = 0
+        self._cache_hit_ranking: Counter[str] = Counter()
         self._inflight_reuse_count = 0
         self._model_result_count = 0
         self._ocr_scan_count = 0
@@ -687,14 +710,25 @@ class LiveController:
     def close(self) -> None:
         if self._shutting_down:
             return
-        self._shutting_down = True
         self._timer.stop()
         self._completion_timer.stop()
+        self._finalizing = True
+        # Queued/retry work cannot be started after shutdown.  Remove those
+        # ordering barriers before draining futures that are already complete,
+        # so a later safe result can still be published during finalization.
+        self._pending_translations.clear()
+        self._translation_retries.clear()
         if self._browser_overlay is not None:
             self._browser_overlay.close()
         self._capture.close()
         self._ocr_executor.shutdown(wait=True, cancel_futures=True)
         self._translation_executor.shutdown(wait=True, cancel_futures=True)
+        # Executors have now finished all work that can still publish. Drain
+        # those completed futures once before taking the bounded snapshot.
+        self._collect_completed_work()
+        self._shutting_down = True
+        if not self._fatal_error:
+            self._save_last_run_snapshot()
         print(
             f"实时统计：OCR {self._ocr_scan_count} 次/识别 {self._ocr_text_count} 条，"
             f"过滤 {self._filtered_text_count} 条，覆盖 {self._translated_count} 条，"
@@ -1645,7 +1679,7 @@ class LiveController:
         else:
             self._latency_stats.record_ocr(ocr_seconds)
             self._refresh_latency_display()
-        if follow_up is not None:
+        if follow_up is not None and not self._finalizing:
             self._submit_roi_ocr(follow_up)
 
     def _observe_translation_layout(
@@ -1684,9 +1718,10 @@ class LiveController:
             waiting_count = len(update.stable_sources) - len(translatable_sources)
             if waiting_count:
                 print(f"版面仲裁：暂缓翻译 {waiting_count} 条规则分组")
-        if translatable_sources:
+        if translatable_sources and not self._finalizing:
             self._submit_translations(translatable_sources)
-        self._dispatch_translation_work()
+        if not self._finalizing:
+            self._dispatch_translation_work()
 
     def _queue_layout_arbitration(self, request: LayoutArbitrationRequest) -> None:
         key = request.key
@@ -1793,7 +1828,8 @@ class LiveController:
             completed_current.append(submission)
 
         if not completed_current:
-            self._dispatch_translation_work()
+            if not self._finalizing:
+                self._dispatch_translation_work()
             return
         # The revision and active-key checks above ensure this rebuild cannot
         # apply a decision to a newer OCR snapshot.  LLM arbitration itself is
@@ -1814,7 +1850,8 @@ class LiveController:
         # were already stable before the request and will not emit stable_sources
         # a second time.  Queue them explicitly now that the block is unblocked.
         self._queue_untranslated_visible_sources()
-        self._dispatch_translation_work()
+        if not self._finalizing:
+            self._dispatch_translation_work()
         if self._latest_frame is not None:
             self._publish_scene(self._latest_frame, self._tracker.visible_tracks)
 
@@ -2032,6 +2069,8 @@ class LiveController:
         return scheduled
 
     def _queue_untranslated_visible_sources(self) -> None:
+        if self._finalizing:
+            return
         visible = self._tracker.visible_tracks
         visible_keys = {
             (track.track_id, track.revision) for track in visible
@@ -2186,6 +2225,16 @@ class LiveController:
             except Exception as exc:
                 if stale_session:
                     continue
+                if self._finalizing:
+                    # Final drain must never create delayed retry work after
+                    # the executor has been shut down. Mark this batch spent
+                    # so later completed order groups can still publish.
+                    self._translation_failure_count += len(submission.batch.items)
+                    self._translation_exhausted_keys.update(
+                        (source.track_id, source.revision)
+                        for source in submission.batch.items
+                    )
+                    continue
                 retry_scheduled = self._handle_translation_failure(submission, exc)
                 if retry_scheduled:
                     if isinstance(exc, TranslationProtocolError):
@@ -2250,7 +2299,8 @@ class LiveController:
             )
 
         self._publish_ready_translations()
-        self._dispatch_translation_work()
+        if not self._finalizing:
+            self._dispatch_translation_work()
 
     def _publish_ready_translations(self) -> None:
         scene_changed = False
@@ -2281,11 +2331,12 @@ class LiveController:
                         ContextPair(result.source.text, result.translated_text)
                     )
                 self._latest_context_order_group = submission.order_group
-            for _, origin in accepted_with_origins:
+            for result, origin in accepted_with_origins:
                 if origin == "manual":
                     self._manual_hit_count += 1
                 elif origin == "automatic":
                     self._cache_hit_count += 1
+                    self._cache_hit_ranking[result.source.text] += 1
                 elif origin == "inflight":
                     self._inflight_reuse_count += 1
                 else:
@@ -2666,16 +2717,106 @@ class LiveController:
     def _refresh_latency_display(self) -> None:
         self._control.set_latency(self._latency_stats.render())
 
+    def _save_last_run_snapshot(self) -> None:
+        """Persist one bounded view of the last successfully published scene."""
+
+        if self._profile is None:
+            return
+        entries = self._last_effective_entries
+        if not entries:
+            entries = self._entries_from_tracks(self._tracker.visible_tracks)
+        if len(entries) > MAX_SNAPSHOT_ENTRIES:
+            entries = tuple(
+                sorted(entries, key=lambda entry: (entry.bounds[1], entry.bounds[0]))[
+                    :MAX_SNAPSHOT_ENTRIES
+                ]
+            )
+        # A run with no final translated item is not a valid result and must
+        # leave the previous Profile snapshot untouched.
+        if not entries:
+            return
+        cache_hits = tuple(
+            CacheHit(source_text=text, hits=hits)
+            for text, hits in sorted(
+                self._cache_hit_ranking.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:5]
+        )
+        peaks = self._latency_stats.peaks
+        try:
+            save_snapshot(
+                self._profile.directory,
+                new_snapshot(
+                    entries,
+                    cache_hits,
+                    ocr_peak_seconds=peaks.ocr_seconds,
+                    llm_peak_seconds=peaks.llm_seconds,
+                    canvas_size=(
+                        self._last_effective_canvas_size
+                        or self._snapshot_canvas_size()
+                    ),
+                ),
+            )
+        except (OSError, ValueError) as exc:
+            # A diagnostic snapshot must never turn a successful live close
+            # into a failed process or alter the existing cache/log contract.
+            print(f"上次运行快照保存失败：{exc}", file=sys.stderr)
+
+    def _snapshot_canvas_size(self) -> tuple[int, int] | None:
+        if self._latest_frame is not None and self._latest_frame.ndim >= 2:
+            height, width = self._latest_frame.shape[:2]
+            if width > 0 and height > 0:
+                return int(width), int(height)
+        region = getattr(self._capture, "region", None)
+        if region is not None and len(region) == 4:
+            left, top, right, bottom = map(int, region)
+            if right > left and bottom > top:
+                return right - left, bottom - top
+        return None
+
+    @staticmethod
+    def _entries_from_tracks(
+        tracks: Sequence[TrackedText],
+    ) -> tuple[SnapshotEntry, ...]:
+        entries = tuple(
+            SnapshotEntry(
+                track_id=track.track_id,
+                revision=track.revision,
+                source_text=track.text,
+                translated_text=translation,
+                confidence=track.confidence,
+                bounds=track.bounds,
+            )
+            for track in tracks
+            if track.missing_since is None
+            and (translation := track.display_translation)
+        )
+        if len(entries) > MAX_SNAPSHOT_ENTRIES:
+            return tuple(
+                sorted(entries, key=lambda entry: (entry.bounds[1], entry.bounds[0]))[
+                    :MAX_SNAPSHOT_ENTRIES
+                ]
+            )
+        return entries
+
     def _publish_scene(
         self,
         frame: np.ndarray | None,
         tracks: Sequence[TrackedText],
     ) -> None:
+        entries = self._entries_from_tracks(tracks)
+        if entries:
+            self._last_effective_entries = entries
+            if frame is not None and frame.ndim >= 2:
+                height, width = frame.shape[:2]
+                if width > 0 and height > 0:
+                    self._last_effective_canvas_size = int(width), int(height)
         self._overlay.set_scene(frame, tracks)
         if self._browser_overlay is not None:
             self._browser_overlay.publish(tracks)
 
     def _fatal(self, message: str) -> None:
+        self._fatal_error = True
         print(message, file=sys.stderr)
         self._control.set_status("实时翻译已停止", message)
         self._timer.stop()
