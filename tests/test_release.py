@@ -79,10 +79,14 @@ def test_public_endpoint_examples_do_not_expose_private_lan_addresses() -> None:
 
 def test_release_metadata_declares_and_bundles_notices() -> None:
     with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
-        project = tomllib.load(handle)["project"]
+        pyproject = tomllib.load(handle)
+    project = pyproject["project"]
 
     assert project["license"] == "Apache-2.0"
     assert set(project["license-files"]) == {"LICENSE", "THIRD_PARTY_NOTICES.md"}
+    assert set(pyproject["build-system"]["requires"]) <= set(
+        project["optional-dependencies"]["dev"]
+    )
     assert (PROJECT_ROOT / "LICENSE").is_file()
     assert (PROJECT_ROOT / "THIRD_PARTY_NOTICES.md").is_file()
     assert "dxcam[winrt]>=0.3,<0.4" in project["optional-dependencies"]["gui"]

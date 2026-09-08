@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "setuptools>=80",
   "build>=1.2,<2",
   "pytest>=8.4,<10",
   "pytest-asyncio>=1.1,<2",

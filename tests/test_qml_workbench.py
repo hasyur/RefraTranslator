@@ -13,6 +13,7 @@ from PySide6.QtCore import (
     QEvent,
     QMetaObject,
     QObject,
+    QPoint,
     QPointF,
     Qt,
     Signal,
@@ -182,6 +183,23 @@ def _click_quick_item(window: QQuickWindow, object_name: str) -> QQuickItem:
     assert QMetaObject.invokeMethod(item, "click") is True, object_name
     QCoreApplication.processEvents()
     return item
+
+
+def _slider_scene_point(slider: QQuickItem, visual_position: float) -> QPoint:
+    handle = slider.property("handle")
+    assert isinstance(handle, QQuickItem)
+    handle_width = float(handle.property("width"))
+    effective_track_width = float(slider.property("availableWidth")) - handle_width
+    local_x = (
+        float(slider.property("leftPadding"))
+        + handle_width / 2
+        + visual_position * effective_track_width
+    )
+    local_y = (
+        float(slider.property("topPadding"))
+        + float(slider.property("availableHeight")) / 2
+    )
+    return slider.mapToScene(QPointF(local_x, local_y)).toPoint()
 
 
 def _open_dialog(dialog: QObject) -> None:
@@ -1056,15 +1074,9 @@ def test_real_overlay_slider_updates_draft_and_global_apply_persists_it(
     resting_plane_x = float(overlay_near_plane.property("x"))
     action_sequence = int(stage.property("actionSequence"))
     start_ratio = float(slider.property("visualPosition"))
-    slider_width = float(slider.property("width"))
-    slider_height = float(slider.property("height"))
-    start = slider.mapToScene(
-        QPointF(slider_width * start_ratio, slider_height / 2)
-    ).toPoint()
+    start = _slider_scene_point(slider, start_ratio)
     end_ratio = 0.73
-    end = slider.mapToScene(
-        QPointF(slider_width * end_ratio, slider_height / 2)
-    ).toPoint()
+    end = _slider_scene_point(slider, end_ratio)
     QTest.mousePress(
         window,
         Qt.MouseButton.LeftButton,
@@ -1075,13 +1087,10 @@ def test_real_overlay_slider_updates_draft_and_global_apply_persists_it(
 
     draft_samples = []
     for progress in (0.25, 0.5, 0.75, 1.0):
-        position = slider.mapToScene(
-            QPointF(
-                slider_width
-                * (start_ratio + (end_ratio - start_ratio) * progress),
-                slider_height / 2,
-            )
-        ).toPoint()
+        position = _slider_scene_point(
+            slider,
+            start_ratio + (end_ratio - start_ratio) * progress,
+        )
         QTest.mouseMove(window, position, delay=10)
         app.processEvents()
         draft_samples.append(controller.overlayOpacity)
@@ -1105,7 +1114,11 @@ def test_real_overlay_slider_updates_draft_and_global_apply_persists_it(
 
     draft = controller.overlayOpacity
     assert draft != configured
-    assert 0.70 <= draft <= 0.76
+    assert math.isclose(
+        draft,
+        end_ratio,
+        abs_tol=float(slider.property("stepSize")),
+    )
     assert float(slider.property("value")) == draft
     assert percentage.property("text") == f"{round(draft * 100)}%"
     assert controller.settingsDirty is True
@@ -1163,14 +1176,8 @@ def test_real_ocr_quality_slider_snaps_three_presets_and_keeps_merge_guard(
     initial_index = controller.detectionQualityIndex
     assert initial_index in (0, 1, 2)
 
-    slider_width = float(slider.property("width"))
-    slider_height = float(slider.property("height"))
-    start = slider.mapToScene(
-        QPointF(slider_width * initial_index / 2, slider_height / 2)
-    ).toPoint()
-    quality_position = slider.mapToScene(
-        QPointF(slider_width * 0.76, slider_height / 2)
-    ).toPoint()
+    start = _slider_scene_point(slider, initial_index / 2)
+    quality_position = _slider_scene_point(slider, 0.76)
     QTest.mousePress(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
     QTest.mouseMove(window, quality_position, delay=10)
     app.processEvents()
@@ -1187,7 +1194,7 @@ def test_real_ocr_quality_slider_snaps_three_presets_and_keeps_merge_guard(
     assert controller.detectionQualitySummary.startswith("质量 · ")
     assert controller.settingsDirty is True
 
-    low_position = slider.mapToScene(QPointF(slider_width * 0.1, slider_height / 2)).toPoint()
+    low_position = _slider_scene_point(slider, 0.1)
     QTest.mousePress(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, quality_position)
     QTest.mouseMove(window, low_position, delay=10)
     QTest.mouseRelease(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, low_position)
