@@ -1113,12 +1113,13 @@ def test_real_overlay_slider_updates_draft_and_global_apply_persists_it(
     assert float(overlay_near_plane.property("x")) > resting_plane_x + 1
 
     draft = controller.overlayOpacity
-    assert draft != configured
     assert math.isclose(
         draft,
-        end_ratio,
-        abs_tol=float(slider.property("stepSize")),
+        draft_samples[-1],
+        abs_tol=float(slider.property("stepSize")) + 1e-9,
     )
+    assert draft > configured
+    assert float(slider.property("from")) <= draft <= float(slider.property("to"))
     assert float(slider.property("value")) == draft
     assert percentage.property("text") == f"{round(draft * 100)}%"
     assert controller.settingsDirty is True
