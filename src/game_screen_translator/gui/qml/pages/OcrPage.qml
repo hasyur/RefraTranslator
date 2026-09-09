@@ -147,11 +147,19 @@ Item {
                         Layout.fillWidth: true
                     }
 
-                    SettingLabel { theme: root.theme; title: "计算设备"; meta: "ISOLATED PROBE" }
+                    SettingLabel {
+                        theme: root.theme
+                        title: "计算设备"
+                        meta: "ISOLATED PROBE"
+                        description: "选择用于文字识别的计算设备。"
+                        settingKey: "ocr-device"
+                    }
                     PrismComboBox {
                         id: deviceSelector
                         theme: root.theme
                         accessibleName: "OCR 计算设备"
+                        settingDescription: "选择用于文字识别的计算设备。"
+                        settingKey: "ocr-device"
                         model: root.workbench.ocrDeviceNames
                         itemEnabled: root.workbench.ocrDeviceAvailability
                         currentIndex: Math.max(0, root.workbench.ocrDeviceValues.indexOf(root.workbench.ocrDevice))
@@ -181,6 +189,8 @@ Item {
                         theme: root.theme
                         title: "检测质量"
                         meta: root.workbench.detectionQualitySummary
+                        description: "选择文字检测的质量档位。"
+                        settingKey: "ocr-quality"
                     }
                     PrismSlider {
                         id: ocrQualitySlider
@@ -188,6 +198,8 @@ Item {
                         property bool changedDuringGesture: false
                         theme: root.theme
                         accessibleName: "OCR 检测质量"
+                        settingDescription: "选择文字检测的质量档位。"
+                        settingKey: "ocr-quality"
                         from: 0
                         to: Math.max(0, root.workbench.detectionQualityNames.length - 1)
                         stepSize: 1
@@ -229,6 +241,8 @@ Item {
                     PrismToggle {
                         theme: root.theme
                         text: "启用文本过滤"
+                        settingDescription: "启用后过滤较不稳定的识别文字。"
+                        settingKey: "ocr-filter"
                         checked: root.workbench.ocrFilterEnabled
                         Layout.fillWidth: true
                         onToggled: {
@@ -240,6 +254,8 @@ Item {
                         objectName: "textMergeToggle"
                         theme: root.theme
                         text: root.workbench.textMergeAllowed ? "合并相邻文本块" : "合并文本块（当前质量不可用）"
+                        settingDescription: "启用后合并相邻的识别文字块。"
+                        settingKey: "ocr-merge"
                         checked: root.workbench.ocrMergeEnabled
                         enabled: root.workbench.textMergeAllowed
                         Layout.fillWidth: true
@@ -251,10 +267,18 @@ Item {
 
                     Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.line }
 
-                    SettingLabel { theme: root.theme; title: "变化检测"; meta: "DYNAMIC ROI" }
+                    SettingLabel {
+                        theme: root.theme
+                        title: "变化检测"
+                        meta: "DYNAMIC ROI"
+                        description: "启用后只处理画面中发生变化的区域。"
+                        settingKey: "ocr-dynamic"
+                    }
                     PrismToggle {
                         theme: root.theme
                         text: "只识别发生变化的区域"
+                        settingDescription: "启用后只处理画面中发生变化的区域。"
+                        settingKey: "ocr-dynamic"
                         checked: root.workbench.dynamicRoiEnabled
                         Layout.fillWidth: true
                         onToggled: {

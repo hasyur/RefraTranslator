@@ -6,6 +6,8 @@ Button {
 
     required property var theme
     property bool primary: false
+    property string settingDescription: ""
+    property string settingKey: ""
     property bool quiet: false
     property string tone: "neutral"
 
@@ -64,5 +66,12 @@ Button {
             Behavior on x { NumberAnimation { duration: root.theme.ui; easing.type: Easing.OutCubic } }
             Behavior on opacity { NumberAnimation { duration: root.theme.fast } }
         }
+    }
+
+    SettingHint {
+        theme: root.theme
+        target: root
+        description: root.settingDescription
+        settingKey: root.settingKey
     }
 }

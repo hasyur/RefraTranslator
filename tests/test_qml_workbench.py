@@ -643,6 +643,141 @@ def test_real_workbench_loads_exactly_seven_pages_without_qml_warnings(
     host.shutdown()
 
 
+def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+    window = host.window
+    assert window is not None
+    window.update()
+    QTest.qWait(20)
+
+    expected_parts = {
+        "home-profile": {"label", "control"},
+        "home-theme": {"label", "control"},
+        "home-motion": {"control"},
+        "capture-monitor": {"label", "control"},
+        "capture-fullscreen": {"control"},
+        "capture-custom": {"control"},
+        "capture-left": {"label", "control"},
+        "capture-top": {"label", "control"},
+        "capture-width": {"label", "control"},
+        "capture-height": {"label", "control"},
+        "ocr-device": {"label", "control"},
+        "ocr-quality": {"label", "control"},
+        "ocr-filter": {"control"},
+        "ocr-merge": {"control"},
+        "ocr-dynamic": {"label", "control"},
+        "translation-backend": {"control"},
+        "translation-builtin-model": {"label", "control"},
+        "translation-builtin-device": {"label", "control"},
+        "translation-builtin-parallel": {"label", "control"},
+        "translation-builtin-cache": {"label", "control"},
+        "translation-external-url": {"label", "control"},
+        "translation-external-key": {"label", "control"},
+        "translation-external-model": {"label", "control"},
+        "translation-external-concurrency": {"label", "control"},
+        "translation-prompt": {"label", "control"},
+        "translation-glossary": {"editor"},
+        "overlay-opacity": {"label", "control"},
+        "settings-poll-fps": {"label", "control"},
+        "settings-clear-after": {"label", "control"},
+        "settings-roi-response": {"label", "control"},
+        "settings-stable-rescan": {"label", "control"},
+        "settings-idle-rescan": {"label", "control"},
+        "settings-ocr-cooldown": {"label", "control"},
+        "settings-browser-overlay": {"label", "control"},
+        "settings-debug-border": {"control"},
+        "cache-corrections": {"editor"},
+    }
+
+    pending = [window.contentItem()]
+    hint_items: dict[tuple[str, str], list[QQuickItem]] = {}
+    while pending:
+        item = pending.pop()
+        object_name = item.objectName()
+        if object_name.startswith("settingHint-"):
+            hint_name = object_name.removeprefix("settingHint-")
+            part = next(
+                part_name
+                for part_name in ("label", "control", "editor")
+                if hint_name.endswith("-" + part_name)
+            )
+            key = hint_name[: -(len(part) + 1)]
+            hint_items.setdefault((key, part), []).append(item)
+        pending.extend(item.childItems())
+
+    actual_parts = {
+        key: {part for (item_key, part) in hint_items if item_key == key}
+        for key in expected_parts
+    }
+    assert actual_parts == expected_parts
+    assert set(hint_items) == {
+        (key, part) for key, parts in expected_parts.items() for part in parts
+    }
+    assert all(
+        hint.property("description")
+        and any(
+            "\u4e00" <= character <= "\u9fff"
+            for character in str(hint.property("description"))
+        )
+        for hints in hint_items.values()
+        for hint in hints
+    )
+    assert _find_quick_item(
+        window, "settingHint-settings-browser-overlay-control"
+    ) is not None
+    assert _find_quick_item(
+        window, "settingHint-translation-external-url-control"
+    ) is not None
+
+    def hover_hint(object_name: str) -> QQuickItem:
+        hint = _find_quick_item(window, object_name)
+        assert hint is not None
+        point = hint.mapToScene(
+            QPointF(hint.width() / 2, hint.height() / 2)
+        ).toPoint()
+        QTest.mouseMove(window, point)
+        QTest.qWait(250)
+        assert hint.property("hintVisible") is False
+        QTest.qWait(220)
+        assert hint.property("hintVisible") is True
+        QTest.mouseMove(window, QPoint(window.width() - 4, window.height() - 4))
+        QTest.qWait(30)
+        assert hint.property("hintVisible") is False
+        return hint
+
+    label_hint = hover_hint("settingHint-home-theme-label")
+    control_hint = hover_hint("settingHint-home-theme-control")
+    assert label_hint.property("description") == control_hint.property("description")
+
+    controller.setPage("OCR")
+    controller.setDetectionQualityIndex(0)
+    app.processEvents()
+    window.update()
+    QTest.qWait(20)
+    assert label_hint.property("visible") is False
+    merge_toggle = window.findChild(QObject, "textMergeToggle")
+    assert merge_toggle is not None
+    assert merge_toggle.property("enabled") is False
+    disabled_hint = hover_hint("settingHint-ocr-merge-control")
+    assert disabled_hint.property("hintVisible") is False
+    host.shutdown()
+
+
 def test_real_prism_dialogs_follow_dark_and_light_themes_and_keep_actions(
     tmp_path: Path,
 ) -> None:
@@ -1986,8 +2121,9 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
     assert "LAST RUN TRANSLATION · UNAVAILABLE" in sources
     assert "LAST RUN CACHE · UNAVAILABLE" in sources
     assert "Math.random" not in sources
-    assert sources.count("Timer {") == 1
+    assert sources.count("Timer {") == 2
     assert 'objectName: "startPreludeTimer"' in sources
+    assert 'interval: 400' in sources
     assert re.search(r"workbench\.apiKey\b", sources) is None
     assert re.search(
         r"font\.family:\s*(?:(?:root\.)?theme|prism)\."

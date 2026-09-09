@@ -204,10 +204,18 @@ Item {
                         Layout.fillWidth: true
                     }
 
-                    SettingLabel { theme: root.theme; title: "目标显示器"; meta: "PHYSICAL DISPLAY" }
+                    SettingLabel {
+                        theme: root.theme
+                        title: "目标显示器"
+                        meta: "PHYSICAL DISPLAY"
+                        description: "选择要捕获游戏画面的显示器。"
+                        settingKey: "capture-monitor"
+                    }
                     PrismComboBox {
                         theme: root.theme
                         accessibleName: "目标显示器"
+                        settingDescription: "选择要捕获游戏画面的显示器。"
+                        settingKey: "capture-monitor"
                         model: root.workbench.monitorNames
                         currentIndex: root.workbench.monitorIndex
                         enabled: root.workbench.hasProfile && model.length > 0
@@ -222,6 +230,8 @@ Item {
                             objectName: "captureScanAction"
                             theme: root.theme
                             text: "整个显示器"
+                            settingDescription: "将捕获范围设为所选显示器的整个画面。"
+                            settingKey: "capture-fullscreen"
                             primary: !root.workbench.customRegion
                             enabled: root.workbench.hasProfile
                             Layout.fillWidth: true
@@ -233,6 +243,8 @@ Item {
                         PrismButton {
                             theme: root.theme
                             text: "自定义区域"
+                            settingDescription: "将捕获范围改为可调整的矩形区域。"
+                            settingKey: "capture-custom"
                             primary: root.workbench.customRegion
                             enabled: root.workbench.hasProfile
                             Layout.fillWidth: true
@@ -243,10 +255,18 @@ Item {
                         }
                     }
 
-                    SettingLabel { theme: root.theme; title: "左边界"; meta: "PIXELS" }
+                    SettingLabel {
+                        theme: root.theme
+                        title: "左边界"
+                        meta: "PIXELS"
+                        description: "设置自定义捕获区域的左侧位置。"
+                        settingKey: "capture-left"
+                    }
                     NumberStepper {
                         theme: root.theme
                         accessibleName: "捕获区域左边界"
+                        settingDescription: "设置自定义捕获区域的左侧位置。"
+                        settingKey: "capture-left"
                         value: root.workbench.captureLeft
                         minimum: 0
                         maximum: 32768
@@ -256,10 +276,18 @@ Item {
                         Layout.fillWidth: true
                         onEdited: value => root.updateRegion("left", value)
                     }
-                    SettingLabel { theme: root.theme; title: "上边界"; meta: "PIXELS" }
+                    SettingLabel {
+                        theme: root.theme
+                        title: "上边界"
+                        meta: "PIXELS"
+                        description: "设置自定义捕获区域的上侧位置。"
+                        settingKey: "capture-top"
+                    }
                     NumberStepper {
                         theme: root.theme
                         accessibleName: "捕获区域上边界"
+                        settingDescription: "设置自定义捕获区域的上侧位置。"
+                        settingKey: "capture-top"
                         value: root.workbench.captureTop
                         minimum: 0
                         maximum: 32768
@@ -269,10 +297,18 @@ Item {
                         Layout.fillWidth: true
                         onEdited: value => root.updateRegion("top", value)
                     }
-                    SettingLabel { theme: root.theme; title: "宽度"; meta: "PIXELS" }
+                    SettingLabel {
+                        theme: root.theme
+                        title: "宽度"
+                        meta: "PIXELS"
+                        description: "设置自定义捕获区域的宽度。"
+                        settingKey: "capture-width"
+                    }
                     NumberStepper {
                         theme: root.theme
                         accessibleName: "捕获区域宽度"
+                        settingDescription: "设置自定义捕获区域的宽度。"
+                        settingKey: "capture-width"
                         value: root.workbench.captureWidth
                         minimum: 1
                         maximum: 32768
@@ -282,10 +318,18 @@ Item {
                         Layout.fillWidth: true
                         onEdited: value => root.updateRegion("width", value)
                     }
-                    SettingLabel { theme: root.theme; title: "高度"; meta: "PIXELS" }
+                    SettingLabel {
+                        theme: root.theme
+                        title: "高度"
+                        meta: "PIXELS"
+                        description: "设置自定义捕获区域的高度。"
+                        settingKey: "capture-height"
+                    }
                     NumberStepper {
                         theme: root.theme
                         accessibleName: "捕获区域高度"
+                        settingDescription: "设置自定义捕获区域的高度。"
+                        settingKey: "capture-height"
                         value: root.workbench.captureHeight
                         minimum: 1
                         maximum: 32768

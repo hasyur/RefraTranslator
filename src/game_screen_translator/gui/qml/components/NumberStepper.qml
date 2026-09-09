@@ -12,6 +12,8 @@ RowLayout {
     property int stepSize: 1
     property string suffix: ""
     property string accessibleName: ""
+    property string settingDescription: ""
+    property string settingKey: ""
     readonly property real compactWidth: suffix.length > 0 ? 200 : 176
     readonly property real suffixSpacing: 5
     signal edited(int value)
@@ -91,5 +93,12 @@ RowLayout {
         Layout.preferredWidth: 42
         enabled: root.enabled && root.value < root.maximum
         onClicked: root.submit(root.value + root.stepSize)
+    }
+
+    SettingHint {
+        theme: root.theme
+        target: root
+        description: root.settingDescription
+        settingKey: root.settingKey
     }
 }

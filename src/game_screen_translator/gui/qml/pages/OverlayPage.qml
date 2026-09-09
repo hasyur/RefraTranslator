@@ -134,13 +134,21 @@ Item {
                     Layout.fillWidth: true
                 }
 
-                SettingLabel { theme: root.theme; title: "背景处理"; meta: "0—100%" }
+                SettingLabel {
+                    theme: root.theme
+                    title: "背景处理"
+                    meta: "0—100%"
+                    description: "设置译文背景的黑色遮罩强度。"
+                    settingKey: "overlay-opacity"
+                }
                 PrismSlider {
                     id: overlayOpacitySlider
                     objectName: "overlayProjectionAction"
                     property bool changedDuringGesture: false
                     theme: root.theme
                     accessibleName: "黑色遮罩强度"
+                    settingDescription: "设置译文背景的黑色遮罩强度。"
+                    settingKey: "overlay-opacity"
                     from: 0
                     to: 1
                     stepSize: 0.01

@@ -6,6 +6,8 @@ TextField {
 
     required property var theme
     property string accessibleName: ""
+    property string settingDescription: ""
+    property string settingKey: ""
 
     Accessible.name: root.accessibleName.length > 0 ? root.accessibleName : root.placeholderText
 
@@ -23,5 +25,12 @@ TextField {
         color: root.theme.dark ? "#8f0b1016" : "#b8eef2f3"
         border.color: root.activeFocus ? root.theme.accent : root.theme.lineStrong
         border.width: root.activeFocus ? 2 : 1
+    }
+
+    SettingHint {
+        theme: root.theme
+        target: root
+        description: root.settingDescription
+        settingKey: root.settingKey
     }
 }

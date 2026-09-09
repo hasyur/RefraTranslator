@@ -270,6 +270,8 @@ Item {
                         sourceTitle: "识别原文"
                         targetTitle: "人工译文"
                         saveText: "保存人工修订"
+                        settingDescription: "编辑当前游戏的识别原文与人工译文对应关系。"
+                        settingKey: "cache-corrections"
                         enabled: root.workbench.hasProfile
                         onDraftChanged: entries => root.workbench.setCorrectionsDraft(entries)
                         onSaveRequested: entries => root.workbench.saveCorrections(entries)

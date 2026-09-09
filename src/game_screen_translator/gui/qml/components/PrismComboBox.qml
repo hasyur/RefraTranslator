@@ -7,6 +7,8 @@ ComboBox {
     required property var theme
     property var itemEnabled: []
     property string accessibleName: ""
+    property string settingDescription: ""
+    property string settingKey: ""
 
     Accessible.name: root.accessibleName.length > 0 ? root.accessibleName : root.displayText
 
@@ -85,5 +87,12 @@ ComboBox {
             color: root.theme.inkRaised
             border.color: root.theme.lineStrong
         }
+    }
+
+    SettingHint {
+        theme: root.theme
+        target: root
+        description: root.settingDescription
+        settingKey: root.settingKey
     }
 }

@@ -5,6 +5,8 @@ CheckBox {
     id: root
 
     required property var theme
+    property string settingDescription: ""
+    property string settingKey: ""
 
     implicitHeight: 42
     spacing: 11
@@ -39,5 +41,12 @@ CheckBox {
         font.pixelSize: 13
         verticalAlignment: Text.AlignVCenter
         wrapMode: Text.WordWrap
+    }
+
+    SettingHint {
+        theme: root.theme
+        target: root
+        description: root.settingDescription
+        settingKey: root.settingKey
     }
 }

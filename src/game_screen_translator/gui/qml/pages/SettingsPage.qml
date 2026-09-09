@@ -58,11 +58,19 @@ Item {
                         Layout.fillWidth: true
                     }
 
-                    SettingLabel { theme: root.theme; title: "画面变化轮询"; meta: "FPS" }
+                    SettingLabel {
+                        theme: root.theme
+                        title: "画面变化轮询"
+                        meta: "FPS"
+                        description: "设置画面变化的检查频率。"
+                        settingKey: "settings-poll-fps"
+                    }
                     NumberStepper {
                         objectName: "settingsCalibrationStepper"
                         theme: root.theme
                         accessibleName: "画面变化轮询频率"
+                        settingDescription: "设置画面变化的检查频率。"
+                        settingKey: "settings-poll-fps"
                         value: root.workbench.changePollFps
                         minimum: 1
                         maximum: 120
@@ -74,10 +82,18 @@ Item {
                         }
                     }
 
-                    SettingLabel { theme: root.theme; title: "字幕消失判定"; meta: "50—1000 MS" }
+                    SettingLabel {
+                        theme: root.theme
+                        title: "字幕消失判定"
+                        meta: "50—1000 MS"
+                        description: "设置字幕多久未更新后被判定为消失。"
+                        settingKey: "settings-clear-after"
+                    }
                     NumberStepper {
                         theme: root.theme
                         accessibleName: "字幕消失判定时间"
+                        settingDescription: "设置字幕多久未更新后被判定为消失。"
+                        settingKey: "settings-clear-after"
                         value: root.workbench.clearAfterMs
                         minimum: 50
                         maximum: 1000
@@ -95,10 +111,18 @@ Item {
                         visible: root.workbench.dynamicRoiEnabled
                         Layout.fillWidth: true
                         spacing: 10
-                        SettingLabel { theme: root.theme; title: "ROI 响应目标"; meta: "100—5000 MS" }
+                        SettingLabel {
+                            theme: root.theme
+                            title: "ROI 响应目标"
+                            meta: "100—5000 MS"
+                            description: "设置变化区域处理的目标响应时间。"
+                            settingKey: "settings-roi-response"
+                        }
                         NumberStepper {
                             theme: root.theme
                             accessibleName: "动态 ROI 响应目标"
+                            settingDescription: "设置变化区域处理的目标响应时间。"
+                            settingKey: "settings-roi-response"
                             value: root.workbench.roiResponseTargetMs
                             minimum: 100
                             maximum: 5000
@@ -118,10 +142,18 @@ Item {
                         Layout.fillWidth: true
                         spacing: 10
 
-                        SettingLabel { theme: root.theme; title: "稳定后复扫"; meta: "0—60000 MS" }
+                        SettingLabel {
+                            theme: root.theme
+                            title: "稳定后复扫"
+                            meta: "0—60000 MS"
+                            description: "设置画面稳定后再次检查的等待时间。"
+                            settingKey: "settings-stable-rescan"
+                        }
                         NumberStepper {
                             theme: root.theme
                             accessibleName: "稳定后复扫时间"
+                            settingDescription: "设置画面稳定后再次检查的等待时间。"
+                            settingKey: "settings-stable-rescan"
                             value: root.workbench.settleRescanMs
                             minimum: 0
                             maximum: 60000
@@ -133,10 +165,18 @@ Item {
                                 root.visualAction("calibrate")
                             }
                         }
-                        SettingLabel { theme: root.theme; title: "空闲复扫"; meta: "0—60000 MS" }
+                        SettingLabel {
+                            theme: root.theme
+                            title: "空闲复扫"
+                            meta: "0—60000 MS"
+                            description: "设置空闲时再次检查的等待时间。"
+                            settingKey: "settings-idle-rescan"
+                        }
                         NumberStepper {
                             theme: root.theme
                             accessibleName: "空闲复扫时间"
+                            settingDescription: "设置空闲时再次检查的等待时间。"
+                            settingKey: "settings-idle-rescan"
                             value: root.workbench.idleRescanMs
                             minimum: 0
                             maximum: 60000
@@ -148,10 +188,18 @@ Item {
                                 root.visualAction("calibrate")
                             }
                         }
-                        SettingLabel { theme: root.theme; title: "OCR 冷却"; meta: "0—10000 MS" }
+                        SettingLabel {
+                            theme: root.theme
+                            title: "OCR 冷却"
+                            meta: "0—10000 MS"
+                            description: "设置两次文字识别之间的最短等待时间。"
+                            settingKey: "settings-ocr-cooldown"
+                        }
                         NumberStepper {
                             theme: root.theme
                             accessibleName: "OCR 冷却时间"
+                            settingDescription: "设置两次文字识别之间的最短等待时间。"
+                            settingKey: "settings-ocr-cooldown"
                             value: root.workbench.ocrCooldownMs
                             minimum: 0
                             maximum: 10000
@@ -211,11 +259,19 @@ Item {
                         Layout.fillWidth: true
                     }
 
-                    SettingLabel { theme: root.theme; title: "OBS 浏览器译文源"; meta: "OPTIONAL OUTPUT" }
+                    SettingLabel {
+                        theme: root.theme
+                        title: "OBS 浏览器译文源"
+                        meta: "OPTIONAL OUTPUT"
+                        description: "启用后提供可被 OBS 使用的译文页面。"
+                        settingKey: "settings-browser-overlay"
+                    }
                     PrismToggle {
                         objectName: "settingsCalibrationAction"
                         theme: root.theme
                         text: "启用浏览器覆盖层"
+                        settingDescription: "启用后提供可被 OBS 使用的译文页面。"
+                        settingKey: "settings-browser-overlay"
                         checked: root.workbench.browserOverlayEnabled
                         Layout.fillWidth: true
                         onToggled: {
@@ -235,6 +291,8 @@ Item {
                     PrismToggle {
                         theme: root.theme
                         text: "下一次运行显示调试边框"
+                        settingDescription: "让下一次运行显示用于排查问题的边框。"
+                        settingKey: "settings-debug-border"
                         checked: root.workbench.debugEnabled
                         Layout.fillWidth: true
                         onToggled: {

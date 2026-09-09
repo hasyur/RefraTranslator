@@ -6,6 +6,8 @@ Slider {
 
     required property var theme
     property string accessibleName: ""
+    property string settingDescription: ""
+    property string settingKey: ""
 
     Accessible.name: accessibleName
     implicitHeight: 34
@@ -45,5 +47,12 @@ Slider {
         color: root.pressed ? root.theme.accent : root.theme.inkRaised
         border.color: root.theme.accent
         border.width: root.activeFocus || root.hovered ? 3 : 2
+    }
+
+    SettingHint {
+        theme: root.theme
+        target: root
+        description: root.settingDescription
+        settingKey: root.settingKey
     }
 }

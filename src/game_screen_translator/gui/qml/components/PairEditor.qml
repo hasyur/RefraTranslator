@@ -11,6 +11,8 @@ Item {
     property string sourceTitle: "原文"
     property string targetTitle: "译文"
     property string saveText: "保存"
+    property string settingDescription: ""
+    property string settingKey: ""
     property bool initialDirty: false
     property bool dirty: false
     property string errorText: ""
@@ -161,6 +163,8 @@ Item {
                         PrismTextField {
                             objectName: "pairSourceField-" + String(rowItem.index)
                             theme: root.theme
+                            settingDescription: root.settingDescription
+                            settingKey: root.settingKey + "-source-" + String(rowItem.index)
                             z: 1
                             text: rowItem.source
                             accessibleName: root.sourceTitle + " " + String(rowItem.index + 1)
@@ -173,6 +177,8 @@ Item {
                         PrismTextField {
                             objectName: "pairTargetField-" + String(rowItem.index)
                             theme: root.theme
+                            settingDescription: root.settingDescription
+                            settingKey: root.settingKey + "-target-" + String(rowItem.index)
                             z: 1
                             text: rowItem.target
                             accessibleName: root.targetTitle + " " + String(rowItem.index + 1)
@@ -186,6 +192,14 @@ Item {
                 }
 
                 ScrollIndicator.vertical: ScrollIndicator { }
+            }
+
+            SettingHint {
+                theme: root.theme
+                target: list
+                description: root.settingDescription
+                settingKey: root.settingKey
+                settingPart: "editor"
             }
 
             UnavailableState {

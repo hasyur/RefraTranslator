@@ -268,10 +268,14 @@ Item {
                     theme: root.theme
                     title: "当前配置"
                     meta: root.workbench.hasProfile ? root.workbench.currentProfileId : "REQUIRED"
+                    description: "选择要读取和保存区域、提示词与术语的游戏配置。"
+                    settingKey: "home-profile"
                 }
                 PrismComboBox {
                     theme: root.theme
                     accessibleName: "当前配置"
+                    settingDescription: "选择要读取和保存区域、提示词与术语的游戏配置。"
+                    settingKey: "home-profile"
                     model: root.workbench.profileNames
                     currentIndex: root.workbench.currentProfileIndex
                     enabled: model.length > 0
@@ -304,11 +308,15 @@ Item {
                     theme: root.theme
                     title: "界面主题"
                     meta: "SYSTEM / DARK / LIGHT"
+                    description: "选择工作台使用的颜色主题。"
+                    settingKey: "home-theme"
                 }
                 PrismComboBox {
                     id: themeSelector
                     theme: root.theme
                     accessibleName: "界面主题"
+                    settingDescription: "选择工作台使用的颜色主题。"
+                    settingKey: "home-theme"
                     model: ["跟随系统", "深色", "浅色"]
                     currentIndex: Math.max(0, root.themeValues.indexOf(root.workbench.themePreference))
                     Layout.fillWidth: true
@@ -320,6 +328,8 @@ Item {
                 PrismToggle {
                     theme: root.theme
                     text: "减少界面动效"
+                    settingDescription: "减少页面切换和反馈动画。"
+                    settingKey: "home-motion"
                     checked: root.workbench.reducedMotion
                     Layout.fillWidth: true
                     onToggled: root.workbench.setReducedMotion(checked)
