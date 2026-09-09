@@ -194,14 +194,6 @@ Item {
                 ScrollIndicator.vertical: ScrollIndicator { }
             }
 
-            SettingHint {
-                theme: root.theme
-                target: list
-                description: root.settingDescription
-                settingKey: root.settingKey
-                settingPart: "editor"
-            }
-
             UnavailableState {
                 anchors.fill: parent
                 anchors.margins: 1

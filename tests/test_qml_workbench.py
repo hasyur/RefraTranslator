@@ -692,7 +692,6 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         "translation-external-model": {"label", "control"},
         "translation-external-concurrency": {"label", "control"},
         "translation-prompt": {"label", "control"},
-        "translation-glossary": {"editor"},
         "overlay-opacity": {"label", "control"},
         "settings-poll-fps": {"label", "control"},
         "settings-clear-after": {"label", "control"},
@@ -702,7 +701,6 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         "settings-ocr-cooldown": {"label", "control"},
         "settings-browser-overlay": {"label", "control"},
         "settings-debug-border": {"control"},
-        "cache-corrections": {"editor"},
     }
 
     hint_items: dict[tuple[str, str], list[QObject]] = {}
@@ -760,6 +758,41 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         excluded = window.findChild(QObject, object_name)
         assert excluded is not None
         assert excluded not in hint_targets
+
+    for editor_name, setting_key in (
+        ("glossaryEditor", "translation-glossary"),
+        ("correctionsEditor", "cache-corrections"),
+    ):
+        editor = window.findChild(QObject, editor_name)
+        assert editor is not None
+        assert editor.property("entryCount") == 0
+        assert not any(
+            item.objectName().startswith("settingHint-" + setting_key)
+            for item in editor.findChildren(QObject)
+        )
+        action_texts = {
+            "添加一行",
+            "删除选中行",
+            str(editor.property("saveText")),
+        }
+        actions = [
+            item
+            for item in editor.findChildren(QObject)
+            if item.metaObject().indexOfProperty("settingDescription") >= 0
+            and str(item.property("text")) in action_texts
+        ]
+        assert {str(action.property("text")) for action in actions} == action_texts
+        for action in actions:
+            assert action.property("settingDescription") == ""
+            assert action.property("settingKey") == ""
+            action_hints = [
+                item
+                for item in action.findChildren(QObject)
+                if item.metaObject().indexOfProperty("hintVisible") >= 0
+            ]
+            assert len(action_hints) == 1
+            assert action_hints[0].property("description") == ""
+            assert action_hints[0].property("enabled") is False
 
     def setting_hint(object_name: str) -> tuple[QObject, QQuickItem]:
         hint = window.findChild(QObject, object_name)
@@ -965,6 +998,181 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         abs_tol=1.0,
     )
     move_out(edge_hint)
+    host.shutdown()
+
+
+def test_pair_editor_existing_rows_show_one_adjacent_hint_and_remain_editable(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.saveGlossary([{"source": "仕事", "target": "委托"}])
+    controller.saveCorrections([{"source": "待て。", "target": "等等。"}])
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+    window = host.window
+    assert window is not None
+    window.resize(980, 700)
+
+    def visible_hints() -> list[QObject]:
+        pending = [window.contentItem()]
+        result: list[QObject] = []
+        while pending:
+            item = pending.pop()
+            result.extend(
+                child
+                for child in item.children()
+                if child.metaObject().indexOfProperty("hintVisible") >= 0
+                and child.property("hintVisible") is True
+            )
+            pending.extend(item.childItems())
+        return result
+
+    def scene_rect(item: QQuickItem) -> tuple[float, float, float, float]:
+        origin = item.mapToScene(QPointF(0, 0))
+        opposite = item.mapToScene(QPointF(item.width(), item.height()))
+        return (
+            min(origin.x(), opposite.x()),
+            min(origin.y(), opposite.y()),
+            abs(opposite.x() - origin.x()),
+            abs(opposite.y() - origin.y()),
+        )
+
+    cases = (
+        (
+            "TRANSLATION",
+            "translationPage",
+            "sideMode",
+            "glossary",
+            "glossaryEditor",
+            "translation-glossary",
+        ),
+        (
+            "CACHE",
+            "cachePage",
+            "mode",
+            "corrections",
+            "correctionsEditor",
+            "cache-corrections",
+        ),
+    )
+    for page_name, page_object, mode_property, mode, editor_name, setting_key in cases:
+        controller.setPage(page_name)
+        page = window.findChild(QObject, page_object)
+        assert page is not None
+        page.setProperty(mode_property, mode)
+        app.processEvents()
+        window.update()
+        QTest.qWait(20)
+        app.processEvents()
+
+        editor = window.findChild(QObject, editor_name)
+        assert isinstance(editor, QQuickItem)
+        assert editor.property("entryCount") == 1
+        assert editor.findChild(
+            QObject,
+            "settingHint-" + setting_key + "-editor",
+        ) is None
+
+        for part, field_name in (
+            ("source", "pairSourceField-0"),
+            ("target", "pairTargetField-0"),
+        ):
+            field = _find_quick_item(editor, field_name)
+            assert isinstance(field, QQuickItem)
+            hint = field.findChild(
+                QObject,
+                "settingHint-" + setting_key + "-" + part + "-0-control",
+            )
+            assert hint is not None
+            assert hint.property("target") == field
+            assert hint.property("enabled") is True
+            assert hint.property("description")
+            assert field.property("visible") is True
+            assert field.width() > 0
+            assert field.height() > 0
+            ancestor = field
+            while ancestor is not None:
+                assert ancestor.property("visible") is True, (
+                    page_name,
+                    ancestor.objectName(),
+                )
+                assert float(ancestor.property("opacity")) > 0, (
+                    page_name,
+                    ancestor.objectName(),
+                )
+                ancestor = ancestor.parentItem()
+
+            field_center = field.mapToScene(
+                QPointF(field.width() / 2, field.height() / 2)
+            ).toPoint()
+            assert 0 <= field_center.x() < window.width(), (
+                page_name,
+                field_center,
+            )
+            assert 0 <= field_center.y() < window.height(), (
+                page_name,
+                field_center,
+            )
+            QTest.mouseMove(window, field_center)
+            app.processEvents()
+            assert hint.property("hovered") is True
+            QTest.qWait(300)
+            assert visible_hints() == []
+            QTest.qWait(150)
+            actual_hints = visible_hints()
+            assert actual_hints == [hint], (
+                hint.property("hintVisible"),
+                hint.property("hovered"),
+                hint.property("hintX"),
+                hint.property("hintY"),
+                hint.property("hintWidth"),
+                hint.property("hintHeight"),
+            )
+
+            target_x, target_y, target_width, target_height = scene_rect(field)
+            popup_x = float(hint.property("hintX"))
+            popup_y = float(hint.property("hintY"))
+            popup_width = float(hint.property("hintWidth"))
+            popup_height = float(hint.property("hintHeight"))
+            vertical_gap = min(
+                abs(popup_y - (target_y + target_height)),
+                abs(target_y - (popup_y + popup_height)),
+            )
+            assert 7.0 <= vertical_gap <= 9.0
+            assert popup_x <= target_x + target_width
+            assert popup_x + popup_width >= target_x
+
+            before_text = str(field.property("text"))
+            QTest.mouseClick(
+                window,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                field_center,
+            )
+            app.processEvents()
+            assert field.property("activeFocus") is True
+            assert visible_hints() == [hint]
+            QTest.keyClick(window, Qt.Key.Key_End)
+            _key_clicks(window, "x")
+            app.processEvents()
+            assert field.property("text") == before_text + "x"
+
+            QTest.mouseMove(window, QPoint(2, 2))
+            app.processEvents()
+            assert hint.property("hintVisible") is False
+            assert visible_hints() == []
+
     host.shutdown()
 
 
