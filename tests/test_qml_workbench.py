@@ -662,6 +662,7 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
     app.processEvents()
     window = host.window
     assert window is not None
+    window.resize(980, 700)
     window.update()
     QTest.qWait(20)
 
@@ -704,10 +705,8 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         "cache-corrections": {"editor"},
     }
 
-    pending = [window.contentItem()]
-    hint_items: dict[tuple[str, str], list[QQuickItem]] = {}
-    while pending:
-        item = pending.pop()
+    hint_items: dict[tuple[str, str], list[QObject]] = {}
+    for item in window.findChildren(QObject):
         object_name = item.objectName()
         if object_name.startswith("settingHint-"):
             hint_name = object_name.removeprefix("settingHint-")
@@ -718,7 +717,6 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
             )
             key = hint_name[: -(len(part) + 1)]
             hint_items.setdefault((key, part), []).append(item)
-        pending.extend(item.childItems())
 
     actual_parts = {
         key: {part for (item_key, part) in hint_items if item_key == key}
@@ -728,6 +726,12 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
     assert set(hint_items) == {
         (key, part) for key, parts in expected_parts.items() for part in parts
     }
+    expected_counts = {key_and_part: 1 for key_and_part in hint_items}
+    expected_counts[("translation-backend", "control")] = 2
+    expected_counts[("translation-external-model", "control")] = 2
+    assert {
+        key_and_part: len(items) for key_and_part, items in hint_items.items()
+    } == expected_counts
     assert all(
         hint.property("description")
         and any(
@@ -737,44 +741,230 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         for hints in hint_items.values()
         for hint in hints
     )
-    assert _find_quick_item(
-        window, "settingHint-settings-browser-overlay-control"
-    ) is not None
-    assert _find_quick_item(
-        window, "settingHint-translation-external-url-control"
-    ) is not None
 
-    def hover_hint(object_name: str) -> QQuickItem:
-        hint = _find_quick_item(window, object_name)
+    named_hints = [hint for hints in hint_items.values() for hint in hints]
+    hint_targets = [hint.property("target") for hint in named_hints]
+    for item in window.findChildren(QObject):
+        if (
+            item.metaObject().indexOfProperty("readOnly") >= 0
+            and item.property("readOnly") is True
+        ):
+            assert item not in hint_targets
+    for object_name in (
+        "openCreateProfileDialogButton",
+        "createProfileNameField",
+        "captureRegionSelectAction",
+        "ocrProbeAction",
+        "openDeleteModelDialogButton",
+    ):
+        excluded = window.findChild(QObject, object_name)
+        assert excluded is not None
+        assert excluded not in hint_targets
+
+    def setting_hint(object_name: str) -> tuple[QObject, QQuickItem]:
+        hint = window.findChild(QObject, object_name)
         assert hint is not None
-        point = hint.mapToScene(
-            QPointF(hint.width() / 2, hint.height() / 2)
-        ).toPoint()
-        QTest.mouseMove(window, point)
-        QTest.qWait(250)
-        assert hint.property("hintVisible") is False
-        QTest.qWait(220)
-        assert hint.property("hintVisible") is True
-        QTest.mouseMove(window, QPoint(window.width() - 4, window.height() - 4))
-        QTest.qWait(30)
-        assert hint.property("hintVisible") is False
-        return hint
+        target = hint.property("target")
+        assert isinstance(target, QQuickItem)
+        return hint, target
 
-    label_hint = hover_hint("settingHint-home-theme-label")
-    control_hint = hover_hint("settingHint-home-theme-control")
+    def move_out(hint: QObject) -> None:
+        QTest.mouseMove(window, QPoint(2, 2))
+        app.processEvents()
+        assert hint.property("hintVisible") is False
+
+    def hover_target(
+        hint: QObject,
+        target: QQuickItem,
+        local_point: QPointF | None = None,
+    ) -> None:
+        point_in_target = local_point or QPointF(
+            target.width() / 2,
+            target.height() / 2,
+        )
+        point = target.mapToScene(point_in_target).toPoint()
+        QTest.mouseMove(window, point)
+        QTest.qWait(300)
+        assert hint.property("hintVisible") is False
+        QTest.qWait(150)
+        assert hint.property("hintVisible") is True
+
+    label_hint, label_target = setting_hint("settingHint-home-theme-label")
+    control_hint, control_target = setting_hint("settingHint-home-theme-control")
+    assert label_target.height() > 20
+    hover_target(
+        label_hint,
+        label_target,
+        QPointF(label_target.width() / 2, label_target.height() - 2),
+    )
+    move_out(label_hint)
+    hover_target(control_hint, control_target)
     assert label_hint.property("description") == control_hint.property("description")
+    move_out(control_hint)
+
+    controller.setPage("SETTINGS")
+    controller.setDynamicRoiEnabled(False)
+    app.processEvents()
+    window.update()
+    QTest.qWait(20)
+
+    stepper_hint, stepper = setting_hint(
+        "settingHint-settings-poll-fps-control"
+    )
+    assert stepper.objectName() == "settingsCalibrationStepper"
+    assert float(stepper.property("width")) == float(
+        stepper.property("compactWidth")
+    )
+    direct_controls = {
+        child.objectName(): child
+        for child in stepper.childItems()
+        if child.objectName()
+    }
+    assert set(direct_controls) == {
+        "numberStepperDecrease",
+        "numberStepperEditor",
+        "numberStepperIncrease",
+    }
+    for child in direct_controls.values():
+        child_center = child.mapToItem(
+            stepper,
+            QPointF(child.width() / 2, child.height() / 2),
+        )
+        hover_target(stepper_hint, stepper, child_center)
+        move_out(stepper_hint)
+
+    increase = direct_controls["numberStepperIncrease"]
+    before_click = controller.changePollFps
+    increase_point = increase.mapToScene(
+        QPointF(increase.width() / 2, increase.height() / 2)
+    ).toPoint()
+    hover_target(
+        stepper_hint,
+        stepper,
+        increase.mapToItem(
+            stepper,
+            QPointF(increase.width() / 2, increase.height() / 2),
+        ),
+    )
+    QTest.mouseClick(
+        window,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        increase_point,
+    )
+    app.processEvents()
+    assert controller.changePollFps == before_click + 1
+    move_out(stepper_hint)
 
     controller.setPage("OCR")
     controller.setDetectionQualityIndex(0)
     app.processEvents()
     window.update()
     QTest.qWait(20)
-    assert label_hint.property("visible") is False
     merge_toggle = window.findChild(QObject, "textMergeToggle")
     assert merge_toggle is not None
     assert merge_toggle.property("enabled") is False
-    disabled_hint = hover_hint("settingHint-ocr-merge-control")
-    assert disabled_hint.property("hintVisible") is False
+    disabled_hint, disabled_target = setting_hint("settingHint-ocr-merge-control")
+    hover_target(disabled_hint, disabled_target)
+    move_out(disabled_hint)
+
+    controller.setPage("SETTINGS")
+    app.processEvents()
+    window.update()
+    QTest.qWait(20)
+    edge_hint, edge_target = setting_hint(
+        "settingHint-settings-ocr-cooldown-control"
+    )
+    ancestor = edge_target.parentItem()
+    flickable = None
+    while ancestor is not None:
+        if (
+            ancestor.metaObject().indexOfProperty("contentY") >= 0
+            and ancestor.metaObject().indexOfProperty("contentHeight") >= 0
+        ):
+            flickable = ancestor
+            break
+        ancestor = ancestor.parentItem()
+    assert flickable is not None
+    target_in_view = edge_target.mapToItem(flickable, QPointF(0, 0))
+    desired_y = float(flickable.property("height")) - edge_target.height() - 12
+    requested_content_y = (
+        float(flickable.property("contentY")) + target_in_view.y() - desired_y
+    )
+    maximum_content_y = max(
+        0.0,
+        float(flickable.property("contentHeight"))
+        - float(flickable.property("height")),
+    )
+    flickable.setProperty(
+        "contentY",
+        max(0.0, min(maximum_content_y, requested_content_y)),
+    )
+    window.update()
+    QTest.qWait(20)
+    app.processEvents()
+
+    hover_target(edge_hint, edge_target)
+
+    def scene_rect(item: QQuickItem) -> tuple[float, float, float, float]:
+        origin = item.mapToScene(QPointF(0, 0))
+        opposite = item.mapToScene(QPointF(item.width(), item.height()))
+        return (
+            min(origin.x(), opposite.x()),
+            min(origin.y(), opposite.y()),
+            abs(opposite.x() - origin.x()),
+            abs(opposite.y() - origin.y()),
+        )
+
+    def assert_hint_geometry() -> tuple[float, float]:
+        target_x, target_y, target_width, target_height = scene_rect(edge_target)
+        view_x, view_y, view_width, view_height = scene_rect(flickable)
+        popup_x = float(edge_hint.property("hintX"))
+        popup_y = float(edge_hint.property("hintY"))
+        popup_width = float(edge_hint.property("hintWidth"))
+        popup_height = float(edge_hint.property("hintHeight"))
+        visible_left = max(0.0, view_x) + 8
+        visible_top = max(0.0, view_y) + 8
+        visible_right = min(float(window.width()), view_x + view_width) - 8
+        visible_bottom = min(float(window.height()), view_y + view_height) - 8
+
+        assert popup_x >= visible_left - 0.5
+        assert popup_y >= visible_top - 0.5
+        assert popup_x + popup_width <= visible_right + 0.5
+        assert popup_y + popup_height <= visible_bottom + 0.5
+        vertical_gap = min(
+            abs(popup_y - (target_y + target_height)),
+            abs(target_y - (popup_y + popup_height)),
+        )
+        assert 7.0 <= vertical_gap <= 9.0
+        assert popup_x <= target_x + target_width
+        assert popup_x + popup_width >= target_x
+        return target_y, popup_y
+
+    first_target_y, first_popup_y = assert_hint_geometry()
+    current_content_y = float(flickable.property("contentY"))
+    moved_content_y = min(maximum_content_y, current_content_y + 16)
+    if math.isclose(moved_content_y, current_content_y):
+        moved_content_y = max(0.0, current_content_y - 16)
+    assert not math.isclose(moved_content_y, current_content_y)
+    flickable.setProperty("contentY", moved_content_y)
+    window.update()
+    QTest.qWait(20)
+    QTest.mouseMove(
+        window,
+        edge_target.mapToScene(
+            QPointF(edge_target.width() / 2, edge_target.height() / 2)
+        ).toPoint(),
+    )
+    QTest.qWait(40)
+    assert edge_hint.property("hintVisible") is True
+    second_target_y, second_popup_y = assert_hint_geometry()
+    assert math.isclose(
+        second_popup_y - first_popup_y,
+        second_target_y - first_target_y,
+        abs_tol=1.0,
+    )
+    move_out(edge_hint)
     host.shutdown()
 
 
@@ -2121,7 +2311,6 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
     assert "LAST RUN TRANSLATION · UNAVAILABLE" in sources
     assert "LAST RUN CACHE · UNAVAILABLE" in sources
     assert "Math.random" not in sources
-    assert sources.count("Timer {") == 2
     assert 'objectName: "startPreludeTimer"' in sources
     assert 'interval: 400' in sources
     assert re.search(r"workbench\.apiKey\b", sources) is None

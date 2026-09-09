@@ -241,7 +241,7 @@ Item {
                     PrismToggle {
                         theme: root.theme
                         text: "启用文本过滤"
-                        settingDescription: "启用后过滤较不稳定的识别文字。"
+                        settingDescription: "启用后按源语言规则跳过纯数字、符号和不符合翻译条件的文字。"
                         settingKey: "ocr-filter"
                         checked: root.workbench.ocrFilterEnabled
                         Layout.fillWidth: true

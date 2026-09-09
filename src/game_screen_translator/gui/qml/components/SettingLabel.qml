@@ -13,7 +13,6 @@ ColumnLayout {
     Layout.fillWidth: true
 
     Text {
-        id: titleText
         text: root.title
         color: root.theme.text
         font.family: root.theme.uiFontFor(text)
@@ -21,14 +20,6 @@ ColumnLayout {
         font.weight: Font.Medium
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
-
-        SettingHint {
-            theme: root.theme
-            target: titleText
-            description: root.description
-            settingKey: root.settingKey
-            settingPart: "label"
-        }
     }
     Text {
         visible: root.meta.length > 0
@@ -39,5 +30,13 @@ ColumnLayout {
         font.letterSpacing: 0.7
         wrapMode: Text.WrapAnywhere
         Layout.fillWidth: true
+    }
+
+    SettingHint {
+        theme: root.theme
+        target: root
+        description: root.description
+        settingKey: root.settingKey
+        settingPart: "label"
     }
 }

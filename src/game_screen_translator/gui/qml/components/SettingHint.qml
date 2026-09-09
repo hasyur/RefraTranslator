@@ -1,72 +1,150 @@
 import QtQuick
 import QtQuick.Controls
 
-Item {
+HoverHandler {
     id: root
 
     required property var theme
-    property Item target: null
     property string description: ""
     property string settingKey: ""
     property string settingPart: "control"
-    readonly property bool hintVisible: popup.visible
+    readonly property bool hintVisible: hintPopup.visible
+    readonly property real hintX: hintPopup.x
+    readonly property real hintY: hintPopup.y
+    readonly property real hintWidth: hintPopup.width
+    readonly property real hintHeight: hintPopup.height
 
     objectName: settingKey.length > 0
                 ? "settingHint-" + settingKey + "-" + settingPart
                 : ""
-    visible: target !== null && description.length > 0 && target.visible
-    enabled: true
-    z: 10000
+    enabled: description.length > 0
 
-    x: target && parent ? target.mapToItem(parent, 0, 0).x : 0
-    y: target && parent ? target.mapToItem(parent, 0, 0).y : 0
-    width: target ? target.width : 0
-    height: target ? target.height : 0
+    function itemRectInOverlay(item, overlay) {
+        const first = item.mapToItem(overlay, 0, 0)
+        const second = item.mapToItem(overlay, item.width, item.height)
+        return Qt.rect(
+            Math.min(first.x, second.x),
+            Math.min(first.y, second.y),
+            Math.abs(second.x - first.x),
+            Math.abs(second.y - first.y)
+        )
+    }
 
-    HoverHandler {
-        id: hoverHandler
+    function intersect(first, second) {
+        const left = Math.max(first.x, second.x)
+        const top = Math.max(first.y, second.y)
+        const right = Math.min(first.x + first.width, second.x + second.width)
+        const bottom = Math.min(first.y + first.height, second.y + second.height)
+        return Qt.rect(left, top, Math.max(0, right - left), Math.max(0, bottom - top))
+    }
 
-        onHoveredChanged: {
-            if (hovered) {
-                showTimer.restart()
-            } else {
-                showTimer.stop()
-                popup.close()
-            }
+    function targetIsVisible() {
+        let current = target
+        while (current) {
+            if (!current.visible || current.opacity <= 0)
+                return false
+            current = current.parent
+        }
+        return true
+    }
+
+    function visibleBounds(overlay) {
+        let bounds = Qt.rect(0, 0, overlay.width, overlay.height)
+        let current = target ? target.parent : null
+        while (current && current !== overlay) {
+            if (current.clip)
+                bounds = intersect(bounds, itemRectInOverlay(current, overlay))
+            current = current.parent
+        }
+        return bounds
+    }
+
+    function reposition() {
+        const overlay = hintPopup.parent
+        if (!target || !overlay || !targetIsVisible()) {
+            hintPopup.close()
+            return
+        }
+
+        const bounds = visibleBounds(overlay)
+        if (bounds.width <= 0 || bounds.height <= 0) {
+            hintPopup.close()
+            return
+        }
+        const targetRect = intersect(bounds, itemRectInOverlay(target, overlay))
+        if (targetRect.width <= 0 || targetRect.height <= 0) {
+            hintPopup.close()
+            return
+        }
+
+        const horizontalInset = Math.min(8, bounds.width / 4)
+        const verticalInset = Math.min(8, bounds.height / 4)
+        const gap = 8
+        const left = bounds.x + horizontalInset
+        const top = bounds.y + verticalInset
+        const right = bounds.x + bounds.width - horizontalInset
+        const bottom = bounds.y + bounds.height - verticalInset
+
+        hintPopup.width = Math.min(280, right - left)
+        const maximumX = Math.max(left, right - hintPopup.width)
+        hintPopup.x = Math.max(left, Math.min(maximumX, targetRect.x))
+
+        const desiredHeight = Math.min(hintPopup.implicitHeight, bottom - top)
+        const targetBottom = targetRect.y + targetRect.height
+        const spaceBelow = bottom - targetBottom - gap
+        const spaceAbove = targetRect.y - top - gap
+        let placeBelow = false
+        if (desiredHeight <= spaceBelow) {
+            placeBelow = true
+        } else if (desiredHeight > spaceAbove) {
+            placeBelow = spaceBelow >= spaceAbove
+        }
+        const sideSpace = placeBelow ? spaceBelow : spaceAbove
+        if (sideSpace <= 0) {
+            hintPopup.close()
+            return
+        }
+        hintPopup.height = Math.min(desiredHeight, sideSpace)
+        if (placeBelow) {
+            hintPopup.y = targetBottom + gap
+        } else {
+            hintPopup.y = targetRect.y - gap - hintPopup.height
         }
     }
 
-    Timer {
-        id: showTimer
+    onHoveredChanged: {
+        if (hovered) {
+            showTimer.restart()
+        } else {
+            showTimer.stop()
+            hintPopup.close()
+        }
+    }
+
+    property Timer showTimer: Timer {
         interval: 400
         repeat: false
         onTriggered: {
-            if (hoverHandler.hovered)
-                popup.open()
+            if (!root.hovered || !root.targetIsVisible())
+                return
+            root.reposition()
+            root.hintPopup.open()
+            Qt.callLater(root.reposition)
         }
     }
 
-    Popup {
-        id: popup
+    property FrameAnimation positionTracker: FrameAnimation {
+        running: root.hintPopup.visible
+        onTriggered: root.reposition()
+    }
 
+    property Popup hintPopup: Popup {
         parent: Overlay.overlay
         width: 280
         padding: 10
         modal: false
         focus: false
         closePolicy: Popup.NoAutoClose
-        x: {
-            if (!root.target || !parent)
-                return 12
-            const point = root.target.mapToItem(parent, 0, root.target.height + 8)
-            return Math.max(12, Math.min(parent.width - width - 12, point.x))
-        }
-        y: {
-            if (!root.target || !parent)
-                return 12
-            const point = root.target.mapToItem(parent, 0, root.target.height + 8)
-            return Math.max(12, Math.min(parent.height - height - 12, point.y))
-        }
 
         contentItem: Text {
             text: root.description
@@ -74,7 +152,10 @@ Item {
             font.family: root.theme.uiFontFor(text)
             font.pixelSize: 12
             wrapMode: Text.WordWrap
-            width: popup.width - popup.leftPadding - popup.rightPadding
+            clip: true
+            width: root.hintPopup.width
+                   - root.hintPopup.leftPadding
+                   - root.hintPopup.rightPadding
         }
 
         background: Rectangle {
