@@ -4,6 +4,7 @@ import asyncio
 import ctypes
 import json
 import os
+import re
 import sys
 import time
 from collections import Counter, deque
@@ -104,6 +105,7 @@ from game_screen_translator.translation.transport import (
 
 try:
     from PySide6.QtCore import QTimer, Qt
+    from PySide6.QtGui import QFont, QFontMetrics
     from PySide6.QtWidgets import (
         QApplication,
         QFrame,
@@ -129,6 +131,33 @@ _CAPTURE_STALL_MIN_SECONDS = 1.0
 _CAPTURE_STALL_FRAME_PERIODS = 3
 _LAYOUT_ARBITRATION_MAX_OUTPUT_TOKENS = 256
 _LAYOUT_ARBITRATION_CACHE_LIMIT = 128
+
+_HUD_REFERENCE_SCREEN_WIDTH = 1920
+_HUD_BASE_WIDTH = 1080
+_HUD_BASE_HEIGHT = 20
+_HUD_BASE_FONT_PIXELS = 16
+_HUD_MIN_SCALE = 0.83
+_HUD_MAX_SCALE = 1.15
+_HUD_COLUMN_WIDTHS = (
+    108,  # status
+    220,  # profile
+    72,  # covered
+    42,  # recent heading
+    94,  # recent OCR
+    94,  # recent LLM
+    110,  # recent total
+    42,  # peak heading
+    94,  # peak OCR
+    94,  # peak LLM
+    110,  # peak total
+)
+_HUD_LATENCY_PATTERN = re.compile(
+    r"^\s*最近\s+OCR\s+(?P<recent_ocr>\S+)\s+·\s*"
+    r"LLM\s+(?P<recent_llm>\S+)\s+·\s*"
+    r"总延迟\s+(?P<recent_total>\S+)\s+峰值\s+OCR\s+(?P<peak_ocr>\S+)\s+·\s*"
+    r"LLM\s+(?P<peak_llm>\S+)\s+·\s*"
+    r"总延迟\s+(?P<peak_total>\S+)\s*$"
+)
 
 
 def _live_message(message: str) -> None:
@@ -321,94 +350,296 @@ class LiveControlWindow(QWidget):
         self._last_cost_status = ""
         self._theme = theme if theme in {"dark", "light"} else THEME_DARK
         self.setWindowTitle(PRODUCT_NAME)
-        self.setFixedSize(1800, 25)
-
-        colors = {
-            "surface": "#000000",
-            "line": "#3b82f6",
-            "status": "#22d3ee",
-            "profile": "#4c8dff",
-            "coverage": "#f472b6",
-            "latency": "#3b82f6",
-        }
-        self.setStyleSheet(
-            "QFrame#hudSurface {"
-            f"background-color: {colors['surface']}; "
-            "border: none; }"
-            "QLabel#hudStatus {"
-            f"color: {colors['status']}; "
-            "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
-            "font-size: 20px; }"
-            "QLabel#hudProfile {"
-            f"color: {colors['profile']}; "
-            "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
-            "font-size: 20px; }"
-            "QLabel#hudCoverage {"
-            f"color: {colors['coverage']}; "
-            "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
-            "font-size: 20px; }"
-            "QLabel#hudLatency {"
-            f"color: {colors['latency']}; "
-            "font-family: 'Cascadia Code', 'Microsoft YaHei UI'; "
-            "font-size: 20px; }"
-        )
 
         self._surface = QFrame(self)
         self._surface.setObjectName("hudSurface")
         surface_layout = QHBoxLayout(self._surface)
-        surface_layout.setContentsMargins(10, 0, 10, 0)
-        surface_layout.setSpacing(10)
+        surface_layout.setContentsMargins(0, 0, 0, 0)
+        surface_layout.setSpacing(0)
 
-        status_row = QHBoxLayout()
-        status_row.setSpacing(5)
-        self._status_indicator = QLabel("●")
-        self._status_indicator.setObjectName("hudStatus")
-        self._status = QLabel("正在初始化……")
+        self._status_cell = QFrame(self._surface)
+        self._status_cell.setObjectName("hudStatusCell")
+        status_row = QHBoxLayout(self._status_cell)
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(4)
+        self._status_indicator = QLabel("●", self._status_cell)
+        self._status_indicator.setObjectName("hudStatusIndicator")
+        self._status_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status = QLabel("初始化", self._status_cell)
         self._status.setObjectName("hudStatus")
+        self._status.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         status_row.addWidget(self._status_indicator)
         status_row.addWidget(self._status)
-        surface_layout.addLayout(status_row)
+        surface_layout.addWidget(self._status_cell)
 
-        self._add_separator(surface_layout, colors["line"])
-
-        self._profile = QLabel(self._profile_name)
-        self._profile.setObjectName("hudProfile")
-        self._profile.setMinimumWidth(110)
-        self._profile.setMaximumWidth(180)
-        self._profile.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self._profile = self._new_hud_label(self._profile_name, "hudProfile")
+        self._profile.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._profile.setToolTip(self._profile_name)
         surface_layout.addWidget(self._profile)
 
-        self._add_separator(surface_layout, colors["line"])
-
-        self._coverage = QLabel("0 条")
-        self._coverage.setObjectName("hudCoverage")
+        self._coverage = self._new_hud_label("0 条", "hudCoverage")
+        self._coverage.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         surface_layout.addWidget(self._coverage)
 
-        self._add_separator(surface_layout, colors["line"])
+        self._recent_heading = self._new_hud_label("最近", "hudLatencyGroup")
+        self._recent_heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        surface_layout.addWidget(self._recent_heading)
+        (
+            self._recent_ocr_cell,
+            self._recent_ocr_title,
+            self._recent_ocr,
+        ) = self._new_metric_cell("OCR")
+        (
+            self._recent_llm_cell,
+            self._recent_llm_title,
+            self._recent_llm,
+        ) = self._new_metric_cell("LLM")
+        (
+            self._recent_total_cell,
+            self._recent_total_title,
+            self._recent_total,
+        ) = self._new_metric_cell("总延迟")
+        for cell in (
+            self._recent_ocr_cell,
+            self._recent_llm_cell,
+            self._recent_total_cell,
+        ):
+            surface_layout.addWidget(cell)
 
-        self._latency = QLabel("最近  OCR — · LLM — · 总延迟 —    峰值  OCR — · LLM — · 总延迟 —")
-        self._latency.setObjectName("hudLatency")
-        self._latency.setMinimumWidth(470)
-        self._latency.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        surface_layout.addWidget(self._latency, 1)
+        self._peak_heading = self._new_hud_label("峰值", "hudLatencyGroup")
+        self._peak_heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        surface_layout.addWidget(self._peak_heading)
+        (
+            self._peak_ocr_cell,
+            self._peak_ocr_title,
+            self._peak_ocr,
+        ) = self._new_metric_cell("OCR")
+        (
+            self._peak_llm_cell,
+            self._peak_llm_title,
+            self._peak_llm,
+        ) = self._new_metric_cell("LLM")
+        (
+            self._peak_total_cell,
+            self._peak_total_title,
+            self._peak_total,
+        ) = self._new_metric_cell("总延迟", object_name="hudLatencyMetricLast")
+        for cell in (
+            self._peak_ocr_cell,
+            self._peak_llm_cell,
+            self._peak_total_cell,
+        ):
+            surface_layout.addWidget(cell)
+
+        self._hud_columns = (
+            self._status_cell,
+            self._profile,
+            self._coverage,
+            self._recent_heading,
+            self._recent_ocr_cell,
+            self._recent_llm_cell,
+            self._recent_total_cell,
+            self._peak_heading,
+            self._peak_ocr_cell,
+            self._peak_llm_cell,
+            self._peak_total_cell,
+        )
+        self._latency_fields = {
+            "recent_ocr": self._recent_ocr,
+            "recent_llm": self._recent_llm,
+            "recent_total": self._recent_total,
+            "peak_ocr": self._peak_ocr,
+            "peak_llm": self._peak_llm,
+            "peak_total": self._peak_total,
+        }
+        self._latency_cells = {
+            "recent_ocr": self._recent_ocr_cell,
+            "recent_llm": self._recent_llm_cell,
+            "recent_total": self._recent_total_cell,
+            "peak_ocr": self._peak_ocr_cell,
+            "peak_llm": self._peak_llm_cell,
+            "peak_total": self._peak_total_cell,
+        }
+        self._latency_titles = {
+            "recent_ocr": self._recent_ocr_title,
+            "recent_llm": self._recent_llm_title,
+            "recent_total": self._recent_total_title,
+            "peak_ocr": self._peak_ocr_title,
+            "peak_llm": self._peak_llm_title,
+            "peak_total": self._peak_total_title,
+        }
+        self._latency_title_widths = {
+            "recent_ocr": 30,
+            "recent_llm": 30,
+            "recent_total": 46,
+            "peak_ocr": 30,
+            "peak_llm": 30,
+            "peak_total": 46,
+        }
+        self._latency_tooltips = {
+            "recent_ocr": "最近 OCR",
+            "recent_llm": "最近 LLM",
+            "recent_total": "最近总延迟",
+            "peak_ocr": "峰值 OCR",
+            "peak_llm": "峰值 LLM",
+            "peak_total": "峰值总延迟",
+        }
 
         root_layout = QHBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.addWidget(self._surface)
 
-        self._latency.setToolTip(
-            "画面延迟按局部 ROI/整帧拆分：变化持续包含 Latest Wins 合并，"
-            "调度包含稳定与频率门，准备是 ROI 规划，线程是执行器排队，"
-            "接收/更新是 OCR 完成后的主线程处理。翻译总计从首次画面变化到译文可显示。"
-        )
+        self._apply_hud_scale(1.0)
 
     @staticmethod
-    def _add_separator(layout: QHBoxLayout, color: str) -> None:
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.VLine)
-        separator.setFrameShadow(QFrame.Shadow.Plain)
-        separator.setStyleSheet(f"color: {color};")
-        layout.addWidget(separator)
+    def _new_hud_label(text: str, object_name: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName(object_name)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        label.setWordWrap(False)
+        return label
+
+    def _new_metric_cell(
+        self,
+        title: str,
+        *,
+        object_name: str = "hudLatencyMetric",
+    ) -> tuple[QFrame, QLabel, QLabel]:
+        cell = QFrame(self._surface)
+        cell.setObjectName(object_name)
+        layout = QHBoxLayout(cell)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        title_label = self._new_hud_label(title, "hudLatencyTitle")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        value_label = self._new_hud_label("—", "hudLatencyValue")
+        value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(title_label)
+        layout.addWidget(value_label, 1)
+        return cell, title_label, value_label
+
+    def _apply_hud_scale(self, scale: float, width: int | None = None) -> None:
+        scale = max(0.01, float(scale))
+        target_width = max(
+            1,
+            int(round(_HUD_BASE_WIDTH * scale)) if width is None else int(width),
+        )
+        height = max(1, int(round(_HUD_BASE_HEIGHT * scale)))
+        font_pixels = max(1, int(round(_HUD_BASE_FONT_PIXELS * scale)))
+        column_widths = [
+            max(1, int(round(column_width * scale)))
+            for column_width in _HUD_COLUMN_WIDTHS
+        ]
+        if target_width >= len(column_widths):
+            column_widths[-1] += target_width - sum(column_widths)
+        self._hud_scale = scale
+        self._hud_font_pixels = font_pixels
+        self._hud_column_widths = tuple(column_widths)
+        self.setFixedSize(target_width, height)
+        self._surface.setFixedSize(target_width, height)
+        for column, column_width in zip(self._hud_columns, column_widths):
+            column.setFixedSize(column_width, height)
+
+        for field, cell in self._latency_cells.items():
+            title_width = max(
+                1,
+                int(round(self._latency_title_widths[field] * scale)),
+            )
+            title = self._latency_titles[field]
+            value = self._latency_fields[field]
+            metric_layout = cell.layout()
+            metric_spacing = max(0, int(round(4 * scale)))
+            metric_padding = max(0, int(round(4 * scale)))
+            if metric_layout is not None:
+                metric_layout.setContentsMargins(
+                    metric_padding,
+                    0,
+                    metric_padding,
+                    0,
+                )
+                metric_layout.setSpacing(metric_spacing)
+            title.setFixedSize(title_width, height)
+            value.setFixedSize(
+                max(
+                    1,
+                    cell.width()
+                    - title_width
+                    - metric_spacing
+                    - 2 * metric_padding,
+                ),
+                height,
+            )
+
+        indicator_width = max(1, int(round(18 * scale)))
+        status_spacing = max(0, int(round(4 * scale)))
+        status_padding = max(0, int(round(4 * scale)))
+        status_layout = self._status_cell.layout()
+        if status_layout is not None:
+            status_layout.setContentsMargins(status_padding, 0, status_padding, 0)
+            status_layout.setSpacing(status_spacing)
+        self._status_indicator.setFixedSize(indicator_width, height)
+        self._status.setFixedSize(
+            max(
+                1,
+                column_widths[0]
+                - indicator_width
+                - status_spacing
+                - 2 * status_padding,
+            ),
+            height,
+        )
+        label_padding = max(0, int(round(4 * scale)))
+        for label in (
+            self._profile,
+            self._coverage,
+            self._recent_heading,
+            self._peak_heading,
+        ):
+            label.setContentsMargins(label_padding, 0, label_padding, 0)
+
+        self.setStyleSheet(
+            "QFrame#hudSurface {"
+            "background-color: #000000; border: none; }"
+            "QFrame#hudStatusCell, QLabel#hudProfile, QLabel#hudCoverage, "
+            "QLabel#hudLatencyGroup, QFrame#hudLatencyMetric {"
+            "border-right: 1px solid #3b82f6; }"
+            "QFrame#hudLatencyMetricLast { border-right: none; }"
+            "QLabel#hudStatus, QLabel#hudStatusIndicator, QLabel#hudProfile, "
+            "QLabel#hudCoverage, QLabel#hudLatencyGroup, QLabel#hudLatencyTitle, "
+            "QLabel#hudLatencyValue {"
+            f"font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
+            f"font-size: {font_pixels}px; "
+            "font-weight: 500; }"
+            "QLabel#hudStatus, QLabel#hudStatusIndicator { color: #22d3ee; }"
+            "QLabel#hudProfile { color: #4c8dff; }"
+            "QLabel#hudCoverage { color: #f472b6; }"
+            "QLabel#hudLatencyGroup, QLabel#hudLatencyTitle, "
+            "QLabel#hudLatencyValue { color: #3b82f6; }"
+        )
+        for label in (
+            self._status_indicator,
+            self._status,
+            self._profile,
+            self._coverage,
+            self._recent_heading,
+            self._recent_ocr_title,
+            self._recent_ocr,
+            self._recent_llm_title,
+            self._recent_llm,
+            self._recent_total_title,
+            self._recent_total,
+            self._peak_heading,
+            self._peak_ocr_title,
+            self._peak_ocr,
+            self._peak_llm_title,
+            self._peak_llm,
+            self._peak_total_title,
+            self._peak_total,
+        ):
+            font = QFont(label.font())
+            font.setPixelSize(font_pixels)
+            label.setFont(font)
+        self._refresh_profile_text()
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt callback name
         super().showEvent(event)
@@ -423,30 +654,68 @@ class LiveControlWindow(QWidget):
         self._normal_exit_callback()
 
     def set_status(self, status: str, detail: str = "") -> None:
-        self._status.setText("" if status == "实时翻译运行中" else status)
+        display_status = self._compact_status(status)
+        self._status.setText(display_status)
         self._last_detail = detail
-        if any(token in status for token in ("失败", "错误", "异常")):
+        if display_status == "异常":
             color = "#f472b6"
-        elif any(token in status for token in ("停止", "恢复", "警告")):
+        elif display_status in {"停止", "恢复", "警告"}:
             color = "#4c8dff"
         else:
             color = "#22d3ee"
         self._status_indicator.setStyleSheet(f"color: {color};")
         self._status.setStyleSheet(f"color: {color};")
         self._status.setToolTip(detail)
+        self._status_indicator.setToolTip(detail)
         self._refresh_tooltip()
 
     def set_profile_name(self, profile_name: str) -> None:
         self._profile_name = profile_name or "会话模式"
-        self._profile.setText(self._profile_name)
+        self._refresh_profile_text()
 
     def set_coverage_count(self, count: int) -> None:
         self._coverage_count = max(0, int(count))
         self._coverage.setText(f"{self._coverage_count} 条")
 
     def set_latency(self, summary: str) -> None:
-        self._latency.setText(summary)
+        match = _HUD_LATENCY_PATTERN.match(summary)
+        values = (
+            match.groupdict()
+            if match is not None
+            else {field: "—" for field in self._latency_fields}
+        )
+        for field, label in self._latency_fields.items():
+            label.setText(values[field])
         self._refresh_tooltip()
+
+    @staticmethod
+    def _compact_status(status: str) -> str:
+        if status == "实时翻译运行中":
+            return ""
+        if "初始化" in status:
+            return "初始化"
+        if any(token in status for token in ("失败", "错误", "异常")):
+            return "异常"
+        if "停止" in status:
+            return "停止"
+        if "恢复" in status:
+            return "恢复"
+        if "警告" in status:
+            return "警告"
+        return status
+
+    def _refresh_profile_text(self) -> None:
+        padding = max(1, int(round(8 * getattr(self, "_hud_scale", 1.0))))
+        available_width = max(1, self._profile.width() - padding)
+        metrics = QFontMetrics(self._profile.font())
+        self._profile.setText(
+            metrics.elidedText(
+                self._profile_name,
+                Qt.TextElideMode.ElideRight,
+                available_width,
+            )
+        )
+        self._profile.setToolTip(self._profile_name)
 
     def set_filter_status(self, summary: str) -> None:
         self._last_filter_status = summary
@@ -466,7 +735,8 @@ class LiveControlWindow(QWidget):
             )
             if value
         )
-        self._latency.setToolTip("\n".join(details))
+        for field, label in self._latency_fields.items():
+            label.setToolTip("\n".join((self._latency_tooltips[field], *details)))
 
 
 class LiveController:
@@ -2830,16 +3100,53 @@ def _overlay_geometry(app: QApplication, capture: DxcamCapture, config: AppConfi
     )
 
 
-def _position_live_control(control: LiveControlWindow, screen) -> None:
-    """Place the read-only HUD at the selected screen's top center."""
-
+def _resize_live_control(control: LiveControlWindow, screen) -> None:
     screen_geometry = screen.geometry()
-    control.setFixedWidth(min(1800, max(1, screen_geometry.width())))
-    control.adjustSize()
+    screen_width = max(1, int(screen_geometry.width()))
+    scale = min(
+        _HUD_MAX_SCALE,
+        max(_HUD_MIN_SCALE, screen_width / _HUD_REFERENCE_SCREEN_WIDTH),
+    )
+    hud_width = int(round(_HUD_BASE_WIDTH * scale))
+    if hud_width > screen_width:
+        hud_width = screen_width
+        scale = hud_width / _HUD_BASE_WIDTH
+    control._apply_hud_scale(scale, hud_width)
     control.move(
-        screen_geometry.x() + max(0, (screen_geometry.width() - control.width()) // 2),
+        screen_geometry.x() + max(0, (screen_width - control.width()) // 2),
         screen_geometry.y(),
     )
+
+
+def _position_live_control(control: LiveControlWindow, screen) -> None:
+    """Place the HUD and follow geometry/DPI changes for the selected screen."""
+
+    if getattr(control, "_hud_screen", None) is not screen:
+        for signal, callback in getattr(control, "_hud_screen_bindings", ()):
+            try:
+                signal.disconnect(callback)
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+
+        def reposition(*_args) -> None:
+            _resize_live_control(control, screen)
+
+        bindings = []
+        for signal_name in ("geometryChanged", "logicalDotsPerInchChanged"):
+            signal = getattr(screen, signal_name, None)
+            connect = getattr(signal, "connect", None)
+            if not callable(connect):
+                continue
+            try:
+                connect(reposition)
+            except (AttributeError, RuntimeError, TypeError):
+                continue
+            bindings.append((signal, reposition))
+        control._hud_screen = screen
+        control._hud_screen_bindings = tuple(bindings)
+        control._hud_screen_reposition = reposition
+
+    _resize_live_control(control, screen)
 
 
 def run_live(
