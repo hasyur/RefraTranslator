@@ -3,7 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QRect, Qt
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.live import runtime as live_runtime
@@ -30,11 +30,13 @@ def test_live_control_is_a_prism_top_hud_and_is_mouse_transparent(monkeypatch) -
 
     assert window.windowTitle() == PRODUCT_NAME
     assert window.size().width() == 920
-    assert window.size().height() == 58
+    assert window.size().height() == 42
     assert window.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
     assert window.windowFlags() & Qt.WindowType.WindowTransparentForInput
     assert not window.findChildren(QPushButton)
     assert not hasattr(window, "_pause_button")
+    captions = {"LIVE", "PROFILE", "COVERED", "LATENCY / RECENT · PEAK"}
+    assert captions.isdisjoint(label.text() for label in window.findChildren(QLabel))
 
     window.set_coverage_count(42)
     window.set_latency(
@@ -55,15 +57,18 @@ def test_live_control_is_a_prism_top_hud_and_is_mouse_transparent(monkeypatch) -
     assert stopped == [True]
 
 
-def test_live_control_reads_prism_dark_and_light_tokens() -> None:
+def test_live_control_uses_black_surface_and_supplied_four_color_palette() -> None:
     app = QApplication.instance() or QApplication([])
     dark = LiveControlWindow(lambda: None, theme="dark")
     light = LiveControlWindow(lambda: None, theme="light")
 
-    assert "#d1182333" in dark.styleSheet()
-    assert "#62e1ff" in dark._coverage.styleSheet()
-    assert "#ebebf0f1" in light.styleSheet()
-    assert "#00758f" in light._coverage.styleSheet()
+    for window in (dark, light):
+        style = window.styleSheet()
+        assert "background-color: #000000" in style
+        assert "#4c8dff" in style
+        assert "#3b82f6" in style
+        assert "#22d3ee" in style
+        assert "#f472b6" in style
 
     dark.close()
     light.close()
@@ -88,7 +93,7 @@ def test_live_control_centers_on_negative_screen_geometry_and_respects_margin() 
         -1420,
         -108,
         920,
-        58,
+        42,
     )
 
     narrow_screen = _ScreenGeometryStub(QRect(-2560, -200, 800, 600))
@@ -97,7 +102,7 @@ def test_live_control_centers_on_negative_screen_geometry_and_respects_margin() 
         -2544,
         -188,
         768,
-        58,
+        42,
     )
 
     window.close()

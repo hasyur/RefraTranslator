@@ -109,7 +109,6 @@ try:
         QFrame,
         QHBoxLayout,
         QLabel,
-        QVBoxLayout,
         QWidget,
     )
 except ImportError as exc:  # pragma: no cover - exercised only without GUI extra
@@ -322,48 +321,35 @@ class LiveControlWindow(QWidget):
         self._last_cost_status = ""
         self._theme = theme if theme in {"dark", "light"} else THEME_DARK
         self.setWindowTitle(PRODUCT_NAME)
-        self.setFixedSize(920, 58)
+        self.setFixedSize(920, 42)
 
-        colors = (
-            {
-                "surface": "#d1182333",
-                "line": "#46545f",
-                "text": "#edf2f5",
-                "soft": "#a4afb8",
-                "dim": "#66727c",
-                "accent": "#62e1ff",
-                "spectrum": "#f27bd7",
-                "amber": "#ffc857",
-                "danger": "#ff7f8f",
-            }
-            if self._theme == "dark"
-            else {
-                "surface": "#ebebf0f1",
-                "line": "#687c86",
-                "text": "#111a1f",
-                "soft": "#384a53",
-                "dim": "#60727b",
-                "accent": "#00758f",
-                "spectrum": "#992477",
-                "amber": "#9b6800",
-                "danger": "#a62d43",
-            }
-        )
+        colors = {
+            "surface": "#000000",
+            "line": "#3b82f6",
+            "status": "#22d3ee",
+            "profile": "#4c8dff",
+            "coverage": "#f472b6",
+            "latency": "#3b82f6",
+        }
         self.setStyleSheet(
             "QFrame#hudSurface {"
             f"background-color: {colors['surface']}; "
             f"border: 1px solid {colors['line']}; "
-            "border-radius: 8px; }"
-            "QLabel#hudCaption {"
-            f"color: {colors['dim']}; "
-            "font-family: 'Cascadia Code', 'Microsoft YaHei UI'; "
-            "font-size: 8px; font-weight: 600; letter-spacing: 1px; }"
-            "QLabel#hudValue {"
-            f"color: {colors['text']}; "
+            "border-radius: 6px; }"
+            "QLabel#hudStatus {"
+            f"color: {colors['status']}; "
+            "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
+            "font-size: 11px; }"
+            "QLabel#hudProfile {"
+            f"color: {colors['profile']}; "
+            "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
+            "font-size: 11px; }"
+            "QLabel#hudCoverage {"
+            f"color: {colors['coverage']}; "
             "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
             "font-size: 11px; }"
             "QLabel#hudLatency {"
-            f"color: {colors['soft']}; "
+            f"color: {colors['latency']}; "
             "font-family: 'Cascadia Code', 'Microsoft YaHei UI'; "
             "font-size: 9px; }"
         )
@@ -371,68 +357,42 @@ class LiveControlWindow(QWidget):
         self._surface = QFrame(self)
         self._surface.setObjectName("hudSurface")
         surface_layout = QHBoxLayout(self._surface)
-        surface_layout.setContentsMargins(16, 6, 16, 6)
+        surface_layout.setContentsMargins(16, 4, 16, 4)
         surface_layout.setSpacing(14)
 
-        status_block = QVBoxLayout()
-        status_block.setSpacing(1)
-        status_caption = QLabel("LIVE")
-        status_caption.setObjectName("hudCaption")
         status_row = QHBoxLayout()
         status_row.setSpacing(5)
         self._status_indicator = QLabel("●")
-        self._status_indicator.setObjectName("hudValue")
-        self._status_indicator.setStyleSheet(f"color: {colors['accent']};")
+        self._status_indicator.setObjectName("hudStatus")
         self._status = QLabel("正在初始化……")
-        self._status.setObjectName("hudValue")
+        self._status.setObjectName("hudStatus")
         self._status.setMinimumWidth(92)
         status_row.addWidget(self._status_indicator)
         status_row.addWidget(self._status)
-        status_block.addWidget(status_caption)
-        status_block.addLayout(status_row)
-        surface_layout.addLayout(status_block)
+        surface_layout.addLayout(status_row)
 
         self._add_separator(surface_layout, colors["line"])
 
-        profile_block = QVBoxLayout()
-        profile_block.setSpacing(1)
-        profile_caption = QLabel("PROFILE")
-        profile_caption.setObjectName("hudCaption")
         self._profile = QLabel(self._profile_name)
-        self._profile.setObjectName("hudValue")
+        self._profile.setObjectName("hudProfile")
         self._profile.setMinimumWidth(110)
         self._profile.setMaximumWidth(180)
         self._profile.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        profile_block.addWidget(profile_caption)
-        profile_block.addWidget(self._profile)
-        surface_layout.addLayout(profile_block)
+        surface_layout.addWidget(self._profile)
 
         self._add_separator(surface_layout, colors["line"])
 
-        coverage_block = QVBoxLayout()
-        coverage_block.setSpacing(1)
-        coverage_caption = QLabel("COVERED")
-        coverage_caption.setObjectName("hudCaption")
         self._coverage = QLabel("0 条")
-        self._coverage.setObjectName("hudValue")
-        self._coverage.setStyleSheet(f"color: {colors['accent']};")
-        coverage_block.addWidget(coverage_caption)
-        coverage_block.addWidget(self._coverage)
-        surface_layout.addLayout(coverage_block)
+        self._coverage.setObjectName("hudCoverage")
+        surface_layout.addWidget(self._coverage)
 
         self._add_separator(surface_layout, colors["line"])
 
-        latency_block = QVBoxLayout()
-        latency_block.setSpacing(1)
-        latency_caption = QLabel("LATENCY / RECENT · PEAK")
-        latency_caption.setObjectName("hudCaption")
         self._latency = QLabel("最近  OCR — · LLM — · 总延迟 —    峰值  OCR — · LLM — · 总延迟 —")
         self._latency.setObjectName("hudLatency")
         self._latency.setMinimumWidth(470)
         self._latency.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        latency_block.addWidget(latency_caption)
-        latency_block.addWidget(self._latency)
-        surface_layout.addLayout(latency_block, 1)
+        surface_layout.addWidget(self._latency, 1)
 
         root_layout = QHBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -468,12 +428,13 @@ class LiveControlWindow(QWidget):
         self._status.setText(status)
         self._last_detail = detail
         if any(token in status for token in ("失败", "错误", "异常")):
-            color = "#ff7f8f" if self._theme == "dark" else "#a62d43"
+            color = "#f472b6"
         elif any(token in status for token in ("停止", "恢复", "警告")):
-            color = "#ffc857" if self._theme == "dark" else "#9b6800"
+            color = "#4c8dff"
         else:
-            color = "#62e1ff" if self._theme == "dark" else "#00758f"
+            color = "#22d3ee"
         self._status_indicator.setStyleSheet(f"color: {color};")
+        self._status.setStyleSheet(f"color: {color};")
         self._status.setToolTip(detail)
         self._refresh_tooltip()
 
