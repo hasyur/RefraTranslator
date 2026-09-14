@@ -365,7 +365,6 @@ class LiveControlWindow(QWidget):
         self._status_indicator.setObjectName("hudStatus")
         self._status = QLabel("正在初始化……")
         self._status.setObjectName("hudStatus")
-        self._status.setMinimumWidth(92)
         status_row.addWidget(self._status_indicator)
         status_row.addWidget(self._status)
         surface_layout.addLayout(status_row)
@@ -424,7 +423,7 @@ class LiveControlWindow(QWidget):
         self._normal_exit_callback()
 
     def set_status(self, status: str, detail: str = "") -> None:
-        self._status.setText(status)
+        self._status.setText("" if status == "实时翻译运行中" else status)
         self._last_detail = detail
         if any(token in status for token in ("失败", "错误", "异常")):
             color = "#f472b6"

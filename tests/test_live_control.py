@@ -43,10 +43,16 @@ def test_live_control_is_a_prism_top_hud_and_is_mouse_transparent(monkeypatch) -
         "最近  OCR 118ms · LLM 2.50s · 总延迟 640ms    "
         "峰值  OCR 230ms · LLM 3.10s · 总延迟 1.20s"
     )
+    window.set_status("实时翻译运行中")
     assert window._profile.text() == "测试游戏"
     assert window._coverage.text() == "42 条"
     assert "最近" in window._latency.text()
     assert "峰值" in window._latency.text()
+    assert window._status_indicator.text() == "●"
+    assert window._status.text() == ""
+
+    window.set_status("实时翻译已停止")
+    assert window._status.text() == "实时翻译已停止"
 
     window.show()
     app.processEvents()
