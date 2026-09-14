@@ -174,6 +174,30 @@ def _bounds_distance_squared(first: Bounds | None, second: Bounds) -> float:
     return (first_x - second_x) ** 2 + (first_y - second_y) ** 2
 
 
+def _capture_geometry_value(value: object) -> object:
+    if value is None:
+        return None
+    try:
+        return tuple(int(item) for item in value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return value
+
+
+def _capture_geometry_token(capture: object) -> tuple[object, ...]:
+    generation = getattr(capture, "geometry_generation", None)
+    if generation is not None:
+        try:
+            generation = int(generation)
+        except (TypeError, ValueError):
+            pass
+        return ("generation", generation)
+    return (
+        "state",
+        _capture_geometry_value(getattr(capture, "output_size", None)),
+        _capture_geometry_value(getattr(capture, "region", None)),
+    )
+
+
 def _create_roi_scheduler(config: AppConfig) -> LatestFrameRoiScheduler | None:
     if not config.live.dynamic_roi_enabled:
         return None
@@ -846,6 +870,10 @@ class LiveController:
         self._settle_rescan_due: float | None = None
         self._settle_rescan_triggered_at: float | None = None
         self._session_epoch = 0
+        self._capture_geometry_token = _capture_geometry_token(capture)
+        self._capture_frame_size: tuple[int, int] | None = None
+        self._overlay_geometry_pending = False
+        self._overlay_window_geometry: tuple[int, int, int, int] | None = None
         self._force_full_scan = False
         self._capture_wait_started_at: float | None = None
         self._capture_stalled = False
@@ -1055,9 +1083,6 @@ class LiveController:
         # Opportunistic fallback for tests and delayed Qt timer delivery.  In
         # normal operation the independent completion timer gets here first.
         self._collect_completed_work()
-        self._expire_missing_tracks(time.monotonic())
-        self._queue_untranslated_visible_sources()
-        self._dispatch_translation_work()
 
         now = time.monotonic()
         try:
@@ -1065,11 +1090,16 @@ class LiveController:
         except Exception as exc:
             self._fatal(f"屏幕采集失败：{exc}")
             return
+        self._observe_capture_geometry(frame)
+        self._sync_overlay_geometry()
         if frame is None:
             self._mark_capture_waiting(now)
             return
 
         self._mark_capture_resumed(now)
+        self._expire_missing_tracks(now)
+        self._queue_untranslated_visible_sources()
+        self._dispatch_translation_work()
         self._latest_frame = frame
         if self._force_full_scan:
             if self._ocr_future is None:
@@ -1083,6 +1113,109 @@ class LiveController:
             self._tick_legacy_ocr(frame, now)
 
         self._publish_scene(frame, self._tracker.visible_tracks)
+
+    def _observe_capture_geometry(self, frame: np.ndarray | None = None) -> bool:
+        token = _capture_geometry_token(self._capture)
+        changed = token != self._capture_geometry_token
+        if frame is not None and frame.ndim >= 2:
+            frame_size = (int(frame.shape[1]), int(frame.shape[0]))
+            if self._capture_frame_size is not None:
+                changed = changed or frame_size != self._capture_frame_size
+            self._capture_frame_size = frame_size
+        if not changed:
+            self._capture_geometry_token = token
+            return False
+
+        self._capture_geometry_token = token
+        self._capture_frame_size = None
+        self._reset_capture_geometry()
+        return True
+
+    def _reset_capture_geometry(self) -> None:
+        self._session_epoch += 1
+        self._tracker.clear()
+        self._ocr_line_tracker.clear()
+        self._layout_stabilizer.reset()
+        self._detector.reset()
+        self._roi_scheduler = _create_roi_scheduler(self._config)
+        self._roi_planner = (
+            ContextualRoiPlanner() if self._roi_scheduler is not None else None
+        )
+
+        self._pending_ocr_frame = None
+        self._pending_ocr_triggered_at = None
+        self._pending_ocr_change_started_at = None
+        self._settle_rescan_due = None
+        self._settle_rescan_triggered_at = None
+        self._next_ocr_allowed = 0.0
+        self._last_ocr_completed = 0.0
+        self._force_full_scan = True
+        self._capture_wait_started_at = None
+        self._capture_stalled = False
+        self._latest_frame = None
+        self._source_latency_origins.clear()
+        self._translation_exhausted_keys.clear()
+
+        self._pending_translations.clear()
+        self._translation_retries.clear()
+        self._completed_translations.clear()
+        self._early_context.clear()
+        self._pending_layout_arbitrations.clear()
+        self._active_layout_arbitration_keys.clear()
+        self._layout_arbitration_blocked_member_ids.clear()
+        self._layout_arbitration_cache.clear()
+        self._cancel_obsolete_translation_futures()
+        self._prune_layout_arbitration_work()
+
+        ocr_future = self._ocr_future
+        if ocr_future is None:
+            self._active_ocr_frame = None
+            self._active_ocr_epoch = None
+            self._active_roi_job = None
+            self._active_roi_plan = None
+            self._active_roi_anchors = ()
+            self._active_roi_empty_retry = False
+            self._pending_roi_empty_retry = False
+            self._active_ocr_cost = None
+            self._active_ocr_latency_origin = None
+        elif ocr_future.cancel():
+            self._ocr_future = None
+            self._active_ocr_frame = None
+            self._active_ocr_epoch = None
+            self._active_roi_job = None
+            self._active_roi_plan = None
+            self._active_roi_anchors = ()
+            self._active_roi_empty_retry = False
+            self._pending_roi_empty_retry = False
+            self._active_ocr_cost = None
+            self._active_ocr_latency_origin = None
+
+        self._last_effective_entries = ()
+        self._last_effective_canvas_size = None
+        self._overlay_geometry_pending = True
+        self._overlay.set_scene(None, ())
+        if self._browser_overlay is not None:
+            self._browser_overlay.publish(())
+
+    def _sync_overlay_geometry(self) -> None:
+        set_geometry = getattr(self._overlay, "setGeometry", None)
+        if not callable(set_geometry):
+            return
+        try:
+            _screen, geometry = _overlay_geometry(
+                self._app,
+                self._capture,
+                self._config,
+            )
+        except (AttributeError, IndexError, RuntimeError, TypeError, ValueError):
+            return
+        if (
+            self._overlay_geometry_pending
+            or geometry != self._overlay_window_geometry
+        ):
+            set_geometry(*geometry)
+        self._overlay_window_geometry = geometry
+        self._overlay_geometry_pending = False
 
     def _mark_capture_waiting(self, now: float) -> None:
         if self._capture_wait_started_at is None:
@@ -1122,6 +1255,7 @@ class LiveController:
     def _collect_completed_work(self) -> None:
         if self._shutting_down:
             return
+        self._observe_capture_geometry()
         self._collect_ocr()
         self._collect_layout_arbitrations()
         self._collect_translations()

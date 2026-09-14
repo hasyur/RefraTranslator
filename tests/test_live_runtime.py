@@ -190,10 +190,14 @@ class FakeOverlay:
         self.scenes = 0
         self.last_tracks = ()
         self.roi_debug_snapshots = []
+        self.geometries: list[tuple[int, int, int, int]] = []
 
     def set_scene(self, frame, tracks) -> None:
         self.scenes += 1
         self.last_tracks = tuple(tracks)
+
+    def setGeometry(self, x, y, width, height) -> None:  # noqa: N802 - Qt API
+        self.geometries.append((x, y, width, height))
 
     def set_roi_debug_snapshot(self, snapshot) -> None:
         self.roi_debug_snapshots.append(snapshot)
@@ -355,6 +359,171 @@ def test_capture_stall_reports_recovery_and_forces_fresh_scan(
     assert "屏幕采集已恢复" in capsys.readouterr().out
     controller.close()
     assert capture.closed
+
+
+def test_capture_geometry_clears_scene_drops_old_translation_and_rescans(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+            max_concurrency=1,
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0),
+    )
+
+    class GeometryCapture:
+        output_size = (2560, 1440)
+        region = (0, 0, 2560, 1440)
+        active_backend = "fake"
+        geometry_generation = 0
+
+        def __init__(self) -> None:
+            self.frame = np.zeros((1440, 2560, 3), dtype=np.uint8)
+            self.closed = False
+
+        def resize(self, width: int, height: int) -> None:
+            self.output_size = (width, height)
+            self.region = (
+                (100, 80, 1100, 900)
+                if (width, height) == (1280, 1024)
+                else (200, 120, 2200, 1300)
+            )
+            self.frame = np.zeros((height, width, 3), dtype=np.uint8)
+            self.geometry_generation += 1
+
+        def latest_frame(self):
+            return self.frame.copy()
+
+        def close(self) -> None:
+            self.closed = True
+
+    class RecordingOcr:
+        def __init__(self) -> None:
+            self.input_shapes: list[tuple[int, ...]] = []
+
+        def recognize_frame(self, frame):
+            self.input_shapes.append(tuple(frame.shape))
+            return ()
+
+    capture = GeometryCapture()
+    ocr = RecordingOcr()
+    overlay = FakeOverlay()
+    browser_overlay = FakeBrowserOverlay()
+    controller = LiveController(
+        config,
+        capture=capture,  # type: ignore[arg-type]
+        ocr=ocr,  # type: ignore[arg-type]
+        overlay=overlay,  # type: ignore[arg-type]
+        control=FakeControl(),
+        app=app,
+        browser_overlay=browser_overlay,  # type: ignore[arg-type]
+    )
+    release = threading.Event()
+    started = threading.Event()
+
+    def translate(batch, context):
+        del context
+        started.set()
+        release.wait(timeout=5)
+        return _successful_worker_result(batch)
+
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
+    old_update = controller._tracker.observe(
+        (
+            OcrText(
+                "旧场景。",
+                0.99,
+                ((10, 10), (180, 10), (180, 40), (10, 40)),
+            ),
+        ),
+        now=1.0,
+    )
+    controller._submit_translations(old_update.stable_sources)
+    old_future = next(iter(controller._translation_futures))
+    assert started.wait(timeout=2)
+    controller._publish_scene(capture.frame, controller._tracker.visible_tracks)
+    assert overlay.last_tracks
+
+    try:
+        capture.resize(1280, 1024)
+        controller._completion_timer.timeout.emit()
+
+        assert controller._session_epoch == 1
+        assert controller._tracker.visible_tracks == ()
+        assert overlay.last_tracks == ()
+        assert browser_overlay.published[-1] == ()
+
+        release.set()
+        old_future.result(timeout=2)
+        controller._collect_translations()
+        assert controller._translation_futures == {}
+        assert controller._tracker.visible_tracks == ()
+
+        first_resize_geometry_calls = len(overlay.geometries)
+        controller._tick()
+        assert len(overlay.geometries) == first_resize_geometry_calls + 1
+        assert controller._ocr_future is not None
+        controller._ocr_future.result(timeout=2)
+        controller._collect_completed_work()
+        assert ocr.input_shapes == [(1024, 1280, 3)]
+        assert overlay.last_tracks == ()
+
+        capture.resize(2560, 1440)
+        controller._completion_timer.timeout.emit()
+        assert overlay.last_tracks == ()
+        second_resize_geometry_calls = len(overlay.geometries)
+        controller._tick()
+        assert len(overlay.geometries) == second_resize_geometry_calls + 1
+        assert overlay.geometries[-1] != overlay.geometries[-2]
+        assert controller._ocr_future is not None
+        controller._ocr_future.result(timeout=2)
+        controller._collect_completed_work()
+        assert ocr.input_shapes == [
+            (1024, 1280, 3),
+            (1440, 2560, 3),
+        ]
+        assert overlay.last_tracks == ()
+    finally:
+        release.set()
+        controller.close()
+        assert capture.closed
+
+
+def test_same_size_pixel_change_does_not_reset_capture_scene() -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(stable_observations=99, stable_ms=0),
+    )
+    capture = MutableCapture(np.zeros((900, 1600, 3), dtype=np.uint8))
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+
+    controller._tick()
+    assert controller._ocr_future is not None
+    controller._ocr_future.result(timeout=2)
+    controller._collect_completed_work()
+    epoch = controller._session_epoch
+
+    capture.frame = np.full_like(capture.frame, 80)
+    controller._tick()
+
+    assert controller._session_epoch == epoch
+    controller.close()
 
 
 def test_live_controller_publishes_and_closes_browser_overlay() -> None:

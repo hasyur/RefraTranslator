@@ -90,6 +90,85 @@ def test_dxgi_failure_falls_back_to_winrt(monkeypatch) -> None:
     assert camera.released
 
 
+def test_full_screen_region_rebuilds_from_original_spec_after_output_resize(
+    monkeypatch,
+) -> None:
+    class ResizingCamera:
+        width = 2560
+        height = 1440
+
+        def __init__(self) -> None:
+            self.region = None
+            self.is_capturing = False
+            self.started_regions: list[tuple[int, int, int, int]] = []
+
+        def start(self, *, region, target_fps, video_mode) -> None:
+            del target_fps, video_mode
+            self.region = region
+            self.started_regions.append(region)
+            self.is_capturing = True
+
+        def get_latest_frame(self, *, copy=True):
+            del copy
+            if not self.is_capturing or self.region is None:
+                return None
+            time.sleep(0.001)
+            left, top, right, bottom = self.region
+            return np.zeros((bottom - top, right - left, 3), dtype=np.uint8)
+
+        def grab(self, *, copy=True):
+            del copy
+            assert self.region is not None
+            left, top, right, bottom = self.region
+            return np.zeros((bottom - top, right - left, 3), dtype=np.uint8)
+
+        def stop(self) -> None:
+            self.is_capturing = False
+
+        def release(self) -> None:
+            self.is_capturing = False
+
+    camera = ResizingCamera()
+    monkeypatch.setitem(
+        sys.modules,
+        "dxcam",
+        SimpleNamespace(create=lambda **kwargs: camera),
+    )
+    capture = DxcamCapture(region_spec=(0, 0, 0, 0))
+    capture.start()
+
+    camera.width, camera.height = 1280, 1024
+    frame = None
+    deadline = time.monotonic() + 1
+    while frame is None and time.monotonic() < deadline:
+        frame = capture.latest_frame()
+        time.sleep(0.005)
+    assert frame is not None
+    assert frame.shape == (1024, 1280, 3)
+    assert capture.output_size == (1280, 1024)
+    assert capture.region == (0, 0, 1280, 1024)
+
+    camera.width, camera.height = 2560, 1440
+    frame = None
+    deadline = time.monotonic() + 1
+    while frame is None and time.monotonic() < deadline:
+        frame = capture.latest_frame()
+        time.sleep(0.005)
+    assert frame is not None
+    assert frame.shape == (1440, 2560, 3)
+    assert capture.output_size == (2560, 1440)
+    assert capture.region == (0, 0, 2560, 1440)
+    assert camera.started_regions == [
+        (0, 0, 2560, 1440),
+        (0, 0, 1280, 1024),
+        (0, 0, 2560, 1440),
+    ]
+    assert capture.geometry_generation == 2
+
+    capture.close()
+    assert capture._reader_thread is None
+
+
 def test_latest_frame_does_not_wait_for_blocked_dxcam_reader(monkeypatch) -> None:
     class BlockingCamera:
         width = 1920
