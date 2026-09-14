@@ -24,6 +24,13 @@ from game_screen_translator.domain import (
     TranslationBatch,
     TranslationResult,
 )
+from game_screen_translator.gui.theme import (
+    GuiPreferences,
+    GuiSettingsError,
+    THEME_DARK,
+    effective_theme,
+    load_gui_preferences,
+)
 from game_screen_translator.live.change_detector import FrameChangeDetector
 from game_screen_translator.live.latency import LiveLatencyStats
 from game_screen_translator.live.snapshot import (
@@ -99,9 +106,9 @@ try:
     from PySide6.QtCore import QTimer, Qt
     from PySide6.QtWidgets import (
         QApplication,
+        QFrame,
         QHBoxLayout,
         QLabel,
-        QPushButton,
         QVBoxLayout,
         QWidget,
     )
@@ -267,78 +274,187 @@ def prefer_game_process_priority() -> bool:
         return False
 
 
+def _read_live_theme(config_path: Path, app: QApplication) -> str:
+    """Read the GUI preference once for this live-process session."""
+
+    try:
+        preference = load_gui_preferences(config_path).theme
+    except (GuiSettingsError, OSError):
+        # A malformed or unavailable optional GUI preference must not prevent
+        # the already-valid translation path from starting.
+        preference = GuiPreferences().theme
+    try:
+        return effective_theme(preference, app)
+    except (GuiSettingsError, OSError, RuntimeError, TypeError, ValueError):
+        return THEME_DARK
+
+
 class LiveControlWindow(QWidget):
     def __init__(
         self,
         stop_callback: Callable[[], None],
-        pause_callback: Callable[[bool], None] | None = None,
+        *,
+        profile_name: str = "",
+        theme: str = THEME_DARK,
     ) -> None:
-        super().__init__(None, Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
-        # Native WM_CLOSE and the existing button path share this callback.
-        # Qt may deliver more than one close event while QApplication exits.
+        flags = (
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowTransparentForInput
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        super().__init__(None, flags)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        # Native WM_CLOSE and the existing parent-GUI stop path share this
+        # callback. Qt may deliver more than one close event while the process
+        # is exiting, so the callback remains one-shot.
         self._normal_exit_callback = stop_callback
         self._close_requested = False
-        self._pause_callback = pause_callback
-        self._paused = False
+        self._profile_name = profile_name or "会话模式"
+        self._coverage_count = 0
+        self._last_detail = ""
+        self._last_filter_status = ""
+        self._last_cost_status = ""
+        self._theme = theme if theme in {"dark", "light"} else THEME_DARK
         self.setWindowTitle(PRODUCT_NAME)
-        self.setFixedWidth(520)
+        self.setFixedSize(920, 58)
+
+        colors = (
+            {
+                "surface": "#d1182333",
+                "line": "#46545f",
+                "text": "#edf2f5",
+                "soft": "#a4afb8",
+                "dim": "#66727c",
+                "accent": "#62e1ff",
+                "spectrum": "#f27bd7",
+                "amber": "#ffc857",
+                "danger": "#ff7f8f",
+            }
+            if self._theme == "dark"
+            else {
+                "surface": "#ebebf0f1",
+                "line": "#687c86",
+                "text": "#111a1f",
+                "soft": "#384a53",
+                "dim": "#60727b",
+                "accent": "#00758f",
+                "spectrum": "#992477",
+                "amber": "#9b6800",
+                "danger": "#a62d43",
+            }
+        )
+        self.setStyleSheet(
+            "QFrame#hudSurface {"
+            f"background-color: {colors['surface']}; "
+            f"border: 1px solid {colors['line']}; "
+            "border-radius: 8px; }"
+            "QLabel#hudCaption {"
+            f"color: {colors['dim']}; "
+            "font-family: 'Cascadia Code', 'Microsoft YaHei UI'; "
+            "font-size: 8px; font-weight: 600; letter-spacing: 1px; }"
+            "QLabel#hudValue {"
+            f"color: {colors['text']}; "
+            "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
+            "font-size: 11px; }"
+            "QLabel#hudLatency {"
+            f"color: {colors['soft']}; "
+            "font-family: 'Cascadia Code', 'Microsoft YaHei UI'; "
+            "font-size: 9px; }"
+        )
+
+        self._surface = QFrame(self)
+        self._surface.setObjectName("hudSurface")
+        surface_layout = QHBoxLayout(self._surface)
+        surface_layout.setContentsMargins(16, 6, 16, 6)
+        surface_layout.setSpacing(14)
+
+        status_block = QVBoxLayout()
+        status_block.setSpacing(1)
+        status_caption = QLabel("LIVE")
+        status_caption.setObjectName("hudCaption")
+        status_row = QHBoxLayout()
+        status_row.setSpacing(5)
+        self._status_indicator = QLabel("●")
+        self._status_indicator.setObjectName("hudValue")
+        self._status_indicator.setStyleSheet(f"color: {colors['accent']};")
         self._status = QLabel("正在初始化……")
-        self._status.setWordWrap(True)
-        self._detail = QLabel("")
-        self._detail.setWordWrap(True)
-        self._detail.setStyleSheet("color: #777;")
-        self._latency = QLabel("延迟统计：等待首个 OCR 样本……")
-        self._latency.setWordWrap(True)
+        self._status.setObjectName("hudValue")
+        self._status.setMinimumWidth(92)
+        status_row.addWidget(self._status_indicator)
+        status_row.addWidget(self._status)
+        status_block.addWidget(status_caption)
+        status_block.addLayout(status_row)
+        surface_layout.addLayout(status_block)
+
+        self._add_separator(surface_layout, colors["line"])
+
+        profile_block = QVBoxLayout()
+        profile_block.setSpacing(1)
+        profile_caption = QLabel("PROFILE")
+        profile_caption.setObjectName("hudCaption")
+        self._profile = QLabel(self._profile_name)
+        self._profile.setObjectName("hudValue")
+        self._profile.setMinimumWidth(110)
+        self._profile.setMaximumWidth(180)
+        self._profile.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        profile_block.addWidget(profile_caption)
+        profile_block.addWidget(self._profile)
+        surface_layout.addLayout(profile_block)
+
+        self._add_separator(surface_layout, colors["line"])
+
+        coverage_block = QVBoxLayout()
+        coverage_block.setSpacing(1)
+        coverage_caption = QLabel("COVERED")
+        coverage_caption.setObjectName("hudCaption")
+        self._coverage = QLabel("0 条")
+        self._coverage.setObjectName("hudValue")
+        self._coverage.setStyleSheet(f"color: {colors['accent']};")
+        coverage_block.addWidget(coverage_caption)
+        coverage_block.addWidget(self._coverage)
+        surface_layout.addLayout(coverage_block)
+
+        self._add_separator(surface_layout, colors["line"])
+
+        latency_block = QVBoxLayout()
+        latency_block.setSpacing(1)
+        latency_caption = QLabel("LATENCY / RECENT · PEAK")
+        latency_caption.setObjectName("hudCaption")
+        self._latency = QLabel("最近  OCR — · LLM — · 总延迟 —    峰值  OCR — · LLM — · 总延迟 —")
+        self._latency.setObjectName("hudLatency")
+        self._latency.setMinimumWidth(470)
+        self._latency.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        latency_block.addWidget(latency_caption)
+        latency_block.addWidget(self._latency)
+        surface_layout.addLayout(latency_block, 1)
+
+        root_layout = QHBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.addWidget(self._surface)
+
         self._latency.setToolTip(
             "画面延迟按局部 ROI/整帧拆分：变化持续包含 Latest Wins 合并，"
             "调度包含稳定与频率门，准备是 ROI 规划，线程是执行器排队，"
             "接收/更新是 OCR 完成后的主线程处理。翻译总计从首次画面变化到译文可显示。"
         )
-        self._filter = QLabel("文字过滤：等待首个 OCR 样本……")
-        self._filter.setWordWrap(True)
-        self._filter.setStyleSheet("color: #777;")
-        self._cost = QLabel("OCR 成本：等待首个样本……")
-        self._cost.setWordWrap(True)
-        self._cost.setStyleSheet("color: #777;")
-        self._cost.setToolTip(
-            "按 detection_max_side 缩放后的检测像素估算；"
-            "候选 ROI 指上下文扩展后、整屏回退前原本会扫描的区域。"
-            "模型调用次数单独显示。该数值不包含文字密度、识别批量和每次调用的固定开销，"
-            "目前只用于观测，不参与 ROI 决策。"
-        )
-        self._shrink_button = QPushButton("缩小")
-        self._shrink_button.setToolTip("隐藏运行信息，只保留恢复和关闭按钮")
-        self._shrink_button.clicked.connect(self.collapse)
-        self._restore_button = QPushButton("恢复")
-        self._restore_button.setToolTip("恢复显示运行状态、过滤和延迟信息")
-        self._restore_button.clicked.connect(self.restore)
-        self._restore_button.hide()
-        self._pause_button = QPushButton("暂停翻译")
-        self._pause_button.setToolTip("暂停 OCR 和新翻译请求，并隐藏当前译文")
-        self._pause_button.clicked.connect(self._toggle_pause)
-        self._stop_button = QPushButton("关闭翻译")
-        self._stop_button.clicked.connect(stop_callback)
-        self._diagnostic_widgets = (
-            self._status,
-            self._detail,
-            self._filter,
-            self._cost,
-            self._latency,
-        )
-        self._layout = QVBoxLayout(self)
-        for widget in self._diagnostic_widgets:
-            self._layout.addWidget(widget)
-        actions = QHBoxLayout()
-        actions.addStretch(1)
-        actions.addWidget(self._shrink_button)
-        actions.addWidget(self._restore_button)
-        actions.addWidget(self._pause_button)
-        actions.addWidget(self._stop_button)
-        self._layout.addLayout(actions)
+
+    @staticmethod
+    def _add_separator(layout: QHBoxLayout, color: str) -> None:
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator.setStyleSheet(f"color: {color};")
+        layout.addWidget(separator)
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt callback name
         super().showEvent(event)
-        if not exclude_window_from_capture(int(self.winId())):
+        if not exclude_window_from_capture(int(self.winId()), click_through=True):
             print("警告：Windows 未能将控制窗口排除出屏幕采集。")
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt callback name
@@ -350,69 +466,48 @@ class LiveControlWindow(QWidget):
 
     def set_status(self, status: str, detail: str = "") -> None:
         self._status.setText(status)
-        self._detail.setText(detail)
+        self._last_detail = detail
+        if any(token in status for token in ("失败", "错误", "异常")):
+            color = "#ff7f8f" if self._theme == "dark" else "#a62d43"
+        elif any(token in status for token in ("停止", "恢复", "警告")):
+            color = "#ffc857" if self._theme == "dark" else "#9b6800"
+        else:
+            color = "#62e1ff" if self._theme == "dark" else "#00758f"
+        self._status_indicator.setStyleSheet(f"color: {color};")
+        self._status.setToolTip(detail)
+        self._refresh_tooltip()
+
+    def set_profile_name(self, profile_name: str) -> None:
+        self._profile_name = profile_name or "会话模式"
+        self._profile.setText(self._profile_name)
+
+    def set_coverage_count(self, count: int) -> None:
+        self._coverage_count = max(0, int(count))
+        self._coverage.setText(f"{self._coverage_count} 条")
 
     def set_latency(self, summary: str) -> None:
         self._latency.setText(summary)
+        self._refresh_tooltip()
 
     def set_filter_status(self, summary: str) -> None:
-        self._filter.setText(summary)
+        self._last_filter_status = summary
+        self._refresh_tooltip()
 
     def set_cost_status(self, summary: str) -> None:
-        self._cost.setText(summary)
+        self._last_cost_status = summary
+        self._refresh_tooltip()
 
-    def set_pause_callback(self, callback: Callable[[bool], None]) -> None:
-        self._pause_callback = callback
-
-    def set_paused(self, paused: bool) -> None:
-        self._paused = paused
-        self._pause_button.setText("恢复翻译" if paused else "暂停翻译")
-        self._pause_button.setToolTip(
-            "从当前画面重新识别并恢复翻译"
-            if paused
-            else "暂停 OCR 和新翻译请求，并隐藏当前译文"
+    def _refresh_tooltip(self) -> None:
+        details = tuple(
+            value
+            for value in (
+                self._last_detail,
+                self._last_filter_status,
+                self._last_cost_status,
+            )
+            if value
         )
-
-    def _toggle_pause(self) -> None:
-        paused = not self._paused
-        self.set_paused(paused)
-        if self._pause_callback is not None:
-            self._pause_callback(paused)
-
-    def collapse(self) -> None:
-        """Compact the control window while keeping runtime actions visible."""
-        if self._shrink_button.isHidden():
-            return
-        right = self.geometry().right()
-        top = self.geometry().top()
-        for widget in self._diagnostic_widgets:
-            widget.hide()
-        self._shrink_button.hide()
-        self._restore_button.show()
-        self.setMinimumSize(0, 0)
-        self.setMaximumSize(16_777_215, 16_777_215)
-        self._layout.invalidate()
-        self._layout.activate()
-        self.setFixedSize(self.sizeHint())
-        self.move(right - self.width() + 1, top)
-
-    def restore(self) -> None:
-        """Restore the complete runtime information without moving the right edge."""
-        if self._restore_button.isHidden():
-            return
-        right = self.geometry().right()
-        top = self.geometry().top()
-        self.setMinimumSize(0, 0)
-        self.setMaximumSize(16_777_215, 16_777_215)
-        self.setFixedWidth(520)
-        for widget in self._diagnostic_widgets:
-            widget.show()
-        self._restore_button.hide()
-        self._shrink_button.show()
-        self._layout.invalidate()
-        self._layout.activate()
-        self.adjustSize()
-        self.move(right - self.width() + 1, top)
+        self._latency.setToolTip("\n".join(details))
 
 
 class LiveController:
@@ -522,7 +617,6 @@ class LiveController:
         self._settle_rescan_due: float | None = None
         self._settle_rescan_triggered_at: float | None = None
         self._session_epoch = 0
-        self._paused = False
         self._force_full_scan = False
         self._capture_wait_started_at: float | None = None
         self._capture_stalled = False
@@ -574,7 +668,10 @@ class LiveController:
         self._completion_timer = QTimer()
         self._completion_timer.setInterval(_COMPLETION_POLL_INTERVAL_MS)
         self._completion_timer.timeout.connect(self._collect_completed_work)
-        self._control.set_latency(self._latency_stats.render())
+        set_coverage_count = getattr(self._control, "set_coverage_count", None)
+        if callable(set_coverage_count):
+            set_coverage_count(0)
+        self._control.set_latency(self._latency_stats.render_hud())
 
     def start(self) -> None:
         region = self._capture.region
@@ -629,83 +726,8 @@ class LiveController:
             f"{profile_label}{region_hint}{browser_overlay_hint}"
         )
         self._control.set_status("实时翻译运行中", self._running_detail)
-        set_paused = getattr(self._control, "set_paused", None)
-        if callable(set_paused):
-            set_paused(False)
         self._completion_timer.start()
         self._timer.start()
-
-    @property
-    def paused(self) -> bool:
-        return self._paused
-
-    def set_paused(self, paused: bool) -> None:
-        if self._shutting_down or paused == self._paused:
-            return
-        self._paused = paused
-        set_control_paused = getattr(self._control, "set_paused", None)
-        if callable(set_control_paused):
-            set_control_paused(paused)
-        if paused:
-            self._pause_pipeline()
-        else:
-            self._resume_pipeline()
-
-    def _pause_pipeline(self) -> None:
-        self._session_epoch += 1
-        self._tracker.clear()
-        self._ocr_line_tracker.clear()
-        self._layout_stabilizer.reset()
-        self._pending_ocr_frame = None
-        self._pending_ocr_triggered_at = None
-        self._pending_ocr_change_started_at = None
-        self._settle_rescan_due = None
-        self._settle_rescan_triggered_at = None
-        self._pending_roi_empty_retry = False
-        self._pending_translations.clear()
-        self._translation_retries.clear()
-        self._completed_translations.clear()
-        self._early_context.clear()
-        self._pending_layout_arbitrations.clear()
-        self._layout_arbitration_cache.clear()
-        self._active_layout_arbitration_keys.clear()
-        self._layout_arbitration_blocked_member_ids.clear()
-        self._translation_exhausted_keys.clear()
-        self._source_latency_origins.clear()
-        for future in self._translation_futures:
-            future.cancel()
-        for future in self._layout_arbitration_futures:
-            future.cancel()
-        if self._ocr_future is not None:
-            self._ocr_future.cancel()
-        self._publish_scene(self._latest_frame, ())
-        self._control.set_status(
-            "实时翻译已暂停",
-            "已停止提交 OCR 和新翻译请求；点击“恢复翻译”后从当前画面重新识别。",
-        )
-
-    def _resume_pipeline(self) -> None:
-        self._detector = FrameChangeDetector(self._config.live.change_threshold)
-        self._roi_scheduler = _create_roi_scheduler(self._config)
-        self._roi_planner = (
-            ContextualRoiPlanner() if self._roi_scheduler is not None else None
-        )
-        self._pending_ocr_frame = None
-        self._pending_ocr_triggered_at = None
-        self._pending_ocr_change_started_at = None
-        self._last_ocr_completed = 0.0
-        self._next_ocr_allowed = 0.0
-        self._settle_rescan_due = None
-        self._settle_rescan_triggered_at = None
-        self._active_roi_empty_retry = False
-        self._pending_roi_empty_retry = False
-        self._force_full_scan = True
-        self._capture_wait_started_at = None
-        self._capture_stalled = False
-        self._control.set_status(
-            "实时翻译运行中",
-            self._running_detail or "已恢复，正在从当前画面重新识别。",
-        )
 
     def close(self) -> None:
         if self._shutting_down:
@@ -804,8 +826,6 @@ class LiveController:
         # Opportunistic fallback for tests and delayed Qt timer delivery.  In
         # normal operation the independent completion timer gets here first.
         self._collect_completed_work()
-        if self._paused:
-            return
         self._expire_missing_tracks(time.monotonic())
         self._queue_untranslated_visible_sources()
         self._dispatch_translation_work()
@@ -1369,7 +1389,7 @@ class LiveController:
             except Exception:
                 pass
             if self._debug:
-                print("暂停期间完成的 OCR 已丢弃")
+                print("过期会话完成的 OCR 已丢弃")
             return
         now = time.monotonic()
         self._next_ocr_allowed = (
@@ -2251,7 +2271,7 @@ class LiveController:
                 continue
             if stale_session:
                 if self._debug:
-                    print("暂停期间完成的翻译已丢弃")
+                    print("过期会话完成的翻译已丢弃")
                 continue
 
             cached_outcome = worker_result.cached_outcome
@@ -2357,6 +2377,9 @@ class LiveController:
                     )
                 )
             self._translated_count += len(accepted)
+            set_coverage_count = getattr(self._control, "set_coverage_count", None)
+            if callable(set_coverage_count):
+                set_coverage_count(self._translated_count)
             if accepted:
                 profile_label = (
                     f" · Profile {self._profile.profile_id}"
@@ -2715,7 +2738,7 @@ class LiveController:
         )
 
     def _refresh_latency_display(self) -> None:
-        self._control.set_latency(self._latency_stats.render())
+        self._control.set_latency(self._latency_stats.render_hud())
 
     def _save_last_run_snapshot(self) -> None:
         """Persist one bounded view of the last successfully published scene."""
@@ -2845,6 +2868,18 @@ def _overlay_geometry(app: QApplication, capture: DxcamCapture, config: AppConfi
         geometry.y() + round(top * scale_y),
         max(1, round((right - left) * scale_x)),
         max(1, round((bottom - top) * scale_y)),
+    )
+
+
+def _position_live_control(control: LiveControlWindow, screen) -> None:
+    """Place the read-only HUD at the selected screen's top center."""
+
+    screen_geometry = screen.availableGeometry()
+    control.setFixedWidth(min(920, max(1, screen_geometry.width() - 32)))
+    control.adjustSize()
+    control.move(
+        screen_geometry.x() + max(0, (screen_geometry.width() - control.width()) // 2),
+        screen_geometry.y() + 12,
     )
 
 
@@ -2982,13 +3017,12 @@ def _run_live_ready(
         ),
         debug_border=debug_border,
     )
-    control = LiveControlWindow(app.quit)
-    screen_geometry = screen.availableGeometry()
-    control.adjustSize()
-    control.move(
-        screen_geometry.right() - control.width() - 20,
-        screen_geometry.top() + 20,
+    control = LiveControlWindow(
+        app.quit,
+        profile_name=profile.display_name if profile is not None else "会话模式",
+        theme=_read_live_theme(config_path, app),
     )
+    _position_live_control(control, screen)
     controller = LiveController(
         config,
         capture=capture,
@@ -3000,7 +3034,6 @@ def _run_live_ready(
         profile=profile,
         debug=debug_border,
     )
-    control.set_pause_callback(controller.set_paused)
     app.aboutToQuit.connect(controller.close)
     _live_message("showing overlay and control windows")
     overlay.show()

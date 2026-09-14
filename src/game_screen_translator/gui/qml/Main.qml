@@ -32,6 +32,13 @@ ApplicationWindow {
     property int pageTransitionSequence: 0
     property bool startPreludePending: false
 
+    onClosing: function(close) {
+        if (boundWorkbench.running) {
+            close.accepted = false
+            boundWorkbench.hideWorkbench()
+        }
+    }
+
     function pageIndex(page) {
         const index = pageOrder.indexOf(page)
         return index < 0 ? 0 : index

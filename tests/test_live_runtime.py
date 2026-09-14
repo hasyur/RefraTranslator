@@ -1,7 +1,6 @@
 import json
 import os
 import threading
-from concurrent.futures import Future
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -221,7 +220,7 @@ class FakeControl:
         self.latency = ""
         self.filter_status = ""
         self.cost_status = ""
-        self.paused = False
+        self.coverage_count = 0
 
     def set_status(self, status, detail="") -> None:
         self.status = status
@@ -236,8 +235,8 @@ class FakeControl:
     def set_cost_status(self, summary) -> None:
         self.cost_status = summary
 
-    def set_paused(self, paused) -> None:
-        self.paused = paused
+    def set_coverage_count(self, count) -> None:
+        self.coverage_count = count
 
 
 def _ambiguous_atomic_observations() -> tuple[OcrText, ...]:
@@ -1697,9 +1696,7 @@ def test_legacy_runtime_confirms_changed_visible_text_without_idle_timers(
     controller.close()
 
 
-def test_pause_clears_overlay_and_resume_discards_stale_ocr(
-    monkeypatch,
-) -> None:
+def test_live_controller_has_no_pause_surface_and_keeps_ocr_pipeline() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
@@ -1723,91 +1720,14 @@ def test_pause_clears_overlay_and_resume_discards_stale_ocr(
         control=control,
         app=app,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
-
+    assert not hasattr(controller, "set_paused")
+    assert not hasattr(control, "set_paused")
     controller._tick()
+    assert controller._ocr_future is not None
     controller._ocr_future.result(timeout=2)
     controller._tick()
-    old_track = controller._tracker.visible_tracks[0]
-    controller._tracker.apply_translations(
-        (TranslationResult(old_track.source("live-zone-1"), "旧译文"),)
-    )
-
-    controller._submit_ocr(capture.latest_frame())
-    stale_future = controller._ocr_future
-    stale_future.result(timeout=2)
-
-    controller.set_paused(True)
-    assert controller.paused
-    assert control.paused
-    assert control.status == "实时翻译已暂停"
-    assert controller._tracker.visible_tracks == ()
-    assert controller._ocr_line_tracker.visible_tracks == ()
-    assert not controller._layout_stabilizer.has_pending
-    assert overlay.last_tracks == ()
-
-    controller._tick()
-    assert controller._ocr_future is None
-    assert controller._tracker.visible_tracks == ()
-
-    controller.set_paused(False)
-    assert not controller.paused
-    assert not control.paused
-    controller._tick()
-    fresh_future = controller._ocr_future
-    assert fresh_future is not None
-    assert fresh_future is not stale_future
-    assert controller._tracker.visible_tracks == ()
-
-    fresh_future.result(timeout=2)
-    controller._tick()
-    assert len(controller._tracker.visible_tracks) == 1
-    assert controller._tracker.visible_tracks[0].track_id != old_track.track_id
-    assert controller._ocr_scan_count == 2
-    controller.close()
-
-
-def test_pause_discards_late_translation_failure_without_changing_status() -> None:
-    app = QApplication.instance() or QApplication([])
-    config = AppConfig(
-        translation=TranslationConfig(
-            provider="openai_compatible",
-            base_url="http://server.test/v1",
-            model="hy-mt1.5-7b",
-        ),
-    )
-    control = FakeControl()
-    controller = LiveController(
-        config,
-        capture=FakeCapture(),
-        ocr=FakeOcr(),
-        overlay=FakeOverlay(),
-        control=control,
-        app=app,
-    )
-    source = SourceText("live-zone-1", "old-track", 1, "待って。")
-    submission = live_runtime._TranslationSubmission(
-        batch=TranslationBatch((source,)),
-        context=(),
-        order_group=0,
-        order_path=(0,),
-        queued_at=1.0,
-        pipeline_started_at=1.0,
-        first_recognized_at=1.0,
-        source_bounds=(None,),
-        session_epoch=0,
-    )
-    future = Future()
-    future.set_exception(RuntimeError("late failure"))
-    controller._translation_futures[future] = submission
-
-    controller.set_paused(True)
-    controller._collect_translations()
-
-    assert controller._translation_futures == {}
-    assert controller._translation_retry_count == 0
-    assert controller._translation_failure_count == 0
-    assert control.status == "实时翻译已暂停"
+    assert controller._ocr_scan_count == 1
+    assert control.coverage_count == 0
     controller.close()
 
 
@@ -2065,14 +1985,13 @@ def test_live_latency_display_covers_ocr_queue_and_cached_translation(
     controller._collect_translations()
 
     assert "OCR" in control.latency
-    assert "画面最近" in control.latency
-    assert "整帧扫描" in control.latency
-    assert "稳定" in control.latency
-    assert "排队" in control.latency
-    assert "LLM 缓存命中" in control.latency
-    assert "总计" in control.latency
+    assert "最近" in control.latency
+    assert "峰值" in control.latency
+    assert "LLM 缓存" in control.latency
+    assert "总延迟" in control.latency
     assert "执行整屏 1 次" in control.cost_status
     assert control.detail.startswith("已覆盖 1 条")
+    assert control.coverage_count == 1
     controller.close()
 
 

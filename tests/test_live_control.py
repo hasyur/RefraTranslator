@@ -2,64 +2,125 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from game_screen_translator.branding import PRODUCT_NAME
+from game_screen_translator.live import runtime as live_runtime
 from game_screen_translator.live.runtime import LiveControlWindow
 
 
-def test_live_control_collapses_and_restores_runtime_information() -> None:
+def test_live_control_is_a_prism_top_hud_and_is_mouse_transparent(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     stopped: list[bool] = []
-    paused: list[bool] = []
+    exclusion_calls: list[tuple[int, bool]] = []
+
+    monkeypatch.setattr(
+        live_runtime,
+        "exclude_window_from_capture",
+        lambda hwnd, *, click_through=False: (
+            exclusion_calls.append((hwnd, click_through)) or True
+        ),
+    )
     window = LiveControlWindow(
         lambda: stopped.append(True),
-        lambda value: paused.append(value),
+        profile_name="测试游戏",
+        theme="dark",
     )
-    window.adjustSize()
-    window.move(700, 20)
-    expanded_width = window.width()
-    expanded_height = window.height()
-    expanded_right = window.geometry().right()
 
     assert window.windowTitle() == PRODUCT_NAME
-    assert window._pause_button.text() == "暂停翻译"
+    assert window.size().width() == 920
+    assert window.size().height() == 58
+    assert window.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    assert window.windowFlags() & Qt.WindowType.WindowTransparentForInput
+    assert not window.findChildren(QPushButton)
+    assert not hasattr(window, "_pause_button")
 
-    window._pause_button.click()
-    assert paused == [True]
-    assert window._pause_button.text() == "恢复翻译"
+    window.set_coverage_count(42)
+    window.set_latency(
+        "最近  OCR 118ms · LLM 2.50s · 总延迟 640ms    "
+        "峰值  OCR 230ms · LLM 3.10s · 总延迟 1.20s"
+    )
+    assert window._profile.text() == "测试游戏"
+    assert window._coverage.text() == "42 条"
+    assert "最近" in window._latency.text()
+    assert "峰值" in window._latency.text()
 
-    window._pause_button.click()
-    assert paused == [True, False]
-    assert window._pause_button.text() == "暂停翻译"
-
-    window._shrink_button.click()
+    window.show()
     app.processEvents()
+    assert exclusion_calls and exclusion_calls[-1][1] is True
 
-    assert all(widget.isHidden() for widget in window._diagnostic_widgets)
-    assert window._shrink_button.isHidden()
-    assert not window._restore_button.isHidden()
-    assert window._restore_button.text() == "恢复"
-    assert not window._pause_button.isHidden()
-    assert window._pause_button.text() == "暂停翻译"
-    assert not window._stop_button.isHidden()
-    assert window._stop_button.text() == "关闭翻译"
-    assert window.width() < expanded_width
-    assert window.height() < expanded_height
-    assert window.geometry().right() == expanded_right
-
-    window._restore_button.click()
-    app.processEvents()
-
-    assert all(not widget.isHidden() for widget in window._diagnostic_widgets)
-    assert not window._shrink_button.isHidden()
-    assert window._restore_button.isHidden()
-    assert not window._stop_button.isHidden()
-    assert window.width() == expanded_width
-    assert window.height() == expanded_height
-    assert window.geometry().right() == expanded_right
-
-    window._stop_button.click()
-    assert stopped == [True]
     window.close()
     app.processEvents()
+    assert stopped == [True]
+
+
+def test_live_control_reads_prism_dark_and_light_tokens() -> None:
+    app = QApplication.instance() or QApplication([])
+    dark = LiveControlWindow(lambda: None, theme="dark")
+    light = LiveControlWindow(lambda: None, theme="light")
+
+    assert "#d1182333" in dark.styleSheet()
+    assert "#62e1ff" in dark._coverage.styleSheet()
+    assert "#ebebf0f1" in light.styleSheet()
+    assert "#00758f" in light._coverage.styleSheet()
+
+    dark.close()
+    light.close()
+    app.processEvents()
+
+
+class _ScreenGeometryStub:
+    def __init__(self, geometry: QRect) -> None:
+        self._geometry = geometry
+
+    def availableGeometry(self) -> QRect:  # noqa: N802
+        return self._geometry
+
+
+def test_live_control_centers_on_negative_screen_geometry_and_respects_margin() -> None:
+    app = QApplication.instance() or QApplication([])
+    window = LiveControlWindow(lambda: None)
+
+    wide_screen = _ScreenGeometryStub(QRect(-1920, -120, 1920, 1080))
+    live_runtime._position_live_control(window, wide_screen)
+    assert (window.x(), window.y(), window.width(), window.height()) == (
+        -1420,
+        -108,
+        920,
+        58,
+    )
+
+    narrow_screen = _ScreenGeometryStub(QRect(-2560, -200, 800, 600))
+    live_runtime._position_live_control(window, narrow_screen)
+    assert (window.x(), window.y(), window.width(), window.height()) == (
+        -2544,
+        -188,
+        768,
+        58,
+    )
+
+    window.close()
+    app.processEvents()
+
+
+def test_live_theme_is_read_from_project_gui_preferences_each_session(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[translation]\n", encoding="utf-8")
+    (tmp_path / ".gui-settings.toml").write_text(
+        "[appearance]\ntheme = \"light\"\n",
+        encoding="utf-8",
+    )
+    calls: list[tuple[str, str]] = []
+
+    def resolve_theme(preference, _app):
+        calls.append((preference, "called"))
+        return "light"
+
+    monkeypatch.setattr(live_runtime, "effective_theme", resolve_theme)
+    assert live_runtime._read_live_theme(config_path, app) == "light"
+    assert calls == [("light", "called")]

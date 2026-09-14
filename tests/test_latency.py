@@ -38,6 +38,10 @@ def test_latency_stats_render_latest_and_peaks() -> None:
     assert "LLM 缓存命中" in rendered
     assert "峰值：OCR 876ms · 稳定 1.25s · 排队 12ms · LLM 2.50s · 总计 4.90s" in rendered
 
+    hud = stats.render_hud()
+    assert "最近  OCR 500ms · LLM 缓存 · 总延迟 700ms" in hud
+    assert "峰值  OCR 876ms · LLM 2.50s · 总延迟 4.90s" in hud
+
 
 def test_latency_stats_reject_invalid_measurements() -> None:
     stats = LiveLatencyStats()

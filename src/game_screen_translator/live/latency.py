@@ -216,6 +216,34 @@ class LiveLatencyStats:
             rendered += "\n峰值：" + " · ".join(peak_parts)
         return rendered
 
+    def render_hud(self) -> str:
+        """Render only the latest and peak values needed by the live HUD.
+
+        The full ``render`` output remains the detailed diagnostic form used by
+        logs and tests.  The native HUD is intentionally a compact monitor, so
+        it exposes the three user-facing latency signals without the phase
+        breakdown that would make the top bar grow vertically.
+        """
+
+        def format_value(value: float | None) -> str:
+            return "—" if value is None else _duration_label(value)
+
+        latest_llm = self._latest.llm_seconds
+        if latest_llm is None and self._latest_was_cache_only:
+            latest_llm_text = "缓存"
+        else:
+            latest_llm_text = format_value(latest_llm)
+        return (
+            "最近  "
+            f"OCR {format_value(self._latest.ocr_seconds)} · "
+            f"LLM {latest_llm_text} · "
+            f"总延迟 {format_value(self._latest.total_seconds)}"
+            "    峰值  "
+            f"OCR {format_value(self._peaks.ocr_seconds)} · "
+            f"LLM {format_value(self._peaks.llm_seconds)} · "
+            f"总延迟 {format_value(self._peaks.total_seconds)}"
+        )
+
     def render_ocr_summary(self) -> str:
         """Render bounded per-kind percentiles and phase averages for logs."""
 

@@ -1,5 +1,8 @@
+import ctypes
 import os
+import queue
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -926,6 +929,191 @@ def test_native_shutdown_targets_real_control_hwnd_and_reaches_qt_close_event() 
     control.close()
     app.processEvents()
     assert callbacks == ["quit"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires the Windows Win32 API")
+def test_native_shutdown_rejects_window_text_length_query_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class NativeCall:
+        def __init__(self, callback):
+            self.callback = callback
+
+        def __call__(self, *args):
+            return self.callback(*args)
+
+    failed_hwnd = 100
+    exact_hwnd = 200
+    posted: list[int] = []
+
+    def enum_windows(callback, _lparam):
+        callback(failed_hwnd, 0)
+        callback(exact_hwnd, 0)
+        return 1
+
+    def get_window_pid(_hwnd, pid_pointer):
+        pid_pointer._obj.value = os.getpid()
+        return 1
+
+    def get_window_text_length(hwnd):
+        if int(hwnd) == failed_hwnd:
+            ctypes.set_last_error(5)
+            return 0
+        ctypes.set_last_error(0)
+        return len(PRODUCT_NAME)
+
+    def get_window_text(_hwnd, buffer, _capacity):
+        buffer.value = PRODUCT_NAME
+        return len(PRODUCT_NAME)
+
+    user32 = SimpleNamespace(
+        EnumWindows=NativeCall(enum_windows),
+        GetWindowThreadProcessId=NativeCall(get_window_pid),
+        GetWindowTextLengthW=NativeCall(get_window_text_length),
+        GetWindowTextW=NativeCall(get_window_text),
+        PostMessageW=NativeCall(lambda hwnd, *_args: posted.append(int(hwnd)) or 1),
+    )
+    monkeypatch.setattr(controller_module.ctypes, "WinDLL", lambda *_args, **_kwargs: user32)
+    monkeypatch.setattr(
+        controller_module,
+        "_process_tree_pids",
+        lambda pid: {int(pid)},
+    )
+
+    process = SimpleNamespace(pid=os.getpid())
+    assert controller_module._request_live_graceful_shutdown(process) is False
+    assert posted == []
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("QT_QPA_PLATFORM", "").lower() != "windows",
+    reason="requires the native Windows Qt platform and real child HWNDs",
+)
+def test_native_shutdown_follows_redirected_child_and_rejects_unsafe_targets() -> None:
+    child_code = """
+import os
+import sys
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
+from game_screen_translator.live.runtime import LiveControlWindow
+
+mode = sys.argv[1]
+app = QApplication(["native-shutdown-child"])
+callbacks = []
+
+def on_close():
+    callbacks.append("close")
+    app.quit()
+
+windows = [LiveControlWindow(on_close)]
+if mode == "ambiguous":
+    windows.append(LiveControlWindow(on_close))
+for window in windows:
+    window.show()
+app.processEvents()
+print("READY", os.getpid(), *[int(window.winId()) for window in windows], flush=True)
+QTimer.singleShot(
+    500,
+    lambda: print("VISIBLE", *[window.isVisible() for window in windows], flush=True),
+)
+QTimer.singleShot(4000, app.quit)
+exit_code = app.exec()
+print("EXIT", exit_code, "callbacks", len(callbacks), flush=True)
+"""
+
+    app = QApplication.instance() or QApplication([])
+    unrelated = QWidget()
+    unrelated.setWindowTitle(PRODUCT_NAME)
+    unrelated.show()
+    app.processEvents()
+
+    def launch(mode: str):
+        process = controller_module.subprocess.Popen(
+            [sys.executable, "-c", child_code, mode],
+            stdout=controller_module.subprocess.PIPE,
+            stderr=controller_module.subprocess.STDOUT,
+            text=True,
+            creationflags=(
+                getattr(controller_module.subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | getattr(controller_module.subprocess, "CREATE_NO_WINDOW", 0)
+            ),
+        )
+        lines: queue.Queue[str] = queue.Queue()
+
+        def collect() -> None:
+            stream = process.stdout
+            if stream is None:
+                return
+            for line in stream:
+                lines.put(line.strip())
+
+        reader = threading.Thread(target=collect, daemon=True)
+        reader.start()
+        return process, lines, reader
+
+    def drain(lines: queue.Queue[str]) -> list[str]:
+        values: list[str] = []
+        while True:
+            try:
+                values.append(lines.get_nowait())
+            except queue.Empty:
+                return values
+
+    process = None
+    reader = None
+    try:
+        process, lines, reader = launch("single")
+        ready = lines.get(timeout=10)
+        ready_parts = ready.split()
+        assert ready_parts[0] == "READY"
+        child_pid = int(ready_parts[1])
+        assert child_pid != process.pid
+
+        tree = controller_module._process_tree_pids(process.pid)
+        assert tree is not None
+        assert process.pid in tree
+        assert child_pid in tree
+        assert controller_module._request_live_graceful_shutdown(process) is True
+        process.wait(timeout=5)
+        reader.join(timeout=2)
+        output = drain(lines)
+        assert "EXIT 0 callbacks 1" in output
+        assert unrelated.isVisible() is True
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except controller_module.subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+        if reader is not None:
+            reader.join(timeout=2)
+
+    process = None
+    reader = None
+    try:
+        process, lines, reader = launch("ambiguous")
+        ready = lines.get(timeout=10)
+        ready_parts = ready.split()
+        assert ready_parts[0] == "READY"
+        tree = controller_module._process_tree_pids(process.pid)
+        assert tree is not None
+        assert controller_module._request_live_graceful_shutdown(process) is False
+        visible = lines.get(timeout=2)
+        assert visible == "VISIBLE True True"
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except controller_module.subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+        if reader is not None:
+            reader.join(timeout=2)
+        unrelated.close()
+        app.processEvents()
 
 
 def test_missing_builtin_model_fails_before_ocr_probe_or_spawn(

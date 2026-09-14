@@ -5,11 +5,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRect, Qt, QTimer, QUrl
-from PySide6.QtGui import QScreen, QWindow
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QScreen, QWindow
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtQuickControls2 import QQuickStyle
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
 
 from game_screen_translator.branding import GUI_PROCESS_NAME, PRODUCT_NAME
 
@@ -52,6 +52,25 @@ def _set_windows_immersive_dark_mode(window_id: int, dark: bool) -> None:
         ctypes.byref(enabled),
         ctypes.sizeof(enabled),
     )
+
+
+def _build_prism_tray_icon(dark: bool) -> QIcon:
+    """Build the small tray mark locally so the live path needs no asset."""
+
+    pixmap = QPixmap(32, 32)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    accent = QColor("#62e1ff" if dark else "#00758f")
+    spectrum = QColor("#f27bd7" if dark else "#992477")
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(accent, 2.2))
+    painter.drawLine(7, 7, 16, 25)
+    painter.drawLine(16, 25, 25, 7)
+    painter.setPen(QPen(spectrum, 1.6))
+    painter.drawLine(11, 7, 16, 17)
+    painter.drawLine(16, 17, 21, 7)
+    painter.end()
+    return QIcon(pixmap)
 
 
 def _apply_workbench_window_theme(
@@ -112,6 +131,7 @@ class QmlWorkbenchHost(QObject):
         theme_applier: (
             Callable[[QApplication, QQuickWindow, str, str], None] | None
         ) = None,
+        tray_factory: Callable[[QApplication], QSystemTrayIcon] | None = None,
     ) -> None:
         super().__init__()
         app = application or QApplication.instance()
@@ -135,15 +155,40 @@ class QmlWorkbenchHost(QObject):
         self._last_geometry: QRect | None = None
         self._was_maximized = False
         self._last_theme_signature: tuple[int, str, str] | None = None
+        self._tray_icon: QSystemTrayIcon | None = None
+
+        # The workbench must retain QApplication's normal last-window exit
+        # behavior whenever live translation is not running.  Background
+        # residency is enabled only while the live HUD/tray owns the session.
+        self._set_quit_on_last_window_closed(True)
 
         controller.stateChanged.connect(self._sync_window_theme)
         controller.regionSelectionRequested.connect(self._open_region_selector)
         controller.liveReady.connect(self._hide_for_live)
         controller.liveFinished.connect(self._restore_after_live)
         controller.liveFailed.connect(self._restore_after_live)
+        hide_requested = getattr(controller, "workbenchHideRequested", None)
+        if hide_requested is not None and hasattr(hide_requested, "connect"):
+            hide_requested.connect(self._hide_to_tray)
         app.aboutToQuit.connect(self.shutdown)
 
+        if tray_factory is not None:
+            self._tray_icon = tray_factory(self._application)
+        elif isinstance(self._application, QApplication):
+            self._tray_icon = QSystemTrayIcon(self._application)
+        if self._tray_icon is not None:
+            self._tray_icon.setIcon(
+                _build_prism_tray_icon(self._controller.effectiveTheme == "dark")
+            )
+            self._tray_icon.setToolTip(f"{PRODUCT_NAME} · 双击打开工作台")
+            self._tray_icon.activated.connect(self._on_tray_activated)
+            self._tray_icon.hide()
+
         self._create_workbench()
+
+    @property
+    def tray_icon(self) -> QSystemTrayIcon | None:
+        return self._tray_icon
 
     @property
     def engine(self) -> QQmlApplicationEngine | None:
@@ -233,14 +278,47 @@ class QmlWorkbenchHost(QObject):
         if self._window is shown_window and shown_window.isVisible():
             self._sync_window_theme(force=True)
 
+    def _set_quit_on_last_window_closed(self, enabled: bool) -> None:
+        setter = getattr(self._application, "setQuitOnLastWindowClosed", None)
+        if callable(setter):
+            setter(enabled)
+
     def _hide_for_live(self) -> None:
+        self._set_quit_on_last_window_closed(False)
         self._hidden_for_live = True
+        self._show_live_tray()
         self._dispose_workbench()
+
+    def _show_live_tray(self) -> None:
+        if self._tray_icon is not None:
+            self._tray_icon.show()
+
+    def _hide_live_tray(self) -> None:
+        if self._tray_icon is not None:
+            self._tray_icon.hide()
+
+    def _hide_to_tray(self) -> None:
+        if self._shutdown_called:
+            return
+        self._set_quit_on_last_window_closed(False)
+        self._hidden_for_live = True
+        self._show_live_tray()
+        self._dispose_workbench()
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason != QSystemTrayIcon.ActivationReason.DoubleClick:
+            return
+        if self._shutdown_called:
+            return
+        self._hidden_for_live = False
+        self.show()
 
     def _restore_after_live(self) -> None:
         if self._shutdown_called:
             return
+        self._set_quit_on_last_window_closed(True)
         self._hidden_for_live = False
+        self._hide_live_tray()
         if self._selector is None:
             self.show()
 
@@ -306,6 +384,8 @@ class QmlWorkbenchHost(QObject):
         if self._shutdown_called:
             return
         self._shutdown_called = True
+        self._set_quit_on_last_window_closed(True)
+        self._hide_live_tray()
         self._dispose_workbench()
         self._controller.shutdown()
 

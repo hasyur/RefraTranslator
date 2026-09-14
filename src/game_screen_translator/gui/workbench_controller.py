@@ -101,6 +101,85 @@ _OCR_DEVICE_PROBE_MARKER = "REFRA_OCR_DEVICES="
 _OCR_DEVICE_PROBE_TIMEOUT_SECONDS = 20.0
 _LIVE_STOP_GRACE_SECONDS = 5.0
 _WM_CLOSE = 0x0010
+_TH32CS_SNAPPROCESS = 0x00000002
+_ERROR_NO_MORE_FILES = 18
+
+
+def _process_tree_pids(root_pid: int) -> set[int] | None:
+    """Return a verified Toolhelp process subtree, or ``None`` on failure."""
+
+    if root_pid <= 0:
+        return None
+    try:
+        from ctypes import wintypes
+
+        class ProcessEntry32W(ctypes.Structure):
+            _fields_ = (
+                ("dwSize", wintypes.DWORD),
+                ("cntUsage", wintypes.DWORD),
+                ("th32ProcessID", wintypes.DWORD),
+                ("th32DefaultHeapID", ctypes.c_void_p),
+                ("th32ModuleID", wintypes.DWORD),
+                ("cntThreads", wintypes.DWORD),
+                ("th32ParentProcessID", wintypes.DWORD),
+                ("pcPriClassBase", wintypes.LONG),
+                ("dwFlags", wintypes.DWORD),
+                ("szExeFile", wintypes.WCHAR * 260),
+            )
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create_snapshot = kernel32.CreateToolhelp32Snapshot
+        create_snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+        create_snapshot.restype = wintypes.HANDLE
+        process_first = kernel32.Process32FirstW
+        process_first.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessEntry32W))
+        process_first.restype = wintypes.BOOL
+        process_next = kernel32.Process32NextW
+        process_next.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessEntry32W))
+        process_next.restype = wintypes.BOOL
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = (wintypes.HANDLE,)
+        close_handle.restype = wintypes.BOOL
+
+        snapshot = create_snapshot(_TH32CS_SNAPPROCESS, 0)
+        invalid_handle = ctypes.c_void_p(-1).value
+        if snapshot in (None, invalid_handle):
+            return None
+        try:
+            entry = ProcessEntry32W()
+            entry.dwSize = ctypes.sizeof(entry)
+            if not process_first(snapshot, ctypes.byref(entry)):
+                return None
+            parents: dict[int, int] = {}
+            while True:
+                pid = int(entry.th32ProcessID)
+                if pid > 0:
+                    parents[pid] = int(entry.th32ParentProcessID)
+                if process_next(snapshot, ctypes.byref(entry)):
+                    continue
+                if ctypes.get_last_error() != _ERROR_NO_MORE_FILES:
+                    return None
+                break
+        finally:
+            close_handle(snapshot)
+
+        if root_pid not in parents:
+            return None
+        children: dict[int, list[int]] = {}
+        for pid, parent_pid in parents.items():
+            children.setdefault(parent_pid, []).append(pid)
+        subtree = {root_pid}
+        pending = [root_pid]
+        while pending:
+            parent_pid = pending.pop()
+            for child_pid in children.get(parent_pid, ()):
+                if child_pid in subtree:
+                    continue
+                subtree.add(child_pid)
+                pending.append(child_pid)
+        return subtree
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
 
 
 def _request_live_graceful_shutdown(process: subprocess.Popen) -> bool:
@@ -130,32 +209,44 @@ def _request_live_graceful_shutdown(process: subprocess.Popen) -> bool:
         post_message = user32.PostMessageW
         post_message.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
         post_message.restype = wintypes.BOOL
-        target_pid = int(process.pid)
-        found = False
+        target_pids = _process_tree_pids(int(process.pid))
+        if target_pids is None:
+            return False
+        target_windows: list[int] = []
+        query_failed = False
 
         @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
         def visit(hwnd, _lparam):
-            nonlocal found
+            nonlocal query_failed
             owner_pid = wintypes.DWORD()
-            get_window_pid(hwnd, ctypes.byref(owner_pid))
-            if int(owner_pid.value) != target_pid:
+            if not get_window_pid(hwnd, ctypes.byref(owner_pid)):
+                query_failed = True
                 return True
+            if int(owner_pid.value) not in target_pids:
+                return True
+            ctypes.set_last_error(0)
             title_length = get_window_text_length(hwnd)
-            if title_length <= 0:
+            if title_length == 0:
+                if ctypes.get_last_error() != 0:
+                    query_failed = True
+                return True
+            if title_length < 0:
+                query_failed = True
                 return True
             title_buffer = ctypes.create_unicode_buffer(title_length + 1)
-            get_window_text(hwnd, title_buffer, title_length + 1)
+            if not get_window_text(hwnd, title_buffer, title_length + 1):
+                query_failed = True
+                return True
             # The live process can own overlay/test-source windows as well.
             # Only the exact native control-window title is a valid target.
             if title_buffer.value != PRODUCT_NAME:
                 return True
-            if post_message(hwnd, _WM_CLOSE, 0, 0):
-                found = True
-                return False
+            target_windows.append(int(hwnd))
             return True
 
-        enum_windows(visit, 0)
-        return found
+        if not enum_windows(visit, 0) or query_failed or len(target_windows) != 1:
+            return False
+        return bool(post_message(target_windows[0], _WM_CLOSE, 0, 0))
     except (AttributeError, OSError, TypeError, ValueError):
         return False
 
@@ -246,6 +337,7 @@ class WorkbenchController(QObject):
     liveReady = Signal()
     liveFinished = Signal()
     liveFailed = Signal()
+    workbenchHideRequested = Signal()
 
     def __init__(self, config_path: Path, *, probe_ocr_devices: bool = True) -> None:
         super().__init__()
@@ -2067,6 +2159,13 @@ class WorkbenchController(QObject):
         self._notice("已刷新当前 Profile 的真实缓存统计", "neutral")
 
     # ----- live process ------------------------------------------------
+
+    @Slot()
+    def hideWorkbench(self) -> None:
+        """Request the host to hide the workbench while live translation runs."""
+
+        if self.running:
+            self.workbenchHideRequested.emit()
 
     def _set_run_state(self, text: str, tone: str, running: bool) -> None:
         self._run_state = text

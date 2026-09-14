@@ -5,6 +5,7 @@ import math
 import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -23,7 +24,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
 
 from game_screen_translator.config import load_config
 from game_screen_translator.gui import qml_workbench as host_module
@@ -44,6 +45,26 @@ class _SignalRecorder:
     def emit(self, *args) -> None:
         for callback in tuple(self.callbacks):
             callback(*args)
+
+
+class _TrayRecorder:
+    def __init__(self) -> None:
+        self.activated = _SignalRecorder()
+        self.visible = False
+        self.icon = None
+        self.tooltip = ""
+
+    def setIcon(self, icon) -> None:  # noqa: N802
+        self.icon = icon
+
+    def setToolTip(self, tooltip: str) -> None:  # noqa: N802
+        self.tooltip = tooltip
+
+    def show(self) -> None:
+        self.visible = True
+
+    def hide(self) -> None:
+        self.visible = False
 
 
 class _ContextRecorder:
@@ -91,6 +112,7 @@ class _ControllerStub(QObject):
     liveReady = Signal()
     liveFinished = Signal()
     liveFailed = Signal()
+    workbenchHideRequested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -110,6 +132,9 @@ class _ControllerStub(QObject):
 
     def stopLive(self) -> None:  # noqa: N802
         self.stop_count += 1
+
+    def hideWorkbench(self) -> None:  # noqa: N802
+        self.workbenchHideRequested.emit()
 
     def shutdown(self) -> None:
         self.shutdown_count += 1
@@ -251,6 +276,7 @@ def _host(
     application=None,
     selector_factory=None,
     theme_applier=None,
+    tray_factory=None,
 ) -> tuple[QmlWorkbenchHost, _EngineRecorder]:
     engine = None
 
@@ -264,6 +290,8 @@ def _host(
         kwargs["selector_factory"] = selector_factory
     if theme_applier is not None:
         kwargs["theme_applier"] = theme_applier
+    if tray_factory is not None:
+        kwargs["tray_factory"] = tray_factory
     host = QmlWorkbenchHost(
         controller,
         application=application or _application(),
@@ -305,6 +333,110 @@ def test_host_exposes_only_workbench_and_rebuilds_engine_around_live() -> None:
     assert restored_window.isVisible()
 
     restored_window.close()
+
+
+def test_host_tray_recalls_workbench_and_running_close_returns_to_tray() -> None:
+    controller = _ControllerStub()
+    tray = _TrayRecorder()
+    app = _application()
+    host, _engine = _host(controller, tray_factory=lambda _app: tray)
+
+    assert app.quitOnLastWindowClosed() is True
+    host.show()
+    controller.liveReady.emit()
+    assert host.window is None
+    assert tray.visible is True
+    assert app.quitOnLastWindowClosed() is False
+
+    tray.activated.emit(QSystemTrayIcon.ActivationReason.DoubleClick)
+    recalled_window = host.window
+    assert recalled_window is not None
+    assert recalled_window.isVisible()
+
+    controller.workbenchHideRequested.emit()
+    assert host.window is None
+    assert tray.visible is True
+
+    controller.liveFinished.emit()
+    restored_window = host.window
+    assert restored_window is not None
+    assert restored_window.isVisible()
+    assert tray.visible is False
+    assert app.quitOnLastWindowClosed() is True
+    host.shutdown()
+
+
+def test_real_workbench_close_while_running_hides_to_tray(tmp_path: Path) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller._live_process = SimpleNamespace(poll=lambda: None)
+    tray = _TrayRecorder()
+    host = QmlWorkbenchHost(
+        controller,
+        application=app,
+        tray_factory=lambda _app: tray,
+    )
+    host.show()
+    app.processEvents()
+    window = host.window
+    assert window is not None
+    assert window.isVisible()
+
+    window.close()
+    app.processEvents()
+
+    assert host.window is None
+    assert controller.running is True
+    assert tray.visible is True
+    host.shutdown()
+
+
+def test_real_workbench_close_while_stopped_keeps_normal_exit_path(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    app.setQuitOnLastWindowClosed(False)
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    tray = _TrayRecorder()
+    host = QmlWorkbenchHost(
+        controller,
+        application=app,
+        tray_factory=lambda _app: tray,
+    )
+    assert app.quitOnLastWindowClosed() is True
+    host.show()
+    app.processEvents()
+    window = host.window
+    assert window is not None
+    assert window.isVisible()
+    assert controller.running is False
+
+    window.close()
+    app.processEvents()
+
+    # The QML onClosing handler accepts a non-running close, so Qt hides the
+    # real window and follows its normal last-window quit path.  No tray
+    # fallback or host disposal is involved in this branch.
+    assert window.isVisible() is False
+    assert host.window is window
+    assert tray.visible is False
+    host.shutdown()
 
 
 def test_host_applies_theme_once_per_change_and_again_for_rebuilt_window() -> None:
