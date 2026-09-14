@@ -321,7 +321,7 @@ class LiveControlWindow(QWidget):
         self._last_cost_status = ""
         self._theme = theme if theme in {"dark", "light"} else THEME_DARK
         self.setWindowTitle(PRODUCT_NAME)
-        self.setFixedSize(920, 42)
+        self.setFixedSize(1800, 25)
 
         colors = {
             "surface": "#000000",
@@ -334,31 +334,30 @@ class LiveControlWindow(QWidget):
         self.setStyleSheet(
             "QFrame#hudSurface {"
             f"background-color: {colors['surface']}; "
-            f"border: 1px solid {colors['line']}; "
-            "border-radius: 6px; }"
+            "border: none; }"
             "QLabel#hudStatus {"
             f"color: {colors['status']}; "
             "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
-            "font-size: 11px; }"
+            "font-size: 20px; }"
             "QLabel#hudProfile {"
             f"color: {colors['profile']}; "
             "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
-            "font-size: 11px; }"
+            "font-size: 20px; }"
             "QLabel#hudCoverage {"
             f"color: {colors['coverage']}; "
             "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
-            "font-size: 11px; }"
+            "font-size: 20px; }"
             "QLabel#hudLatency {"
             f"color: {colors['latency']}; "
             "font-family: 'Cascadia Code', 'Microsoft YaHei UI'; "
-            "font-size: 9px; }"
+            "font-size: 20px; }"
         )
 
         self._surface = QFrame(self)
         self._surface.setObjectName("hudSurface")
         surface_layout = QHBoxLayout(self._surface)
-        surface_layout.setContentsMargins(16, 4, 16, 4)
-        surface_layout.setSpacing(14)
+        surface_layout.setContentsMargins(10, 0, 10, 0)
+        surface_layout.setSpacing(10)
 
         status_row = QHBoxLayout()
         status_row.setSpacing(5)
@@ -2835,12 +2834,12 @@ def _overlay_geometry(app: QApplication, capture: DxcamCapture, config: AppConfi
 def _position_live_control(control: LiveControlWindow, screen) -> None:
     """Place the read-only HUD at the selected screen's top center."""
 
-    screen_geometry = screen.availableGeometry()
-    control.setFixedWidth(min(920, max(1, screen_geometry.width() - 32)))
+    screen_geometry = screen.geometry()
+    control.setFixedWidth(min(1800, max(1, screen_geometry.width())))
     control.adjustSize()
     control.move(
         screen_geometry.x() + max(0, (screen_geometry.width() - control.width()) // 2),
-        screen_geometry.y() + 12,
+        screen_geometry.y(),
     )
 
 

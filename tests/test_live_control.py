@@ -29,8 +29,8 @@ def test_live_control_is_a_prism_top_hud_and_is_mouse_transparent(monkeypatch) -
     )
 
     assert window.windowTitle() == PRODUCT_NAME
-    assert window.size().width() == 920
-    assert window.size().height() == 42
+    assert window.size().width() == 1800
+    assert window.size().height() == 25
     assert window.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
     assert window.windowFlags() & Qt.WindowType.WindowTransparentForInput
     assert not window.findChildren(QPushButton)
@@ -69,6 +69,9 @@ def test_live_control_uses_black_surface_and_supplied_four_color_palette() -> No
         assert "#3b82f6" in style
         assert "#22d3ee" in style
         assert "#f472b6" in style
+        assert "border: none" in style
+        assert "border-radius" not in style
+        assert "font-size: 20px" in style
 
     dark.close()
     light.close()
@@ -82,27 +85,30 @@ class _ScreenGeometryStub:
     def availableGeometry(self) -> QRect:  # noqa: N802
         return self._geometry
 
+    def geometry(self) -> QRect:
+        return self._geometry
 
-def test_live_control_centers_on_negative_screen_geometry_and_respects_margin() -> None:
+
+def test_live_control_centers_on_negative_screen_geometry_and_touches_top_edge() -> None:
     app = QApplication.instance() or QApplication([])
     window = LiveControlWindow(lambda: None)
 
     wide_screen = _ScreenGeometryStub(QRect(-1920, -120, 1920, 1080))
     live_runtime._position_live_control(window, wide_screen)
     assert (window.x(), window.y(), window.width(), window.height()) == (
-        -1420,
-        -108,
-        920,
-        42,
+        -1860,
+        -120,
+        1800,
+        25,
     )
 
     narrow_screen = _ScreenGeometryStub(QRect(-2560, -200, 800, 600))
     live_runtime._position_live_control(window, narrow_screen)
     assert (window.x(), window.y(), window.width(), window.height()) == (
-        -2544,
-        -188,
-        768,
-        42,
+        -2560,
+        -200,
+        800,
+        25,
     )
 
     window.close()
