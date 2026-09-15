@@ -2373,6 +2373,72 @@ def _successful_worker_result(batch: TranslationBatch):
     )
 
 
+def test_final_quality_gate_failure_is_not_published_or_added_to_context(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0),
+    )
+    overlay = FakeOverlay()
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=overlay,
+        control=FakeControl(),
+        app=app,
+    )
+    source = controller._tracker.observe(
+        (
+            OcrText(
+                "解消すること。",
+                0.99,
+                ((10, 10), (250, 10), (250, 40), (10, 40)),
+            ),
+        ),
+        now=1.0,
+    ).stable_sources[0]
+    bad_result = TranslationResult(source, "消除すること。")
+    monkeypatch.setattr(
+        controller,
+        "_translate_blocking_timed",
+        lambda batch, context: live_runtime._TranslationWorkerResult(
+            CachedTranslationOutcome(
+                TranslationOutcome((bad_result,), (), (source,)),
+                ("model",),
+            ),
+            started_at=1.0,
+            completed_at=1.1,
+            llm_seconds=0.1,
+        ),
+    )
+
+    try:
+        controller._submit_translations((source,))
+        next(iter(controller._translation_futures)).result(timeout=2)
+        controller._collect_translations()
+
+        track = controller._tracker.visible_tracks[0]
+        assert track.translated_text is None
+        assert track.display_translation is None
+        assert tuple(controller._context) == ()
+        assert controller._early_context == {}
+        assert (source.track_id, source.revision) in controller._translation_exhausted_keys
+
+        controller._queue_untranslated_visible_sources()
+        assert controller._translation_futures == {}
+        assert controller._pending_translations == []
+        assert overlay.last_tracks == ()
+    finally:
+        controller.close()
+
+
 def _two_visible_sources(controller: LiveController):
     update = controller._tracker.observe(
         (

@@ -2643,6 +2643,14 @@ class LiveController:
                 continue
 
             cached_outcome = worker_result.cached_outcome
+            # A final quality-gate failure is deliberately not published and
+            # must not be resubmitted on every live tick.  Keep the key spent
+            # until OCR produces a new track revision; a newer revision gets
+            # its own translation attempt naturally.
+            self._translation_exhausted_keys.update(
+                (source.track_id, source.revision)
+                for source in cached_outcome.outcome.suspected_untranslated
+            )
             stability_seconds = max(
                 0.0, submission.queued_at - submission.first_recognized_at
             )
@@ -3031,11 +3039,17 @@ class LiveController:
         assigned: set[tuple[str, int]] = set()
         accepted: list[tuple[TranslationResult, str]] = []
         reattached = 0
+        suspected_ids = {
+            source.wire_id
+            for source in cached_outcome.outcome.suspected_untranslated
+        }
         for result, origin in zip(
             cached_outcome.outcome.results,
             cached_outcome.origins,
             strict=True,
         ):
+            if result.source.wire_id in suspected_ids:
+                continue
             source_key = (result.source.track_id, result.source.revision)
             track = self._matching_visible_track(
                 result.source,

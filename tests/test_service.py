@@ -69,11 +69,22 @@ async def test_late_old_revision_is_discarded() -> None:
     [
         ("Please wait.", "Please wait.", True),
         ("ここで待って。", "ここで待って。", True),
+        (
+            "床屋さんや美容室は何のお店?",
+            "床屋さんや美容室は何のお店ですか？",
+            True,
+        ),
+        ("解消すること。", "消除すること。", True),
+        ("12時にはき", "12时にはき", True),
+        ("日本語では「入る」", "在日语中称为「入る」。", False),
+        ("初音ミクの消失", "初音ミク的消失", False),
         ("Please wait.", "请稍等。", False),
         ("FPS", "FPS", False),
         ("E2M3", "E2M3", False),
         ("RefraTranslator", "RefraTranslator", False),
         ("https://example.com", "https://example.com", False),
+        ("初音ミク", "初音ミク", False),
+        ("水瀬いのり", "水瀬いのり", False),
     ],
 )
 def test_suspected_untranslated_detection_is_conservative(
@@ -103,6 +114,23 @@ async def test_only_source_equal_items_receive_one_correction_retry() -> None:
     assert "这是纠正重试" in transport.prompts[1]
     assert "Please wait." in transport.prompts[1]
     assert "急げ。" not in transport.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_partial_japanese_copy_receives_one_correction_retry() -> None:
+    source = SourceText("dialogue", "partial", 1, "解消すること。")
+    transport = ScriptedTransport(
+        '<target><sn id="1">消除すること。</sn></target>',
+        '<target><sn id="1">消除すること。</sn></target>',
+    )
+    service = TranslationService(transport, prompt_builder=HyMtPromptBuilder())
+
+    outcome = await service.translate(TranslationBatch((source,)))
+
+    assert [item.translated_text for item in outcome.results] == ["消除すること。"]
+    assert outcome.suspected_untranslated == (source,)
+    assert len(transport.prompts) == 2
+    assert "这是纠正重试" in transport.prompts[1]
 
 
 @pytest.mark.asyncio

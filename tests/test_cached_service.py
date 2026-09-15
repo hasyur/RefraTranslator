@@ -384,6 +384,41 @@ async def test_source_equal_retry_result_is_not_written_to_automatic_cache(
 
 
 @pytest.mark.asyncio
+async def test_partial_japanese_retry_result_is_not_written_to_automatic_cache(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    response = '<target><sn id="1">消除すること。</sn></target>'
+    transport = ScriptedTransport(response, response, response, response)
+    service = _service(transport, profile)
+
+    first = await service.translate(
+        TranslationBatch((SourceText("z", "first", 1, "解消すること。"),))
+    )
+    second = await service.translate(
+        TranslationBatch((SourceText("z", "second", 1, "解消すること。"),))
+    )
+
+    assert [item.translated_text for item in first.outcome.results] == [
+        "消除すること。"
+    ]
+    assert [item.translated_text for item in second.outcome.results] == [
+        "消除すること。"
+    ]
+    assert first.outcome.suspected_untranslated == (
+        SourceText("z", "first", 1, "解消すること。"),
+    )
+    assert second.outcome.suspected_untranslated == (
+        SourceText("z", "second", 1, "解消すること。"),
+    )
+    assert first.origins == ("model",)
+    assert second.origins == ("model",)
+    assert len(transport.prompts) == 4
+    assert profile.cache.stats().automatic_entries == 0
+
+
+@pytest.mark.asyncio
 async def test_existing_source_equal_cache_is_removed_without_invalidating_good_cache(
     tmp_path: Path,
 ) -> None:
@@ -424,6 +459,52 @@ async def test_existing_source_equal_cache_is_removed_without_invalidating_good_
 
     assert [item.translated_text for item in repaired.outcome.results] == ["请稍等。"]
     assert [item.translated_text for item in preserved.outcome.results] == ["重新开始"]
+    assert repaired.origins == ("model",)
+    assert preserved.origins == ("automatic",)
+    assert len(transport.prompts) == 1
+    assert profile.cache.stats().automatic_entries == 2
+
+
+@pytest.mark.asyncio
+async def test_existing_partial_copy_cache_is_lazily_removed(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    builder = HyMtPromptBuilder(custom_prompt=profile.custom_prompt)
+    environment = CacheEnvironment(
+        profile_id=profile.profile_id,
+        source_language="japan",
+        target_language="简体中文",
+        model="hy-mt1.5-7b",
+        prompt_version=builder.prompt_version,
+        glossary_revision=profile.glossary_revision,
+    )
+    profile.cache.store_automatic(
+        "解消すること。",
+        "消除すること。",
+        environment,
+        (),
+    )
+    profile.cache.store_automatic(
+        "Restart",
+        "重新开始",
+        environment,
+        (),
+    )
+    transport = ScriptedTransport(
+        '<target><sn id="1">消除。</sn></target>',
+    )
+    service = _service(transport, profile)
+
+    repaired = await service.translate(
+        TranslationBatch((SourceText("z", "first", 1, "解消すること。"),))
+    )
+    preserved = await service.translate(
+        TranslationBatch((SourceText("z", "second", 1, "Restart"),))
+    )
+
+    assert [item.translated_text for item in repaired.outcome.results] == ["消除。"]
     assert repaired.origins == ("model",)
     assert preserved.origins == ("automatic",)
     assert len(transport.prompts) == 1
