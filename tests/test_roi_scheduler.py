@@ -190,6 +190,52 @@ def test_successful_ocr_advances_baseline_before_one_semantic_confirmation() -> 
     assert scheduler.observe(changed.copy(), 0.3) is None
 
 
+def test_new_change_during_confirmation_gets_its_own_confirmation() -> None:
+    base = _blank()
+    first_change = _paint(base, 40, 70)
+    second_change = _paint(first_change, 200, 70)
+    scheduler = LatestFrameRoiScheduler(
+        _detector(),
+        min_ocr_interval_s=0.1,
+        settle_interval_s=0.0,
+        max_coalesce_s=0.2,
+    )
+    scheduler.prime(base, 0.0)
+
+    first_job = scheduler.observe(first_change, 0.1)
+    assert first_job is not None
+    assert scheduler.complete(
+        first_job,
+        accepted=True,
+        completed_at_s=0.1,
+        confirmation_requested=True,
+    ) is None
+
+    # The newer frame is coalesced while the first frame's confirmation is
+    # waiting, but it must be dispatched as new pixel work.
+    second_job = scheduler.observe(second_change, 0.2)
+    assert second_job is not None
+    assert not second_job.is_confirmation
+    assert scheduler.complete(
+        second_job,
+        accepted=True,
+        completed_at_s=0.2,
+        confirmation_requested=True,
+    ) is None
+
+    confirmation = scheduler.observe(second_change.copy(), 0.3)
+    assert confirmation is not None
+    assert confirmation.is_confirmation
+    assert scheduler.complete(
+        confirmation,
+        accepted=True,
+        completed_at_s=0.3,
+        confirmation_requested=True,
+    ) is None
+    assert not scheduler.has_pending
+    assert scheduler.observe(second_change.copy(), 0.4) is None
+
+
 def test_rejected_ocr_does_not_consume_the_pending_change() -> None:
     base = _blank()
     changed = _paint(base, 120, 70)

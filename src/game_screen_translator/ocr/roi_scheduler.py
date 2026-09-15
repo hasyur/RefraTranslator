@@ -40,6 +40,10 @@ class ScheduledRoiScan:
     predicted_scan_kind: str
     predicted_remaining_s: float
     response_wait_budget_s: float
+    # The latest real pixel-change generation represented by this job.  A
+    # capture tick alone does not advance it, so a pending confirmation can
+    # survive static observations while a newer change invalidates it.
+    change_generation: int = 0
     is_confirmation: bool = False
 
 
@@ -114,6 +118,7 @@ class LatestFrameRoiScheduler:
         self._last_dispatch_at_s: float | None = None
 
         self._generation = 0
+        self._last_change_generation = 0
         self._next_job_id = 1
         self._in_flight: ScheduledRoiScan | None = None
 
@@ -124,6 +129,7 @@ class LatestFrameRoiScheduler:
         self._pending_fallback_candidate_coverage = 0.0
         self._pending_fallback_candidate_region_count = 0
         self._confirmation_pending = False
+        self._confirmation_change_generation: int | None = None
 
     @property
     def primed(self) -> bool:
@@ -271,6 +277,7 @@ class LatestFrameRoiScheduler:
         self._last_observed_at_s = now_s
 
         if proposal.rois:
+            self._last_change_generation = self._generation
             self._record_pending(proposal, now_s)
         elif (
             self._pending_fallback_reason is None
@@ -335,11 +342,16 @@ class LatestFrameRoiScheduler:
         assert self._latest_frame is not None
         assert self._latest_sample is not None
         assert self._latest_at_s is not None
+        is_confirmation = (
+            self._confirmation_pending
+            and self._confirmation_change_generation
+            == self._last_change_generation
+        )
         trigger_reason = (
             "forced"
             if force
             else "semantic-confirmation"
-            if self._confirmation_pending
+            if is_confirmation
             else "response-deadline"
             if (
                 self.response_target_s is not None
@@ -350,7 +362,6 @@ class LatestFrameRoiScheduler:
             if settled
             else "max-coalesce"
         )
-        is_confirmation = self._confirmation_pending
         job = ScheduledRoiScan(
             self._next_job_id,
             self._generation,
@@ -365,12 +376,14 @@ class LatestFrameRoiScheduler:
             predicted_scan_kind,
             predicted_remaining_s,
             response_wait_budget_s,
+            self._last_change_generation,
             is_confirmation,
         )
         self._next_job_id += 1
         self._in_flight = job
         self._last_dispatch_at_s = now_s
         self._confirmation_pending = False
+        self._confirmation_change_generation = None
         self._clear_pending()
         return job
 
@@ -569,6 +582,7 @@ class LatestFrameRoiScheduler:
                 job.proposal.candidate_region_count
             )
         self._confirmation_pending = True
+        self._confirmation_change_generation = job.change_generation
 
     def _pending_proposal(self) -> DynamicRoiProposal:
         assert self._latest_frame is not None

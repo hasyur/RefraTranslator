@@ -1810,6 +1810,109 @@ def test_dynamic_roi_full_frame_confirmation_does_not_replay_static_scene(
     controller.close()
 
 
+def test_dynamic_roi_new_frame_during_confirmation_gets_own_confirmation(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=1,
+            stable_ms=0,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            dynamic_roi_response_target_ms=500,
+            dynamic_roi_settle_ms=0,
+            dynamic_roi_ocr_interval_ms=250,
+            dynamic_roi_max_coalesce_ms=250,
+        ),
+    )
+    initial = _dynamic_roi_frame()
+    capture = MutableCapture(initial)
+    ocr = ColorBlockOcr()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [30.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 30.05
+    controller._tick()
+    old = next(
+        track for track in controller._tracker.visible_tracks if track.text == "待って。"
+    )
+    controller._tracker.apply_translations(
+        (TranslationResult(old.source("live-zone-1"), "旧译文"),)
+    )
+
+    first_change = initial.copy()
+    first_change[200:260, 200:600] = 220
+    capture.frame = first_change
+    clock[0] = 30.3
+    controller._tick()
+    clock[0] = 30.35
+    controller._tick()
+    assert controller._ocr_future is not None
+    assert controller._active_roi_job is not None
+    assert not controller._active_roi_job.is_confirmation
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 30.4
+    controller._tick()
+    scheduler = controller._roi_scheduler
+    assert scheduler is not None
+    assert scheduler.has_pending
+    assert controller._tracker.has_pending_revisions
+
+    # A second real frame arrives before B's semantic confirmation dispatches.
+    second_change = first_change.copy()
+    second_change[200:260, 200:600] = 150
+    capture.frame = second_change
+    clock[0] = 30.45
+    controller._tick()
+    clock[0] = 30.5
+    controller._tick()
+    assert controller._ocr_future is not None
+    assert controller._active_roi_job is not None
+    assert not controller._active_roi_job.is_confirmation
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 30.55
+    controller._tick()
+    assert scheduler.has_pending
+    assert controller._tracker.has_pending_revisions
+
+    # The confirmation now belongs to C, and a static C frame must settle it
+    # once without creating another OCR loop.
+    clock[0] = 30.6
+    controller._tick()
+    assert controller._ocr_future is not None
+    assert controller._active_roi_job is not None
+    assert controller._active_roi_job.is_confirmation
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 30.65
+    controller._tick()
+    assert not controller._tracker.has_pending_revisions
+    assert len(ocr.input_shapes) == 4
+
+    for now in (30.75, 30.85, 30.95):
+        clock[0] = now
+        controller._tick()
+        assert controller._ocr_future is None
+    assert len(ocr.input_shapes) == 4
+    controller.close()
+
+
 def test_dynamic_roi_empty_plan_recovers_with_a_full_scan(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
