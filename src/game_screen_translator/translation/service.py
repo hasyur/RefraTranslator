@@ -141,13 +141,17 @@ def _is_short_japanese_name(value: str) -> bool:
         "CJK UNIFIED IDEOGRAPH" in unicodedata.name(character, "")
         for character in compact
     )
-    if not (hiragana or katakana) or (
-        not han and not (katakana and not hiragana)
-    ):
+    if not (hiragana or katakana):
         return False
     if katakana and not hiragana:
-        return compact not in _COMMON_KATAKANA_WORDS
+        if han:
+            return True
+        return len(compact) <= 4 and compact not in _COMMON_KATAKANA_WORDS
     if han < 2 or hiragana < 2:
+        return False
+
+    hiragana_runs = re.findall(r"[\u3040-\u309F]+", compact)
+    if len(hiragana_runs) != 1 or not compact.endswith(hiragana_runs[0]):
         return False
     return not any(compact.endswith(suffix) for suffix in _JAPANESE_FUNCTION_SUFFIXES)
 
@@ -167,9 +171,45 @@ def _protected_mask(value: str, fragments: Sequence[str]) -> tuple[bool, ...]:
             end = start + len(fragment)
             mask[start:end] = [True] * (end - start)
             start = value.find(fragment, end)
-    for match in _QUOTED_TEXT_RE.finditer(value):
-        mask[match.start() : match.end()] = [True] * (match.end() - match.start())
     return tuple(mask)
+
+
+def _quoted_spans(value: str) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (match.group(0), _comparison_text(match.group(0)[1:-1]))
+        for match in _QUOTED_TEXT_RE.finditer(value)
+        if len(match.group(0)) >= 2
+    )
+
+
+def _matching_quoted_fragments(source: str, translated: str) -> tuple[str, ...]:
+    source_contents = {
+        content for _, content in _quoted_spans(source) if content
+    }
+    return tuple(
+        whole
+        for whole, content in _quoted_spans(translated)
+        if content and content in source_contents
+    )
+
+
+def _matching_glossary_targets(
+    source: str,
+    translated: str,
+    glossary: Sequence[GlossaryEntry],
+) -> tuple[str, ...]:
+    fragments: list[str] = []
+    for entry in glossary:
+        source_fragment = _normalized_text(entry.source)
+        target_fragment = _normalized_text(entry.target)
+        if (
+            source_fragment
+            and source_fragment in source
+            and target_fragment
+            and target_fragment in translated
+        ):
+            fragments.append(target_fragment)
+    return tuple(fragments)
 
 
 def _unprotected_hiragana_ratio(value: str, mask: Sequence[bool]) -> float:
@@ -253,11 +293,13 @@ def is_suspected_untranslated(
 
     source_hiragana_mask = _protected_mask(
         source,
-        tuple(entry.source for entry in glossary),
+        tuple(entry.source for entry in glossary)
+        + tuple(whole for whole, _ in _quoted_spans(source)),
     )
     translated_hiragana_mask = _protected_mask(
         translated,
-        tuple(entry.target for entry in glossary),
+        _matching_glossary_targets(source, translated, glossary)
+        + _matching_quoted_fragments(source, translated),
     )
     retained_count, source_count = _retained_hiragana(
         source,

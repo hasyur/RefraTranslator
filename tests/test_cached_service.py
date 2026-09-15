@@ -419,6 +419,63 @@ async def test_partial_japanese_retry_result_is_not_written_to_automatic_cache(
 
 
 @pytest.mark.asyncio
+async def test_mixed_manual_automatic_and_model_results_keep_order_and_quality_marks(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    profile.cache.set_manual_correction(
+        "固定。",
+        "手动。",
+        source_language="japan",
+        target_language="简体中文",
+    )
+    builder = HyMtPromptBuilder(custom_prompt=profile.custom_prompt)
+    environment = CacheEnvironment(
+        profile_id=profile.profile_id,
+        source_language="japan",
+        target_language="简体中文",
+        model="hy-mt1.5-7b",
+        prompt_version=builder.prompt_version,
+        glossary_revision=profile.glossary_revision,
+    )
+    profile.cache.store_automatic("缓存。", "自动。", environment, ())
+
+    manual = SourceText("z", "manual", 1, "固定。")
+    automatic = SourceText("z", "automatic", 1, "缓存。")
+    model = SourceText("z", "model", 1, "正常です。")
+    suspected = SourceText("z", "suspected", 1, "解消すること。")
+    transport = ScriptedTransport(
+        "<target>"
+        '<sn id="1">正常。</sn>'
+        '<sn id="2">消除すること。</sn>'
+        "</target>",
+        '<target><sn id="1">消除すること。</sn></target>',
+    )
+    service = _service(transport, profile)
+
+    outcome = await service.translate(
+        TranslationBatch((manual, automatic, model, suspected))
+    )
+
+    assert [item.source for item in outcome.outcome.results] == [
+        manual,
+        automatic,
+        model,
+        suspected,
+    ]
+    assert [item.translated_text for item in outcome.outcome.results] == [
+        "手动。",
+        "自动。",
+        "正常。",
+        "消除すること。",
+    ]
+    assert outcome.origins == ("manual", "automatic", "model", "model")
+    assert outcome.outcome.suspected_untranslated == (suspected,)
+    assert len(transport.prompts) == 2
+
+
+@pytest.mark.asyncio
 async def test_existing_source_equal_cache_is_removed_without_invalidating_good_cache(
     tmp_path: Path,
 ) -> None:

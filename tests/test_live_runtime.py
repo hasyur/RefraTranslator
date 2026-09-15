@@ -2394,24 +2394,35 @@ def test_final_quality_gate_failure_is_not_published_or_added_to_context(
         control=FakeControl(),
         app=app,
     )
-    source = controller._tracker.observe(
+    update = controller._tracker.observe(
         (
             OcrText(
                 "解消すること。",
                 0.99,
                 ((10, 10), (250, 10), (250, 40), (10, 40)),
             ),
+            OcrText(
+                "正常です。",
+                0.99,
+                ((10, 60), (250, 60), (250, 90), (10, 90)),
+            ),
         ),
         now=1.0,
-    ).stable_sources[0]
-    bad_result = TranslationResult(source, "消除すること。")
+    )
+    bad_source, good_source = update.stable_sources
+    bad_result = TranslationResult(bad_source, "消除すること。")
+    good_result = TranslationResult(good_source, "正常译文")
     monkeypatch.setattr(
         controller,
         "_translate_blocking_timed",
         lambda batch, context: live_runtime._TranslationWorkerResult(
             CachedTranslationOutcome(
-                TranslationOutcome((bad_result,), (), (source,)),
-                ("model",),
+                TranslationOutcome(
+                    (bad_result, good_result),
+                    (),
+                    (bad_source,),
+                ),
+                ("model", "model"),
             ),
             started_at=1.0,
             completed_at=1.1,
@@ -2420,21 +2431,27 @@ def test_final_quality_gate_failure_is_not_published_or_added_to_context(
     )
 
     try:
-        controller._submit_translations((source,))
+        controller._submit_translations((bad_source, good_source))
         next(iter(controller._translation_futures)).result(timeout=2)
         controller._collect_translations()
 
-        track = controller._tracker.visible_tracks[0]
-        assert track.translated_text is None
-        assert track.display_translation is None
-        assert tuple(controller._context) == ()
+        tracks_by_text = {
+            track.text: track for track in controller._tracker.visible_tracks
+        }
+        assert tracks_by_text[bad_source.text].translated_text is None
+        assert tracks_by_text[bad_source.text].display_translation is None
+        assert tracks_by_text[good_source.text].display_translation == "正常译文"
+        assert [pair.target for pair in controller._context] == ["正常译文"]
         assert controller._early_context == {}
-        assert (source.track_id, source.revision) in controller._translation_exhausted_keys
+        assert (
+            bad_source.track_id,
+            bad_source.revision,
+        ) in controller._translation_exhausted_keys
 
         controller._queue_untranslated_visible_sources()
         assert controller._translation_futures == {}
         assert controller._pending_translations == []
-        assert overlay.last_tracks == ()
+        assert controller._translated_count == 1
     finally:
         controller.close()
 
