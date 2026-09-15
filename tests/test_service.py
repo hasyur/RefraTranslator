@@ -82,6 +82,13 @@ async def test_late_old_revision_is_discarded() -> None:
             "译文：『床屋さんや美容室は何のお店ですか？』",
             True,
         ),
+        ("彼は「今日は暑い」と言った", "他说「今日は暑い」", True),
+        (
+            "彼は「すぐに逃げてください」と叫んだ",
+            "他喊道「すぐに逃げてください」",
+            True,
+        ),
+        ("日本語では「入る」と言う", "日本語で「入る」", True),
         ("「今日は暑い」", "译文：「今日は暑い」", True),
         ("日本語では「入る」", "在日语中称为「入る」。", False),
         ("初音ミクの消失", "初音ミク的消失", False),
@@ -201,5 +208,13 @@ def test_glossary_only_protects_a_fragment_when_source_and_target_both_match() -
     assert is_suspected_untranslated(
         "解消すること。",
         "消除すること。",
+        glossary=(GlossaryEntry("すること", "应做之事"),),
+    ) is True
+
+
+def test_glossary_target_does_not_hide_unprotected_source_residue() -> None:
+    assert is_suspected_untranslated(
+        "解消すること。",
+        "消除すること（应做之事）。",
         glossary=(GlossaryEntry("すること", "应做之事"),),
     ) is True

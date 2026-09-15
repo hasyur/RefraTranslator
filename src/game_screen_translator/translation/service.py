@@ -46,6 +46,12 @@ _MIN_RETAINED_HIRAGANA_RATIO = 0.35
 _MIN_TRANSLATED_HIRAGANA_RATIO = 0.20
 _MIN_OVERALL_SIMILARITY = 0.65
 _MIN_JAPANESE_BODY_HIRAGANA_RATIO = 0.45
+# Quote protection is limited to short tokens; longer quoted sentences must
+# still pass the normal untranslated-text gate.
+_MAX_PROTECTED_QUOTE_LENGTH = 4
+# Han is shared by Japanese and Chinese, so the translated body must contain
+# at least two Han characters absent from the source and no unprotected kana.
+_MIN_TRANSLATED_BODY_UNIQUE_HAN = 2
 
 
 def _normalized_text(value: str) -> str:
@@ -123,6 +129,24 @@ def _is_han(character: str) -> bool:
     )
 
 
+def _is_translated_chinese_body(
+    source_outside: str,
+    translated_outside: str,
+) -> bool:
+    if not source_outside or not translated_outside:
+        return False
+    if _contains_kana(translated_outside):
+        return False
+    source_han = {
+        character for character in source_outside if _is_han(character)
+    }
+    translated_unique_han = sum(
+        _is_han(character) and character not in source_han
+        for character in translated_outside
+    )
+    return translated_unique_han >= _MIN_TRANSLATED_BODY_UNIQUE_HAN
+
+
 def _quoted_protection_pairs(
     source: str,
     translated: str,
@@ -139,8 +163,7 @@ def _quoted_protection_pairs(
     if not source_outside or not translated_outside:
         return ()
 
-    translated_han = sum(_is_han(character) for character in translated_outside)
-    if not translated_han:
+    if not _is_translated_chinese_body(source_outside, translated_outside):
         return ()
 
     source_hiragana = sum(_is_hiragana(character) for character in source_outside)
@@ -171,6 +194,7 @@ def _quoted_protection_pairs(
         for source_whole, source_content in source_spans
         for translated_whole, translated_content in translated_spans
         if source_content
+        and len(source_content) <= _MAX_PROTECTED_QUOTE_LENGTH
         and translated_content == source_content
     )
 
@@ -274,6 +298,16 @@ def is_suspected_untranslated(
         return bool(_LATIN_RE.search(source)) and not _is_obvious_latin_exemption(source)
 
     glossary_pairs = _matching_glossary_pairs(source, translated, glossary)
+    authorized_glossary_pairs = set(glossary_pairs)
+    if any(
+        source_content == translated_content
+        and len(source_content) > _MAX_PROTECTED_QUOTE_LENGTH
+        and _contains_kana(source_content)
+        and (source_content, translated_content) not in authorized_glossary_pairs
+        for _, source_content in _quoted_spans(source)
+        for _, translated_content in _quoted_spans(translated)
+    ):
+        return True
     quoted_pairs = _quoted_protection_pairs(source, translated)
     source_hiragana_mask = _protected_mask(
         source,
@@ -285,6 +319,14 @@ def is_suspected_untranslated(
         tuple(target_fragment for _, target_fragment in glossary_pairs)
         + tuple(translated_whole for _, translated_whole in quoted_pairs),
     )
+    translated_hiragana_count = sum(
+        not translated_hiragana_mask[index] and _is_hiragana(character)
+        for index, character in enumerate(translated)
+    )
+    translated_hiragana_ratio = _unprotected_hiragana_ratio(
+        translated,
+        translated_hiragana_mask,
+    )
     retained_count, source_count = _retained_hiragana(
         source,
         translated,
@@ -292,7 +334,11 @@ def is_suspected_untranslated(
         translated_hiragana_mask,
     )
     if source_count < _MIN_RETAINED_HIRAGANA:
-        return False
+        return bool(
+            (glossary_pairs or quoted_pairs)
+            and translated_hiragana_count >= _MIN_RETAINED_HIRAGANA
+            and translated_hiragana_ratio >= _MIN_JAPANESE_BODY_HIRAGANA_RATIO
+        )
 
     similarity = SequenceMatcher(
         None,
@@ -301,11 +347,6 @@ def is_suspected_untranslated(
         autojunk=False,
     ).ratio()
     retained_ratio = retained_count / source_count
-    translated_hiragana_ratio = _unprotected_hiragana_ratio(
-        translated,
-        translated_hiragana_mask,
-    )
-
     shared_hiragana_copy = (
         retained_count >= _MIN_RETAINED_HIRAGANA
         and retained_ratio >= _MIN_RETAINED_HIRAGANA_RATIO
