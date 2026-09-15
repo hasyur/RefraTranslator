@@ -82,20 +82,25 @@ async def test_late_old_revision_is_discarded() -> None:
             "译文：『床屋さんや美容室は何のお店ですか？』",
             True,
         ),
+        ("「今日は暑い」", "译文：「今日は暑い」", True),
         ("日本語では「入る」", "在日语中称为「入る」。", False),
         ("初音ミクの消失", "初音ミク的消失", False),
         ("今日は暑い", "今日は暑い", True),
         ("君が好き", "君が好き", True),
         ("気分が悪い", "気分が悪い", True),
         ("空が青い", "空が青い", True),
+        ("新ゲーム", "新ゲーム", True),
+        ("設定メニュー", "設定メニュー", True),
+        ("美味しい", "美味しい", True),
+        ("最高だよ", "最高だよ", True),
         ("コンティニュー", "コンティニュー", True),
         ("Please wait.", "请稍等。", False),
         ("FPS", "FPS", False),
         ("E2M3", "E2M3", False),
         ("RefraTranslator", "RefraTranslator", False),
         ("https://example.com", "https://example.com", False),
-        ("初音ミク", "初音ミク", False),
-        ("水瀬いのり", "水瀬いのり", False),
+        ("初音ミク", "初音ミク", True),
+        ("水瀬いのり", "水瀬いのり", True),
     ],
 )
 def test_suspected_untranslated_detection_is_conservative(
@@ -173,3 +178,28 @@ async def test_explicit_same_text_glossary_entry_exempts_a_preserved_brand() -> 
     assert [item.translated_text for item in outcome.results] == ["STYX HELIX"]
     assert outcome.suspected_untranslated == ()
     assert len(transport.prompts) == 1
+
+
+@pytest.mark.asyncio
+async def test_explicit_same_text_glossary_entry_exempts_a_japanese_name() -> None:
+    source = SourceText("credits", "name", 1, "初音ミク")
+    response = '<target><sn id="1">初音ミク</sn></target>'
+    transport = ScriptedTransport(response)
+    service = TranslationService(transport, prompt_builder=HyMtPromptBuilder())
+
+    outcome = await service.translate(
+        TranslationBatch((source,)),
+        glossary=(GlossaryEntry("初音ミク", "初音ミク"),),
+    )
+
+    assert [item.translated_text for item in outcome.results] == ["初音ミク"]
+    assert outcome.suspected_untranslated == ()
+    assert len(transport.prompts) == 1
+
+
+def test_glossary_only_protects_a_fragment_when_source_and_target_both_match() -> None:
+    assert is_suspected_untranslated(
+        "解消すること。",
+        "消除すること。",
+        glossary=(GlossaryEntry("すること", "应做之事"),),
+    ) is True

@@ -40,40 +40,12 @@ _QUOTED_TEXT_RE = re.compile(
 )
 
 # These thresholds deliberately require several independent signs.  A single
-# retained particle (or a short name) is not enough to reject a translation.
+# retained particle is not enough to reject a translation.
 _MIN_RETAINED_HIRAGANA = 2
 _MIN_RETAINED_HIRAGANA_RATIO = 0.35
 _MIN_TRANSLATED_HIRAGANA_RATIO = 0.20
 _MIN_OVERALL_SIMILARITY = 0.65
 _MIN_JAPANESE_BODY_HIRAGANA_RATIO = 0.45
-
-_JAPANESE_FUNCTION_SUFFIXES = (
-    "では",
-    "です",
-    "ます",
-    "する",
-    "した",
-    "して",
-    "され",
-    "れる",
-    "られ",
-    "ない",
-    "たい",
-    "って",
-    "こと",
-    "もの",
-    "さん",
-    "くん",
-    "ちゃん",
-)
-_COMMON_KATAKANA_WORDS = {
-    "ゲーム",
-    "テスト",
-    "メニュー",
-    "タイトル",
-    "スタート",
-    "ストップ",
-}
 
 
 def _normalized_text(value: str) -> str:
@@ -115,47 +87,6 @@ def _contains_kana(value: str) -> bool:
     )
 
 
-def _is_short_japanese_name(value: str) -> bool:
-    """Conservatively leave short name-shaped source text alone.
-
-    This is intentionally narrow: sentence-like text with a common Japanese
-    grammatical ending remains subject to the quality gate.  It only covers
-    the ambiguous, short label/name case where deterministic text signals
-    cannot tell a preserved proper name from an untranslated sentence.
-    """
-
-    compact = "".join(
-        character
-        for character in value
-        if not character.isspace()
-        and not unicodedata.category(character).startswith(("P", "S"))
-    )
-    if (
-        not 2 <= len(compact) <= 8
-        or any(character.isdigit() for character in compact)
-    ):
-        return False
-    hiragana = sum(_is_hiragana(character) for character in compact)
-    katakana = sum(_is_katakana(character) for character in compact)
-    han = sum(
-        "CJK UNIFIED IDEOGRAPH" in unicodedata.name(character, "")
-        for character in compact
-    )
-    if not (hiragana or katakana):
-        return False
-    if katakana and not hiragana:
-        if han:
-            return True
-        return len(compact) <= 4 and compact not in _COMMON_KATAKANA_WORDS
-    if han < 2 or hiragana < 2:
-        return False
-
-    hiragana_runs = re.findall(r"[\u3040-\u309F]+", compact)
-    if len(hiragana_runs) != 1 or not compact.endswith(hiragana_runs[0]):
-        return False
-    return not any(compact.endswith(suffix) for suffix in _JAPANESE_FUNCTION_SUFFIXES)
-
-
 def _protected_mask(value: str, fragments: Sequence[str]) -> tuple[bool, ...]:
     """Mark explicitly preserved spans used by the kana-ratio check."""
 
@@ -182,23 +113,74 @@ def _quoted_spans(value: str) -> tuple[tuple[str, str], ...]:
     )
 
 
-def _matching_quoted_fragments(source: str, translated: str) -> tuple[str, ...]:
-    source_contents = {
-        content for _, content in _quoted_spans(source) if content
-    }
-    return tuple(
-        whole
-        for whole, content in _quoted_spans(translated)
-        if content and content in source_contents
+def _is_han(character: str) -> bool:
+    codepoint = ord(character)
+    return (
+        0x3400 <= codepoint <= 0x4DBF
+        or 0x4E00 <= codepoint <= 0x9FFF
+        or 0xF900 <= codepoint <= 0xFAFF
+        or 0x20000 <= codepoint <= 0x323AF
     )
 
 
-def _matching_glossary_targets(
+def _quoted_protection_pairs(
+    source: str,
+    translated: str,
+) -> tuple[tuple[str, str], ...]:
+    """Return quote spans that are source-backed and outside-translated."""
+
+    source_spans = _quoted_spans(source)
+    translated_spans = _quoted_spans(translated)
+    if not source_spans or not translated_spans:
+        return ()
+
+    source_outside = _comparison_text(_QUOTED_TEXT_RE.sub("", source))
+    translated_outside = _comparison_text(_QUOTED_TEXT_RE.sub("", translated))
+    if not source_outside or not translated_outside:
+        return ()
+
+    translated_han = sum(_is_han(character) for character in translated_outside)
+    if not translated_han:
+        return ()
+
+    source_hiragana = sum(_is_hiragana(character) for character in source_outside)
+    translated_hiragana = sum(
+        _is_hiragana(character) for character in translated_outside
+    )
+    outside_similarity = SequenceMatcher(
+        None,
+        source_outside,
+        translated_outside,
+        autojunk=False,
+    ).ratio()
+    if (
+        source_hiragana
+        and translated_hiragana >= source_hiragana
+        and outside_similarity >= _MIN_OVERALL_SIMILARITY
+    ):
+        return ()
+    if (
+        source_hiragana
+        and not translated_hiragana
+        and outside_similarity >= 0.80
+    ):
+        return ()
+
+    return tuple(
+        (source_whole, translated_whole)
+        for source_whole, source_content in source_spans
+        for translated_whole, translated_content in translated_spans
+        if source_content
+        and translated_content == source_content
+    )
+
+
+def _matching_glossary_pairs(
     source: str,
     translated: str,
     glossary: Sequence[GlossaryEntry],
-) -> tuple[str, ...]:
-    fragments: list[str] = []
+) -> tuple[tuple[str, str], ...]:
+    pairs: list[tuple[str, str]] = []
     for entry in glossary:
         source_fragment = _normalized_text(entry.source)
         target_fragment = _normalized_text(entry.target)
@@ -208,8 +190,8 @@ def _matching_glossary_targets(
             and target_fragment
             and target_fragment in translated
         ):
-            fragments.append(target_fragment)
-    return tuple(fragments)
+            pairs.append((source_fragment, target_fragment))
+    return tuple(pairs)
 
 
 def _unprotected_hiragana_ratio(value: str, mask: Sequence[bool]) -> float:
@@ -288,18 +270,20 @@ def is_suspected_untranslated(
         return False
     if source == translated:
         if _contains_kana(source):
-            return not _is_short_japanese_name(source)
+            return True
         return bool(_LATIN_RE.search(source)) and not _is_obvious_latin_exemption(source)
 
+    glossary_pairs = _matching_glossary_pairs(source, translated, glossary)
+    quoted_pairs = _quoted_protection_pairs(source, translated)
     source_hiragana_mask = _protected_mask(
         source,
-        tuple(entry.source for entry in glossary)
-        + tuple(whole for whole, _ in _quoted_spans(source)),
+        tuple(source_fragment for source_fragment, _ in glossary_pairs)
+        + tuple(source_whole for source_whole, _ in quoted_pairs),
     )
     translated_hiragana_mask = _protected_mask(
         translated,
-        _matching_glossary_targets(source, translated, glossary)
-        + _matching_quoted_fragments(source, translated),
+        tuple(target_fragment for _, target_fragment in glossary_pairs)
+        + tuple(translated_whole for _, translated_whole in quoted_pairs),
     )
     retained_count, source_count = _retained_hiragana(
         source,

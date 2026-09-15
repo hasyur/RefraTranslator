@@ -2412,6 +2412,7 @@ def test_final_quality_gate_failure_is_not_published_or_added_to_context(
     bad_source, good_source = update.stable_sources
     bad_result = TranslationResult(bad_source, "消除すること。")
     good_result = TranslationResult(good_source, "正常译文")
+    controller._latest_frame = np.zeros((120, 320, 3), dtype=np.uint8)
     monkeypatch.setattr(
         controller,
         "_translate_blocking_timed",
@@ -2441,6 +2442,10 @@ def test_final_quality_gate_failure_is_not_published_or_added_to_context(
         assert tracks_by_text[bad_source.text].translated_text is None
         assert tracks_by_text[bad_source.text].display_translation is None
         assert tracks_by_text[good_source.text].display_translation == "正常译文"
+        assert overlay.scenes == 1
+        published_by_text = {track.text: track for track in overlay.last_tracks}
+        assert published_by_text[bad_source.text].display_translation is None
+        assert published_by_text[good_source.text].display_translation == "正常译文"
         assert [pair.target for pair in controller._context] == ["正常译文"]
         assert controller._early_context == {}
         assert (
