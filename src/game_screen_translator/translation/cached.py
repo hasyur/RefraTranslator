@@ -95,7 +95,6 @@ class CachedTranslationService:
                 and is_suspected_untranslated(
                     source.text,
                     hit.translated_text,
-                    glossary=profile.glossary,
                 )
             ):
                 profile.cache.delete_automatic(source.text, environment, context)

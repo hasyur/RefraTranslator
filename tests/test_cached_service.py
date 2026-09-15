@@ -165,7 +165,7 @@ async def test_manual_correction_bypasses_model_and_context_version(tmp_path: Pa
     profile = create_game_profile(config_path, _config(), "game")
     profile.cache.set_manual_correction(
         "待て。",
-        "等等。",
+        "待って。",
         source_language="japan",
         target_language="简体中文",
     )
@@ -177,7 +177,7 @@ async def test_manual_correction_bypasses_model_and_context_version(tmp_path: Pa
         context=(ContextPair("急げ。", "快点。"),),
     )
 
-    assert [result.translated_text for result in outcome.outcome.results] == ["等等。"]
+    assert [result.translated_text for result in outcome.outcome.results] == ["待って。"]
     assert outcome.origins == ("manual",)
     assert transport.prompts == []
 
@@ -426,7 +426,7 @@ async def test_mixed_manual_automatic_and_model_results_keep_order_and_quality_m
     profile = create_game_profile(config_path, _config(), "game")
     profile.cache.set_manual_correction(
         "固定。",
-        "手动。",
+        "かな",
         source_language="japan",
         target_language="简体中文",
     )
@@ -465,7 +465,7 @@ async def test_mixed_manual_automatic_and_model_results_keep_order_and_quality_m
         suspected,
     ]
     assert [item.translated_text for item in outcome.outcome.results] == [
-        "手动。",
+        "かな",
         "自动。",
         "正常。",
         "消除すること。",

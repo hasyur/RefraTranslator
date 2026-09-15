@@ -69,48 +69,26 @@ async def test_late_old_revision_is_discarded() -> None:
     [
         ("Please wait.", "Please wait.", True),
         ("ここで待って。", "ここで待って。", True),
-        (
-            "床屋さんや美容室は何のお店?",
-            "床屋さんや美容室は何のお店ですか？",
-            True,
-        ),
         ("解消すること。", "消除すること。", True),
         ("12時にはき", "12时にはき", True),
-        ("解消すること。", "翻译为「解消すること。」", True),
-        (
-            "床屋さんや美容室は何のお店?",
-            "译文：『床屋さんや美容室は何のお店ですか？』",
-            True,
-        ),
-        ("彼は「今日は暑い」と言った", "他说「今日は暑い」", True),
-        (
-            "彼は「すぐに逃げてください」と叫んだ",
-            "他喊道「すぐに逃げてください」",
-            True,
-        ),
-        ("日本語では「入る」と言う", "日本語で「入る」", True),
-        ("「今日は暑い」", "译文：「今日は暑い」", True),
-        ("日本語では「入る」", "在日语中称为「入る」。", False),
-        ("初音ミクの消失", "初音ミク的消失", False),
-        ("今日は暑い", "今日は暑い", True),
-        ("君が好き", "君が好き", True),
-        ("気分が悪い", "気分が悪い", True),
-        ("空が青い", "空が青い", True),
-        ("新ゲーム", "新ゲーム", True),
-        ("設定メニュー", "設定メニュー", True),
-        ("美味しい", "美味しい", True),
-        ("最高だよ", "最高だよ", True),
-        ("コンティニュー", "コンティニュー", True),
+        ("かな", "かな", True),
+        ("カナ", "カナ", True),
+        ("ｶﾅ", "ｶﾅ", True),
+        ("\U0001B001", "\U0001B001", True),
+        ("中文", "中文かな", True),
+        ("中文", "中文カナ", True),
+        ("初音ミクの消失", "初音ミク的消失", True),
+        ("日本語では「入る」", "在日语中称为「入る」。", True),
+        ("用语", "用语「かな」", True),
         ("Please wait.", "请稍等。", False),
+        ("这是中文。", "这是中文。", False),
         ("FPS", "FPS", False),
         ("E2M3", "E2M3", False),
         ("RefraTranslator", "RefraTranslator", False),
         ("https://example.com", "https://example.com", False),
-        ("初音ミク", "初音ミク", True),
-        ("水瀬いのり", "水瀬いのり", True),
     ],
 )
-def test_suspected_untranslated_detection_is_conservative(
+def test_suspected_untranslated_detection_uses_kana_and_latin_exemptions(
     source: str,
     translated: str,
     suspected: bool,
@@ -171,27 +149,24 @@ async def test_second_source_equal_result_is_returned_but_marked_uncacheable() -
 
 
 @pytest.mark.asyncio
-async def test_explicit_same_text_glossary_entry_exempts_a_preserved_brand() -> None:
-    source = SourceText("credits", "brand", 1, "STYX HELIX")
-    response = '<target><sn id="1">STYX HELIX</sn></target>'
+async def test_existing_latin_brand_is_not_suspected() -> None:
+    source = SourceText("credits", "brand", 1, "RefraTranslator")
+    response = '<target><sn id="1">RefraTranslator</sn></target>'
     transport = ScriptedTransport(response)
     service = TranslationService(transport, prompt_builder=HyMtPromptBuilder())
 
-    outcome = await service.translate(
-        TranslationBatch((source,)),
-        glossary=(GlossaryEntry("STYX HELIX", "STYX HELIX"),),
-    )
+    outcome = await service.translate(TranslationBatch((source,)))
 
-    assert [item.translated_text for item in outcome.results] == ["STYX HELIX"]
+    assert [item.translated_text for item in outcome.results] == ["RefraTranslator"]
     assert outcome.suspected_untranslated == ()
     assert len(transport.prompts) == 1
 
 
 @pytest.mark.asyncio
-async def test_explicit_same_text_glossary_entry_exempts_a_japanese_name() -> None:
+async def test_glossary_does_not_exempt_a_kana_automatic_result() -> None:
     source = SourceText("credits", "name", 1, "初音ミク")
     response = '<target><sn id="1">初音ミク</sn></target>'
-    transport = ScriptedTransport(response)
+    transport = ScriptedTransport(response, response)
     service = TranslationService(transport, prompt_builder=HyMtPromptBuilder())
 
     outcome = await service.translate(
@@ -200,21 +175,6 @@ async def test_explicit_same_text_glossary_entry_exempts_a_japanese_name() -> No
     )
 
     assert [item.translated_text for item in outcome.results] == ["初音ミク"]
-    assert outcome.suspected_untranslated == ()
-    assert len(transport.prompts) == 1
-
-
-def test_glossary_only_protects_a_fragment_when_source_and_target_both_match() -> None:
-    assert is_suspected_untranslated(
-        "解消すること。",
-        "消除すること。",
-        glossary=(GlossaryEntry("すること", "应做之事"),),
-    ) is True
-
-
-def test_glossary_target_does_not_hide_unprotected_source_residue() -> None:
-    assert is_suspected_untranslated(
-        "解消すること。",
-        "消除すること（应做之事）。",
-        glossary=(GlossaryEntry("すること", "应做之事"),),
-    ) is True
+    assert outcome.suspected_untranslated == (source,)
+    assert len(transport.prompts) == 2
+    assert "初音ミク 翻译成 初音ミク" in transport.prompts[0]
