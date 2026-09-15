@@ -1995,15 +1995,19 @@ class LiveController:
         follow_up = None
         if scheduler is not None:
             if roi_job is not None:
+                # OCR success consumes the pixels even when text or layout
+                # still needs one confirmation.  Keeping those concerns
+                # separate prevents a static scene from being compared with
+                # the pre-change image forever.
+                accepted = not empty_roi_retry_requested
                 empty_retry_exhausted = roi_empty_retry and raw_count == 0
-                accepted = (
-                    not empty_roi_retry_requested
+                confirmation_requested = (
+                    accepted
+                    and not empty_retry_exhausted
+                    and not roi_job.is_confirmation
                     and (
-                        empty_retry_exhausted
-                        or (
-                            not self._tracker.has_pending_revisions
-                            and not self._layout_stabilizer.has_pending
-                        )
+                        self._tracker.has_pending_revisions
+                        or self._layout_stabilizer.has_pending
                     )
                 )
                 follow_up = scheduler.complete(
@@ -2011,6 +2015,7 @@ class LiveController:
                     accepted=accepted,
                     completed_at_s=now,
                     target_count=roi_target_count if accepted else None,
+                    confirmation_requested=confirmation_requested,
                     dispatch_follow_up=not empty_roi_retry_requested,
                 )
                 if empty_roi_retry_requested and not scheduler.has_pending:

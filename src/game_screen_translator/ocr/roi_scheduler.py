@@ -40,6 +40,7 @@ class ScheduledRoiScan:
     predicted_scan_kind: str
     predicted_remaining_s: float
     response_wait_budget_s: float
+    is_confirmation: bool = False
 
 
 class LatestFrameRoiScheduler:
@@ -122,6 +123,7 @@ class LatestFrameRoiScheduler:
         self._pending_fallback_reason: str | None = None
         self._pending_fallback_candidate_coverage = 0.0
         self._pending_fallback_candidate_region_count = 0
+        self._confirmation_pending = False
 
     @property
     def primed(self) -> bool:
@@ -270,7 +272,10 @@ class LatestFrameRoiScheduler:
 
         if proposal.rois:
             self._record_pending(proposal, now_s)
-        elif self._pending_fallback_reason is None:
+        elif (
+            self._pending_fallback_reason is None
+            and not self._confirmation_pending
+        ):
             # Latest Wins: a local transient that returned to the accepted (or
             # in-flight) state before OCR does not need to be scanned.
             self._clear_pending()
@@ -333,6 +338,8 @@ class LatestFrameRoiScheduler:
         trigger_reason = (
             "forced"
             if force
+            else "semantic-confirmation"
+            if self._confirmation_pending
             else "response-deadline"
             if (
                 self.response_target_s is not None
@@ -343,6 +350,7 @@ class LatestFrameRoiScheduler:
             if settled
             else "max-coalesce"
         )
+        is_confirmation = self._confirmation_pending
         job = ScheduledRoiScan(
             self._next_job_id,
             self._generation,
@@ -357,10 +365,12 @@ class LatestFrameRoiScheduler:
             predicted_scan_kind,
             predicted_remaining_s,
             response_wait_budget_s,
+            is_confirmation,
         )
         self._next_job_id += 1
         self._in_flight = job
         self._last_dispatch_at_s = now_s
+        self._confirmation_pending = False
         self._clear_pending()
         return job
 
@@ -371,16 +381,20 @@ class LatestFrameRoiScheduler:
         accepted: bool,
         completed_at_s: float,
         target_count: int | None = None,
+        confirmation_requested: bool = False,
         dispatch_follow_up: bool = True,
     ) -> ScheduledRoiScan | None:
-        """Finish a job, advancing the baseline only for accepted OCR output.
+        """Finish a job, advancing the baseline for successful OCR output.
 
-        Accepted OCR results may report how many changed translation targets
-        they produced. Repeated empty results gradually lower only the OCR
-        cadence (the cheap global change scan keeps running); the first empty
-        result receives a grace scan, and any real target restores the user
-        configured interval immediately. ``dispatch_follow_up=False`` keeps
-        rebuilt work pending so the caller can wait for a fresh observation.
+        Successful OCR results may report how many changed translation targets
+        they produced. A caller can request one semantic confirmation scan
+        when its text/layout state is still settling; that scan is independent
+        of the image baseline and is consumed at dispatch. Repeated empty
+        results gradually lower only the OCR cadence (the cheap global change
+        scan keeps running); the first empty result receives a grace scan, and
+        any real target restores the user configured interval immediately.
+        ``dispatch_follow_up=False`` keeps rebuilt work pending so the caller
+        can wait for a fresh observation.
         """
         self._require_primed()
         self._validate_poll_time(completed_at_s)
@@ -393,6 +407,8 @@ class LatestFrameRoiScheduler:
                 raise ValueError("target_count 不能为负数")
             if not accepted:
                 raise ValueError("失败的 OCR 不能提交 target_count")
+        if not isinstance(confirmation_requested, bool):
+            raise TypeError("confirmation_requested 必须是布尔值")
 
         post_job_pending_since = self._pending_since_s
         post_job_rois = self._pending_change_rois
@@ -409,6 +425,8 @@ class LatestFrameRoiScheduler:
             self._accepted_at_s = completed_at_s
             if target_count is not None:
                 self._record_target_feedback(target_count)
+            if confirmation_requested and not job.is_confirmation:
+                self._record_confirmation(job, completed_at_s)
         else:
             # The failed job did not consume its change. Rebuild from the last
             # accepted frame to the newest frame and retain any full-frame
@@ -469,6 +487,8 @@ class LatestFrameRoiScheduler:
                     pending_times,
                     default=job.observed_at_s,
                 )
+            if job.is_confirmation:
+                self._record_confirmation(job, completed_at_s)
 
         if not dispatch_follow_up:
             return None
@@ -520,6 +540,35 @@ class LatestFrameRoiScheduler:
             self._pending_fallback_candidate_region_count = (
                 proposal.candidate_region_count
             )
+
+    def _record_confirmation(
+        self,
+        job: ScheduledRoiScan,
+        completed_at_s: float,
+    ) -> None:
+        """Retain one semantic retry without rewinding the image baseline."""
+        if self._pending_since_s is None:
+            self._pending_since_s = completed_at_s
+        seeds = job.proposal.change_rois or job.proposal.rois
+        self._pending_change_rois = self._merge_rois(
+            (*self._pending_change_rois, *seeds)
+        )
+        self._pending_changed_fraction = max(
+            self._pending_changed_fraction,
+            job.proposal.changed_fraction,
+        )
+        if (
+            self._pending_fallback_reason is None
+            and job.proposal.fallback_full_frame
+        ):
+            self._pending_fallback_reason = job.proposal.reason
+            self._pending_fallback_candidate_coverage = (
+                job.proposal.candidate_coverage_fraction
+            )
+            self._pending_fallback_candidate_region_count = (
+                job.proposal.candidate_region_count
+            )
+        self._confirmation_pending = True
 
     def _pending_proposal(self) -> DynamicRoiProposal:
         assert self._latest_frame is not None

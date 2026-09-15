@@ -150,6 +150,46 @@ def test_full_frame_fallback_stays_sticky_until_successful_ocr() -> None:
     assert job.proposal.candidate_region_count == 1
 
 
+def test_successful_ocr_advances_baseline_before_one_semantic_confirmation() -> None:
+    base = _blank()
+    changed = base.copy()
+    changed[:, :160] = 255
+    scheduler = LatestFrameRoiScheduler(
+        _detector(),
+        min_ocr_interval_s=0.1,
+        settle_interval_s=0.0,
+        max_coalesce_s=0.2,
+    )
+    scheduler.prime(base, 0.0)
+
+    first_job = scheduler.observe(changed, 0.1)
+    assert first_job is not None
+    assert first_job.proposal.fallback_full_frame
+    assert scheduler.complete(
+        first_job,
+        accepted=True,
+        completed_at_s=0.1,
+        confirmation_requested=True,
+    ) is None
+    assert scheduler.has_pending
+
+    confirmation = scheduler.observe(changed.copy(), 0.2)
+    assert confirmation is not None
+    assert confirmation.is_confirmation
+    assert confirmation.proposal.fallback_full_frame
+    assert scheduler.complete(
+        confirmation,
+        accepted=True,
+        completed_at_s=0.2,
+        confirmation_requested=True,
+    ) is None
+
+    # The unchanged frame is now compared with the successful OCR frame, and
+    # the one-shot confirmation cannot create another full-frame loop.
+    assert not scheduler.has_pending
+    assert scheduler.observe(changed.copy(), 0.3) is None
+
+
 def test_rejected_ocr_does_not_consume_the_pending_change() -> None:
     base = _blank()
     changed = _paint(base, 120, 70)

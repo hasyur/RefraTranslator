@@ -1719,6 +1719,97 @@ def test_dynamic_roi_debug_reports_full_frame_fallback(
     controller.close()
 
 
+def test_dynamic_roi_full_frame_confirmation_does_not_replay_static_scene(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=1,
+            stable_ms=0,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            dynamic_roi_response_target_ms=500,
+            dynamic_roi_settle_ms=0,
+            dynamic_roi_ocr_interval_ms=250,
+            dynamic_roi_max_coalesce_ms=250,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    ocr = ColorBlockOcr()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [20.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller._tick()
+    controller._ocr_future.result(timeout=2)
+    clock[0] = 20.05
+    controller._tick()
+    old = next(
+        track for track in controller._tracker.visible_tracks if track.text == "待って。"
+    )
+    controller._tracker.apply_translations(
+        (TranslationResult(old.source("live-zone-1"), "旧译文"),)
+    )
+
+    changed = _dynamic_roi_frame()
+    changed[:, :800] = 255
+    changed[200:260, 200:600] = 220
+    capture.frame = changed
+    clock[0] = 20.2
+    controller._tick()
+    assert controller._ocr_future is None
+    clock[0] = 20.3
+    controller._tick()
+    assert controller._ocr_future is not None
+    assert controller._active_roi_plan is not None
+    assert controller._active_roi_plan.fallback_full_frame
+    controller._ocr_future.result(timeout=2)
+
+    clock[0] = 20.35
+    controller._tick()
+    scheduler = controller._roi_scheduler
+    assert scheduler is not None
+    assert scheduler.has_pending
+    assert controller._tracker.has_pending_revisions
+    assert len(ocr.input_shapes) == 2
+
+    clock[0] = 20.4
+    controller._tick()
+    assert controller._ocr_future is not None
+    assert controller._active_roi_job is not None
+    assert controller._active_roi_job.is_confirmation
+    assert controller._active_roi_plan is not None
+    assert controller._active_roi_plan.fallback_full_frame
+    controller._ocr_future.result(timeout=2)
+
+    clock[0] = 20.45
+    controller._tick()
+    assert not controller._tracker.has_pending_revisions
+    assert len(ocr.input_shapes) == 3
+    assert controller._roi_full_fallback_count == 2
+
+    for now in (20.55, 20.65, 20.75):
+        clock[0] = now
+        controller._tick()
+        assert controller._ocr_future is None
+    assert len(ocr.input_shapes) == 3
+    controller.close()
+
+
 def test_dynamic_roi_empty_plan_recovers_with_a_full_scan(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
