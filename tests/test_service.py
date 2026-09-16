@@ -80,6 +80,12 @@ async def test_late_old_revision_is_discarded() -> None:
         ("初音ミクの消失", "初音ミク的消失", True),
         ("日本語では「入る」", "在日语中称为「入る」。", True),
         ("用语", "用语「かな」", True),
+        ("水柿ツカサ", "水柿", True),
+        ("石原つぼみ", "石原", True),
+        ("山崎淳 + げそいくお", "山崎淳", True),
+        ("山崎淳げそいくお", "山崎淳葛索久夫", False),
+        ("水柿ツカサ", "水柿司", False),
+        ("正常です。", "正常。", False),
         ("Please wait.", "请稍等。", False),
         ("这是中文。", "这是中文。", False),
         ("FPS", "FPS", False),
@@ -97,7 +103,7 @@ def test_suspected_untranslated_detection_uses_kana_and_latin_exemptions(
 
 
 @pytest.mark.asyncio
-async def test_only_source_equal_items_receive_one_correction_retry() -> None:
+async def test_only_failed_items_receive_semantic_correction_retry() -> None:
     english = SourceText("dialogue", "english", 1, "Please wait.")
     japanese = SourceText("dialogue", "japanese", 1, "急げ。")
     transport = ScriptedTransport(
@@ -111,41 +117,92 @@ async def test_only_source_equal_items_receive_one_correction_retry() -> None:
     assert [item.translated_text for item in outcome.results] == ["请稍等。", "快点。"]
     assert outcome.suspected_untranslated == ()
     assert len(transport.prompts) == 2
-    assert "这是纠正重试" not in transport.prompts[0]
-    assert "这是纠正重试" in transport.prompts[1]
+    assert "第1次纠正" not in transport.prompts[0]
+    assert "第1次纠正" in transport.prompts[1]
+    assert "第2次纠正" not in transport.prompts[1]
     assert "Please wait." in transport.prompts[1]
     assert "急げ。" not in transport.prompts[1]
 
 
 @pytest.mark.asyncio
-async def test_partial_japanese_copy_receives_one_correction_retry() -> None:
+async def test_partial_japanese_copy_receives_semantic_then_phonetic_retry() -> None:
     source = SourceText("dialogue", "partial", 1, "解消すること。")
     transport = ScriptedTransport(
         '<target><sn id="1">消除すること。</sn></target>',
         '<target><sn id="1">消除すること。</sn></target>',
+        '<target><sn id="1">消除事项。</sn></target>',
     )
     service = TranslationService(transport, prompt_builder=HyMtPromptBuilder())
 
     outcome = await service.translate(TranslationBatch((source,)))
 
-    assert [item.translated_text for item in outcome.results] == ["消除すること。"]
-    assert outcome.suspected_untranslated == (source,)
-    assert len(transport.prompts) == 2
-    assert "这是纠正重试" in transport.prompts[1]
+    assert [item.translated_text for item in outcome.results] == ["消除事项。"]
+    assert outcome.suspected_untranslated == ()
+    assert len(transport.prompts) == 3
+    assert "第1次纠正" in transport.prompts[1]
+    assert "第2次纠正" in transport.prompts[2]
 
 
 @pytest.mark.asyncio
-async def test_second_source_equal_result_is_returned_but_marked_uncacheable() -> None:
+async def test_omitted_kana_segment_reaches_general_phonetic_retry() -> None:
+    water = SourceText("credits", "water", 1, "水柿ツカサ")
+    stone = SourceText("credits", "stone", 1, "石原つぼみ")
+    omitted = SourceText("credits", "omitted", 1, "山崎淳げそいくお")
+    complete = SourceText("credits", "complete", 1, "内匠靖明")
+    transport = ScriptedTransport(
+        "<target>"
+        '<sn id="1">水柿</sn>'
+        '<sn id="2">石原</sn>'
+        '<sn id="3">山崎淳</sn>'
+        '<sn id="4">内匠靖明</sn>'
+        "</target>",
+        "<target>"
+        '<sn id="1">水柿司</sn>'
+        '<sn id="2">石原</sn>'
+        '<sn id="3">山崎淳</sn>'
+        "</target>",
+        "<target>"
+        '<sn id="1">石原次博美</sn>'
+        '<sn id="2">山崎淳葛索久夫</sn>'
+        "</target>",
+    )
+    service = TranslationService(transport, prompt_builder=HyMtPromptBuilder())
+
+    outcome = await service.translate(
+        TranslationBatch((water, stone, omitted, complete))
+    )
+
+    assert [item.translated_text for item in outcome.results] == [
+        "水柿司",
+        "石原次博美",
+        "山崎淳葛索久夫",
+        "内匠靖明",
+    ]
+    assert outcome.suspected_untranslated == ()
+    assert len(transport.prompts) == 3
+    assert "山崎淳げそいくお" in transport.prompts[1]
+    assert "山崎淳げそいくお" in transport.prompts[2]
+    assert "水柿ツカサ" in transport.prompts[1]
+    assert "水柿ツカサ" not in transport.prompts[2]
+    assert "石原つぼみ" in transport.prompts[1]
+    assert "石原つぼみ" in transport.prompts[2]
+    assert "内匠靖明" not in transport.prompts[1]
+    assert "内匠靖明" not in transport.prompts[2]
+
+
+@pytest.mark.asyncio
+async def test_final_source_equal_result_is_returned_but_marked_uncacheable() -> None:
     source = SourceText("dialogue", "line", 1, "ここで待って。")
     response = '<target><sn id="1">ここで待って。</sn></target>'
-    transport = ScriptedTransport(response, response)
+    transport = ScriptedTransport(response, response, response)
     service = TranslationService(transport, prompt_builder=HyMtPromptBuilder())
 
     outcome = await service.translate(TranslationBatch((source,)))
 
     assert [item.translated_text for item in outcome.results] == ["ここで待って。"]
     assert outcome.suspected_untranslated == (source,)
-    assert len(transport.prompts) == 2
+    assert len(transport.prompts) == 3
+    assert "第2次纠正" in transport.prompts[2]
 
 
 @pytest.mark.asyncio
@@ -166,7 +223,7 @@ async def test_existing_latin_brand_is_not_suspected() -> None:
 async def test_glossary_does_not_exempt_a_kana_automatic_result() -> None:
     source = SourceText("credits", "name", 1, "初音ミク")
     response = '<target><sn id="1">初音ミク</sn></target>'
-    transport = ScriptedTransport(response, response)
+    transport = ScriptedTransport(response, response, response)
     service = TranslationService(transport, prompt_builder=HyMtPromptBuilder())
 
     outcome = await service.translate(
@@ -176,5 +233,7 @@ async def test_glossary_does_not_exempt_a_kana_automatic_result() -> None:
 
     assert [item.translated_text for item in outcome.results] == ["初音ミク"]
     assert outcome.suspected_untranslated == (source,)
-    assert len(transport.prompts) == 2
+    assert len(transport.prompts) == 3
     assert "初音ミク 翻译成 初音ミク" in transport.prompts[0]
+    assert "初音ミク 翻译成 初音ミク" not in transport.prompts[1]
+    assert "初音ミク 翻译成 初音ミク" not in transport.prompts[2]

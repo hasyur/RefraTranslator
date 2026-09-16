@@ -365,7 +365,14 @@ async def test_source_equal_retry_result_is_not_written_to_automatic_cache(
     config_path = tmp_path / "config.toml"
     profile = create_game_profile(config_path, _config(), "game")
     response = '<target><sn id="1">Please wait.</sn></target>'
-    transport = ScriptedTransport(response, response, response, response)
+    transport = ScriptedTransport(
+        response,
+        response,
+        response,
+        response,
+        response,
+        response,
+    )
     service = _service(transport, profile)
 
     first = await service.translate(
@@ -379,7 +386,7 @@ async def test_source_equal_retry_result_is_not_written_to_automatic_cache(
     assert [item.translated_text for item in second.outcome.results] == ["Please wait."]
     assert first.origins == ("model",)
     assert second.origins == ("model",)
-    assert len(transport.prompts) == 4
+    assert len(transport.prompts) == 6
     assert profile.cache.stats().automatic_entries == 0
 
 
@@ -390,7 +397,14 @@ async def test_partial_japanese_retry_result_is_not_written_to_automatic_cache(
     config_path = tmp_path / "config.toml"
     profile = create_game_profile(config_path, _config(), "game")
     response = '<target><sn id="1">消除すること。</sn></target>'
-    transport = ScriptedTransport(response, response, response, response)
+    transport = ScriptedTransport(
+        response,
+        response,
+        response,
+        response,
+        response,
+        response,
+    )
     service = _service(transport, profile)
 
     first = await service.translate(
@@ -414,7 +428,7 @@ async def test_partial_japanese_retry_result_is_not_written_to_automatic_cache(
     )
     assert first.origins == ("model",)
     assert second.origins == ("model",)
-    assert len(transport.prompts) == 4
+    assert len(transport.prompts) == 6
     assert profile.cache.stats().automatic_entries == 0
 
 
@@ -451,6 +465,7 @@ async def test_mixed_manual_automatic_and_model_results_keep_order_and_quality_m
         '<sn id="2">消除すること。</sn>'
         "</target>",
         '<target><sn id="1">消除すること。</sn></target>',
+        '<target><sn id="1">消除すること。</sn></target>',
     )
     service = _service(transport, profile)
 
@@ -472,7 +487,7 @@ async def test_mixed_manual_automatic_and_model_results_keep_order_and_quality_m
     ]
     assert outcome.origins == ("manual", "automatic", "model", "model")
     assert outcome.outcome.suspected_untranslated == (suspected,)
-    assert len(transport.prompts) == 2
+    assert len(transport.prompts) == 3
 
 
 @pytest.mark.asyncio
@@ -592,6 +607,10 @@ async def test_uncacheable_inflight_result_is_shared_without_persisting(
     )
     await _wait_for_calls(transport, 2)
     transport.calls[1][1].set_result(
+        '<target><sn id="1">待って。</sn></target>'
+    )
+    await _wait_for_calls(transport, 3)
+    transport.calls[2][1].set_result(
         '<target><sn id="1">待って。</sn></target>'
     )
     first, second = await asyncio.gather(first_task, second_task)

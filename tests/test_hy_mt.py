@@ -41,25 +41,57 @@ def test_prompt_uses_native_tags_and_escapes_source() -> None:
     assert "<target>" in prompt
 
 
-def test_prompt_uses_short_katakana_translation_policy() -> None:
+def test_prompt_uses_general_translation_policy_without_name_special_case() -> None:
     prompt = HyMtPromptBuilder(target_language="简体中文").build(_batch())
 
-    assert "片假名人名一律按日语读音音译成简体中文" in prompt
-    assert "禁止意译或保留原文" in prompt
-    assert "其他片假名词优先使用简体中文常用译名或意译" in prompt
-    assert "无法自然意译时才音译" in prompt
+    assert "优先使用常用译名或自然意译" in prompt
+    assert "无法自然意译的内容按原文读音音译" in prompt
+    assert "不得遗漏内容或保留日文假名" in prompt
     assert "相同原文始终使用相同译名" in prompt
+    assert "人名" not in prompt
+    assert "专名" not in prompt
 
 
-def test_correction_prompt_explicitly_rejects_copying_translatable_source() -> None:
-    prompt = HyMtPromptBuilder(target_language="简体中文").build(
+def test_retry_prompts_change_by_count_and_drop_global_context() -> None:
+    builder = HyMtPromptBuilder(
+        target_language="简体中文",
+        custom_prompt="这是一款校园游戏。",
+    )
+    glossary = (GlossaryEntry("フィクサー", "中间人"),)
+    context = (ContextPair("仕事だ。", "是工作。"),)
+
+    semantic_prompt = builder.build(
         _batch(),
-        correction=True,
+        glossary=glossary,
+        context=context,
+        retry_count=1,
+    )
+    phonetic_prompt = builder.build(
+        _batch(),
+        glossary=glossary,
+        context=context,
+        retry_count=2,
     )
 
-    assert "这是纠正重试" in prompt
-    assert "不要原样复制可翻译的英文或日文" in prompt
-    assert "专名、品牌和缩写可以保留" in prompt
+    assert "第1次纠正" in semantic_prompt
+    assert "完整意译成简体中文" in semantic_prompt
+    assert "第2次纠正" not in semantic_prompt
+    assert "第2次纠正" in phonetic_prompt
+    assert "按原文读音音译成简体中文" in phonetic_prompt
+    assert "第1次纠正" not in phonetic_prompt
+    for retry_prompt in (semantic_prompt, phonetic_prompt):
+        assert "这是一款校园游戏" not in retry_prompt
+        assert "フィクサー 翻译成 中间人" not in retry_prompt
+        assert "工作。" not in retry_prompt
+        assert "专名" not in retry_prompt
+        assert '<sn id="1">' in retry_prompt
+        assert "<target>" in retry_prompt
+
+
+@pytest.mark.parametrize("retry_count", [-1, 3])
+def test_prompt_rejects_unsupported_retry_count(retry_count: int) -> None:
+    with pytest.raises(ValueError, match="retry_count"):
+        HyMtPromptBuilder().build(_batch(), retry_count=retry_count)
 
 
 def test_profile_custom_prompt_is_included_and_revises_cache_contract() -> None:

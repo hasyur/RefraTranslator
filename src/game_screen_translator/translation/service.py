@@ -62,6 +62,34 @@ def _contains_kana(value: str) -> bool:
     )
 
 
+def _content_key_without_kana(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value)
+    return "".join(
+        character
+        for character in normalized
+        if character.isalnum()
+        and not _is_hiragana(character)
+        and not _is_katakana(character)
+        and not 0x1B000 <= ord(character) <= 0x1B16F
+    )
+
+
+def _kana_count(value: str) -> int:
+    normalized = unicodedata.normalize("NFKC", value)
+    return sum(
+        1
+        for character in normalized
+        if _is_hiragana(character)
+        or _is_katakana(character)
+        or 0x1B000 <= ord(character) <= 0x1B16F
+    )
+
+
+def _content_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value)
+    return "".join(character for character in normalized if character.isalnum())
+
+
 def _is_obvious_latin_exemption(value: str) -> bool:
     compact = value.strip()
     return bool(
@@ -85,6 +113,14 @@ def is_suspected_untranslated(
         return False
     if _contains_kana(translated):
         return True
+    if _contains_kana(source):
+        source_without_kana = _content_key_without_kana(source)
+        if (
+            source_without_kana
+            and _kana_count(source) > len(source_without_kana)
+            and source_without_kana == _content_key(translated)
+        ):
+            return True
     if source == translated:
         return bool(_LATIN_RE.search(source)) and not _is_obvious_latin_exemption(source)
     return False
@@ -120,21 +156,22 @@ class TranslationService:
             (item.wire_id for item in batch.items),
         )
 
-        retry_sources = tuple(
-            source
-            for source in batch.items
-            if is_suspected_untranslated(
-                source.text,
-                translated_by_id[source.wire_id],
+        retry_sources: tuple[SourceText, ...] = ()
+        for retry_count in (1, 2):
+            retry_sources = tuple(
+                source
+                for source in batch.items
+                if is_suspected_untranslated(
+                    source.text,
+                    translated_by_id[source.wire_id],
+                )
             )
-        )
-        if retry_sources:
+            if not retry_sources:
+                break
             retry_batch = TranslationBatch(retry_sources)
             retry_prompt = self._prompt_builder.build(
                 retry_batch,
-                glossary=glossary,
-                context=context,
-                correction=True,
+                retry_count=retry_count,
             )
             retry_response = await self._transport.complete(retry_prompt)
             translated_by_id.update(
@@ -146,7 +183,7 @@ class TranslationService:
 
         suspected_ids = {
             source.wire_id
-            for source in retry_sources
+            for source in batch.items
             if is_suspected_untranslated(
                 source.text,
                 translated_by_id[source.wire_id],

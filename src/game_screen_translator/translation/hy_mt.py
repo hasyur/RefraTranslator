@@ -10,7 +10,7 @@ from typing import Iterable, Sequence
 from game_screen_translator.domain import ContextPair, GlossaryEntry, TranslationBatch
 
 
-PROMPT_VERSION = "hy-mt1.5-batch-v3-katakana-policy"
+PROMPT_VERSION = "hy-mt1.5-batch-v4-progressive-correction"
 _CODE_FENCE_RE = re.compile(r"^\s*```(?:xml)?\s*(.*?)\s*```\s*$", re.DOTALL | re.IGNORECASE)
 _TARGET_RE = re.compile(r"<target(?:\s[^>]*)?>.*?</target\s*>", re.DOTALL | re.IGNORECASE)
 _SN_RE = re.compile(r"<sn\b[^>]*>.*?</sn\s*>", re.DOTALL | re.IGNORECASE)
@@ -54,36 +54,33 @@ class HyMtPromptBuilder:
         *,
         glossary: Sequence[GlossaryEntry] = (),
         context: Sequence[ContextPair] = (),
-        correction: bool = False,
+        retry_count: int = 0,
     ) -> str:
+        if retry_count not in (0, 1, 2):
+            raise ValueError("retry_count 必须是 0、1 或 2")
+
         sections: list[str] = []
 
-        if correction:
-            sections.append(
-                "这是纠正重试：上次结果原样复制了原文。"
-                f"不要原样复制可翻译的英文或日文，必须翻译成{self.target_language}；"
-                "专名、品牌和缩写可以保留。"
-            )
+        if retry_count == 0:
+            custom_prompt = self.custom_prompt.strip()
+            if custom_prompt:
+                sections.append(f"当前配置的补充说明：\n{custom_prompt}")
 
-        custom_prompt = self.custom_prompt.strip()
-        if custom_prompt:
-            sections.append(f"当前配置的补充说明：\n{custom_prompt}")
+            if glossary:
+                terminology = ["术语表中的固定译名必须原样使用："]
+                terminology.extend(
+                    f"{_one_line(entry.source)} 翻译成 {_one_line(entry.target)}"
+                    for entry in glossary
+                )
+                sections.append("\n".join(terminology))
 
-        if glossary:
-            terminology = ["术语表中的固定译名必须原样使用："]
-            terminology.extend(
-                f"{_one_line(entry.source)} 翻译成 {_one_line(entry.target)}"
-                for entry in glossary
-            )
-            sections.append("\n".join(terminology))
-
-        if context:
-            context_lines = ["参考最近的翻译对照来保持称呼、语气和上下文一致："]
-            context_lines.extend(
-                f"原文：{_one_line(pair.source)}\n译文：{_one_line(pair.target)}"
-                for pair in context
-            )
-            sections.append("\n".join(context_lines))
+            if context:
+                context_lines = ["参考最近的翻译对照来保持称呼、语气和上下文一致："]
+                context_lines.extend(
+                    f"原文：{_one_line(pair.source)}\n译文：{_one_line(pair.target)}"
+                    for pair in context
+                )
+                sections.append("\n".join(context_lines))
 
         source_lines = ["<source>"]
         source_lines.extend(
@@ -92,17 +89,32 @@ class HyMtPromptBuilder:
         )
         source_lines.append("</source>")
 
-        instruction = (
-            f"参考上面的信息，把下面文本翻译成{self.target_language}。"
-            f"片假名人名一律按日语读音音译成{self.target_language}，禁止意译或保留原文；"
-            f"其他片假名词优先使用{self.target_language}常用译名或意译，"
-            "无法自然意译时才音译；相同原文始终使用相同译名。"
+        if retry_count == 0:
+            instruction = (
+                f"把每个 <sn> 内的文本完整翻译成{self.target_language}。"
+                "优先使用常用译名或自然意译，无法自然意译的内容按原文读音音译；"
+                "不得遗漏内容或保留日文假名，相同原文始终使用相同译名。"
+            )
+        elif retry_count == 1:
+            instruction = (
+                f"第1次纠正：上次结果有内容未翻译或被遗漏。"
+                f"只把下面各项完整意译成{self.target_language}，使用自然含义或常用译名；"
+                "不得复制原文、保留日文假名或省略任何片段。"
+            )
+        else:
+            instruction = (
+                f"第2次纠正：上次意译仍有内容未翻译或被遗漏。"
+                f"把无法意译的内容全部按原文读音音译成{self.target_language}；"
+                "不得保留日文假名、可翻译英文或省略任何片段。"
+            )
+
+        output_contract = (
             "保留每个 <sn> 标签及其 id 属性和原有顺序，只翻译标签内的文字；"
             "id 是从 1 开始的连续短编号，请原样保留数字和两侧的双引号；"
             "用一个 <target> 根标签包住全部结果。"
             "只输出 XML 结果，不要翻译参考信息，不要添加解释。"
         )
-        sections.extend((instruction, "\n".join(source_lines)))
+        sections.extend((instruction + output_contract, "\n".join(source_lines)))
         return "\n\n".join(sections)
 
 
