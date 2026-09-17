@@ -1374,7 +1374,7 @@ class WorkbenchController(QObject):
             capture_height = max(1, round(geometry.height() * scale))
             self._monitor_names.append(
                 f"{index}: {screen.name()} · {capture_width}×{capture_height} · "
-                f"系统缩放 {round(scale * 100)}%"
+                f"{scale:g}x"
             )
         if self._monitor_values and self._monitor_index not in self._monitor_values:
             self._monitor_index = 0

@@ -165,9 +165,7 @@ def test_controller_monitor_label_uses_capture_pixel_size(
 
     controller._refresh_monitors()
 
-    assert controller.monitorNames == [
-        "0: DISPLAY1 · 2560×1440 · 系统缩放 125%"
-    ]
+    assert controller.monitorNames == ["0: DISPLAY1 · 2560×1440 · 1.25x"]
     controller.shutdown()
 
 
