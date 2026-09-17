@@ -2373,7 +2373,7 @@ def _successful_worker_result(batch: TranslationBatch):
     )
 
 
-def test_final_quality_gate_failure_is_not_published_or_added_to_context(
+def test_initial_success_publishes_while_failed_item_continues_quality_retries(
     monkeypatch,
 ) -> None:
     app = QApplication.instance() or QApplication([])
@@ -2410,31 +2410,49 @@ def test_final_quality_gate_failure_is_not_published_or_added_to_context(
         now=1.0,
     )
     bad_source, good_source = update.stable_sources
-    bad_result = TranslationResult(bad_source, "消除すること。")
-    good_result = TranslationResult(good_source, "正常译文")
     controller._latest_frame = np.zeros((120, 320, 3), dtype=np.uint8)
-    monkeypatch.setattr(
-        controller,
-        "_translate_blocking_timed",
-        lambda batch, context: live_runtime._TranslationWorkerResult(
+    semantic_started = threading.Event()
+    release_semantic = threading.Event()
+    calls: list[tuple[int, tuple[str, ...]]] = []
+
+    def translate(batch, context, quality_retry_count=0):
+        del context
+        calls.append(
+            (
+                quality_retry_count,
+                tuple(source.text for source in batch.items),
+            )
+        )
+        if quality_retry_count == 1:
+            semantic_started.set()
+            release_semantic.wait(timeout=5)
+        results = tuple(
+            TranslationResult(
+                source,
+                "正常译文" if source.text == good_source.text else "消除すること。",
+            )
+            for source in batch.items
+        )
+        suspected = tuple(
+            source for source in batch.items if source.text == bad_source.text
+        )
+        return live_runtime._TranslationWorkerResult(
             CachedTranslationOutcome(
-                TranslationOutcome(
-                    (bad_result, good_result),
-                    (),
-                    (bad_source,),
-                ),
-                ("model", "model"),
+                TranslationOutcome(results, (), suspected),
+                tuple("model" for _ in results),
             ),
             started_at=1.0,
             completed_at=1.1,
             llm_seconds=0.1,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
 
     try:
         controller._submit_translations((bad_source, good_source))
         next(iter(controller._translation_futures)).result(timeout=2)
         controller._collect_translations()
+        assert semantic_started.wait(timeout=2)
 
         tracks_by_text = {
             track.text: track for track in controller._tracker.visible_tracks
@@ -2448,6 +2466,31 @@ def test_final_quality_gate_failure_is_not_published_or_added_to_context(
         assert published_by_text[good_source.text].display_translation == "正常译文"
         assert [pair.target for pair in controller._context] == ["正常译文"]
         assert controller._early_context == {}
+        assert calls == [
+            (0, (bad_source.text, good_source.text)),
+            (1, (bad_source.text,)),
+        ]
+        assert (
+            bad_source.track_id,
+            bad_source.revision,
+        ) not in controller._translation_exhausted_keys
+
+        release_semantic.set()
+        next(iter(controller._translation_futures)).result(timeout=2)
+        controller._collect_translations()
+        next(iter(controller._translation_futures)).result(timeout=2)
+        controller._collect_translations()
+
+        tracks_by_text = {
+            track.text: track for track in controller._tracker.visible_tracks
+        }
+        assert tracks_by_text[bad_source.text].display_translation is None
+        assert tracks_by_text[good_source.text].display_translation == "正常译文"
+        assert calls == [
+            (0, (bad_source.text, good_source.text)),
+            (1, (bad_source.text,)),
+            (2, (bad_source.text,)),
+        ]
         assert (
             bad_source.track_id,
             bad_source.revision,
@@ -2458,6 +2501,136 @@ def test_final_quality_gate_failure_is_not_published_or_added_to_context(
         assert controller._pending_translations == []
         assert controller._translated_count == 1
     finally:
+        release_semantic.set()
+        controller.close()
+
+
+def test_quality_correction_updates_only_tracks_still_on_the_current_scene(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            provider="openai_compatible",
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0),
+    )
+    controller = LiveController(
+        config,
+        capture=FakeCapture(),
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    original_observations = (
+        OcrText(
+            "石原つぼみ",
+            0.99,
+            ((10, 10), (250, 10), (250, 40), (10, 40)),
+        ),
+        OcrText(
+            "水柿ツカサ",
+            0.99,
+            ((10, 60), (250, 60), (250, 90), (10, 90)),
+        ),
+        OcrText(
+            "正常です。",
+            0.99,
+            ((10, 110), (250, 110), (250, 140), (10, 140)),
+        ),
+    )
+    sources = controller._tracker.observe(
+        original_observations,
+        now=1.0,
+    ).stable_sources
+    semantic_started = threading.Event()
+    release_semantic = threading.Event()
+    calls: list[tuple[int, tuple[str, ...]]] = []
+
+    def translate(batch, context, quality_retry_count=0):
+        del context
+        calls.append(
+            (
+                quality_retry_count,
+                tuple(source.text for source in batch.items),
+            )
+        )
+        if quality_retry_count == 1:
+            semantic_started.set()
+            release_semantic.wait(timeout=5)
+        translations = {
+            0: {
+                "石原つぼみ": "石原",
+                "水柿ツカサ": "水柿",
+                "正常です。": "正常译文",
+            },
+            1: {
+                "石原つぼみ": "石原次博美",
+                "水柿ツカサ": "水柿司",
+            },
+        }
+        results = tuple(
+            TranslationResult(source, translations[quality_retry_count][source.text])
+            for source in batch.items
+        )
+        suspected = (
+            tuple(source for source in batch.items if source.text != "正常です。")
+            if quality_retry_count == 0
+            else ()
+        )
+        return live_runtime._TranslationWorkerResult(
+            CachedTranslationOutcome(
+                TranslationOutcome(results, (), suspected),
+                tuple("model" for _ in results),
+            ),
+            started_at=1.0,
+            completed_at=1.1,
+            llm_seconds=0.1,
+        )
+
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
+
+    try:
+        controller._submit_translations(sources)
+        next(iter(controller._translation_futures)).result(timeout=2)
+        controller._collect_translations()
+        assert semantic_started.wait(timeout=2)
+        assert next(
+            track
+            for track in controller._tracker.visible_tracks
+            if track.text == "正常です。"
+        ).display_translation == "正常译文"
+
+        current_observations = (
+            original_observations[0],
+            OcrText(
+                "新场景。",
+                0.99,
+                ((10, 60), (250, 60), (250, 90), (10, 90)),
+            ),
+            original_observations[2],
+        )
+        controller._tracker.observe(current_observations, now=2.0)
+        release_semantic.set()
+        next(iter(controller._translation_futures)).result(timeout=2)
+        controller._collect_translations()
+
+        tracks_by_text = {
+            track.text: track for track in controller._tracker.visible_tracks
+        }
+        assert tracks_by_text["石原つぼみ"].display_translation == "石原次博美"
+        assert tracks_by_text["新场景。"].display_translation is None
+        assert tracks_by_text["正常です。"].display_translation == "正常译文"
+        assert calls == [
+            (0, ("石原つぼみ", "水柿ツカサ", "正常です。")),
+            (1, ("石原つぼみ", "水柿ツカサ")),
+        ]
+        assert controller._stale_result_count == 1
+    finally:
+        release_semantic.set()
         controller.close()
 
 

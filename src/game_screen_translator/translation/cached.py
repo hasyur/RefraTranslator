@@ -62,10 +62,15 @@ class CachedTranslationService:
         batch: TranslationBatch,
         *,
         context: Sequence[ContextPair] = (),
+        retry_count: int | None = None,
     ) -> CachedTranslationOutcome:
         profile = self._profile
         if profile is None:
-            outcome = await self._service.translate(batch, context=context)
+            outcome = await self._service.translate(
+                batch,
+                context=context,
+                retry_count=retry_count,
+            )
             return CachedTranslationOutcome(
                 outcome,
                 tuple("model" for _ in outcome.results),
@@ -143,6 +148,7 @@ class CachedTranslationService:
                     glossary=profile.glossary,
                     context=context,
                     discard_stale=False,
+                    retry_count=retry_count,
                 )
                 results_by_id = {
                     result.source.wire_id: result for result in model_outcome.results

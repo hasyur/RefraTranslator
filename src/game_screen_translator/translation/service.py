@@ -147,39 +147,49 @@ class TranslationService:
         glossary: Sequence[GlossaryEntry] = (),
         context: Sequence[ContextPair] = (),
         discard_stale: bool = True,
+        retry_count: int | None = None,
     ) -> TranslationOutcome:
+        if retry_count not in (None, 0, 1, 2):
+            raise ValueError("翻译纠正阶段必须是 0、1 或 2")
+
         self.revisions.observe_batch(batch)
-        prompt = self._prompt_builder.build(batch, glossary=glossary, context=context)
+        prompt = self._prompt_builder.build(
+            batch,
+            glossary=glossary,
+            context=context,
+            retry_count=retry_count or 0,
+        )
         raw_response = await self._transport.complete(prompt)
         translated_by_id = self._response_parser.parse(
             raw_response,
             (item.wire_id for item in batch.items),
         )
 
-        retry_sources: tuple[SourceText, ...] = ()
-        for retry_count in (1, 2):
-            retry_sources = tuple(
-                source
-                for source in batch.items
-                if is_suspected_untranslated(
-                    source.text,
-                    translated_by_id[source.wire_id],
+        if retry_count is None:
+            retry_sources: tuple[SourceText, ...] = ()
+            for correction_retry_count in (1, 2):
+                retry_sources = tuple(
+                    source
+                    for source in batch.items
+                    if is_suspected_untranslated(
+                        source.text,
+                        translated_by_id[source.wire_id],
+                    )
                 )
-            )
-            if not retry_sources:
-                break
-            retry_batch = TranslationBatch(retry_sources)
-            retry_prompt = self._prompt_builder.build(
-                retry_batch,
-                retry_count=retry_count,
-            )
-            retry_response = await self._transport.complete(retry_prompt)
-            translated_by_id.update(
-                self._response_parser.parse(
-                    retry_response,
-                    (item.wire_id for item in retry_sources),
+                if not retry_sources:
+                    break
+                retry_batch = TranslationBatch(retry_sources)
+                retry_prompt = self._prompt_builder.build(
+                    retry_batch,
+                    retry_count=correction_retry_count,
                 )
-            )
+                retry_response = await self._transport.complete(retry_prompt)
+                translated_by_id.update(
+                    self._response_parser.parse(
+                        retry_response,
+                        (item.wire_id for item in retry_sources),
+                    )
+                )
 
         suspected_ids = {
             source.wire_id

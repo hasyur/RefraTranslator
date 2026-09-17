@@ -259,6 +259,7 @@ class _TranslationSubmission:
     source_bounds: tuple[Bounds | None, ...]
     session_epoch: int
     attempt: int = 1
+    quality_retry_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +273,7 @@ class _PendingTranslationRetry:
     first_recognized_at: float
     source_bounds: tuple[Bounds | None, ...]
     attempt: int
+    quality_retry_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -2355,7 +2357,7 @@ class LiveController:
                     batch,
                     context,
                     order_group,
-                    (batch_index,),
+                    (0, batch_index),
                     queued_at,
                     pipeline_started_at,
                     first_recognized_at,
@@ -2545,10 +2547,15 @@ class LiveController:
         self,
         submission: _TranslationSubmission,
     ) -> None:
-        future = self._translation_executor.submit(
-            self._translate_blocking_timed,
+        arguments: tuple[object, ...] = (
             submission.batch,
             submission.context,
+        )
+        if submission.quality_retry_count:
+            arguments += (submission.quality_retry_count,)
+        future = self._translation_executor.submit(
+            self._translate_blocking_timed,
+            *arguments,
         )
         self._translation_futures[future] = submission
 
@@ -2563,6 +2570,7 @@ class LiveController:
         self,
         batch: TranslationBatch,
         context: tuple[ContextPair, ...],
+        quality_retry_count: int = 0,
     ) -> _TranslationWorkerResult:
         started_at = time.monotonic()
 
@@ -2589,7 +2597,11 @@ class LiveController:
                     model=self._config.translation.model,
                     prompt_version=prompt_builder.prompt_version,
                 )
-                cached_outcome = await cached_service.translate(batch, context=context)
+                cached_outcome = await cached_service.translate(
+                    batch,
+                    context=context,
+                    retry_count=quality_retry_count,
+                )
                 durations = transport.completion_durations
                 return cached_outcome, (sum(durations) if durations else None)
 
@@ -2643,14 +2655,17 @@ class LiveController:
                 continue
 
             cached_outcome = worker_result.cached_outcome
-            # A final quality-gate failure is deliberately not published and
-            # must not be resubmitted on every live tick.  Keep the key spent
-            # until OCR produces a new track revision; a newer revision gets
-            # its own translation attempt naturally.
-            self._translation_exhausted_keys.update(
-                (source.track_id, source.revision)
-                for source in cached_outcome.outcome.suspected_untranslated
-            )
+            suspected = cached_outcome.outcome.suspected_untranslated
+            if suspected:
+                if submission.quality_retry_count < 2 and not self._finalizing:
+                    self._schedule_quality_correction(submission, suspected)
+                else:
+                    # A final quality-gate failure is deliberately not
+                    # published and must not be resubmitted on every live
+                    # tick. A newer track revision gets a fresh attempt.
+                    self._translation_exhausted_keys.update(
+                        (source.track_id, source.revision) for source in suspected
+                    )
             stability_seconds = max(
                 0.0, submission.queued_at - submission.first_recognized_at
             )
@@ -2675,6 +2690,7 @@ class LiveController:
                     else "缓存命中"
                 )
                 print(
+                    f"翻译阶段 {submission.quality_retry_count} · "
                     f"耗时：稳定 {stability_seconds:.3f}s · "
                     f"翻译排队 {queue_seconds:.3f}s · LLM {llm_label} · "
                     f"总计 {total_seconds:.3f}s · 批次 {len(submission.batch.items)} 条"
@@ -2698,6 +2714,48 @@ class LiveController:
         if not self._finalizing:
             self._dispatch_translation_work()
 
+    def _schedule_quality_correction(
+        self,
+        submission: _TranslationSubmission,
+        suspected: tuple[SourceText, ...],
+    ) -> None:
+        suspected_ids = {source.wire_id for source in suspected}
+        retry_items: list[SourceText] = []
+        retry_bounds: list[Bounds | None] = []
+        for source, bounds in zip(
+            submission.batch.items,
+            submission.source_bounds,
+            strict=True,
+        ):
+            if source.wire_id not in suspected_ids:
+                continue
+            retry_items.append(source)
+            retry_bounds.append(bounds)
+        if not retry_items:
+            return
+
+        next_retry_count = submission.quality_retry_count + 1
+        now = time.monotonic()
+        self._pending_translations.append(
+            _TranslationSubmission(
+                TranslationBatch(tuple(retry_items)),
+                submission.context,
+                submission.order_group,
+                (next_retry_count,) + submission.order_path[1:],
+                now,
+                now,
+                now,
+                tuple(retry_bounds),
+                submission.session_epoch,
+                1,
+                next_retry_count,
+            )
+        )
+        self._translation_queue_peak = max(
+            self._translation_queue_peak,
+            len(self._pending_translations),
+        )
+
     def _publish_ready_translations(self) -> None:
         scene_changed = False
         while True:
@@ -2714,9 +2772,16 @@ class LiveController:
                 cached_outcome,
             )
             accepted = tuple(result for result, _ in accepted_with_origins)
+            suspected_ids = {
+                source.wire_id for source in outcome.suspected_untranslated
+            }
+            publishable_result_count = sum(
+                result.source.wire_id not in suspected_ids
+                for result in outcome.results
+            )
             self._stale_result_count += (
                 len(outcome.discarded_stale)
-                + len(outcome.results)
+                + publishable_result_count
                 - len(accepted)
             )
             self._reattached_result_count += reattached
@@ -2872,6 +2937,7 @@ class LiveController:
                     first_recognized_at=submission.first_recognized_at,
                     source_bounds=rebound_bounds[item_slice],
                     attempt=1,
+                    quality_retry_count=submission.quality_retry_count,
                     delay_seconds=_TRANSLATION_RETRY_BASE_SECONDS,
                 )
             return True
@@ -2894,6 +2960,7 @@ class LiveController:
                     first_recognized_at=submission.first_recognized_at,
                     source_bounds=rebound_bounds[item_slice],
                     attempt=_MAX_TRANSLATION_ATTEMPTS,
+                    quality_retry_count=submission.quality_retry_count,
                     delay_seconds=_TRANSLATION_RETRY_BASE_SECONDS,
                 )
             return True
@@ -2915,6 +2982,7 @@ class LiveController:
             first_recognized_at=submission.first_recognized_at,
             source_bounds=rebound_bounds,
             attempt=submission.attempt + 1,
+            quality_retry_count=submission.quality_retry_count,
             delay_seconds=delay,
         )
         return True
@@ -2930,6 +2998,7 @@ class LiveController:
         first_recognized_at: float,
         source_bounds: tuple[Bounds | None, ...],
         attempt: int,
+        quality_retry_count: int,
         delay_seconds: float,
     ) -> None:
         self._translation_retries.append(
@@ -2943,6 +3012,7 @@ class LiveController:
                 first_recognized_at,
                 source_bounds,
                 attempt,
+                quality_retry_count,
             )
         )
         self._translation_retry_count += 1
@@ -2985,6 +3055,7 @@ class LiveController:
                     source_bounds,
                     self._session_epoch,
                     retry.attempt,
+                    retry.quality_retry_count,
                 )
             )
 

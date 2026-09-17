@@ -491,6 +491,52 @@ async def test_mixed_manual_automatic_and_model_results_keep_order_and_quality_m
 
 
 @pytest.mark.asyncio
+async def test_staged_quality_retry_caches_only_the_accepted_result(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    transport = ScriptedTransport(
+        '<target><sn id="1">石原</sn></target>',
+        '<target><sn id="1">石原次博美</sn></target>',
+    )
+    service = _service(transport, profile)
+    initial_source = SourceText("credits", "initial", 1, "石原つぼみ")
+
+    initial = await service.translate(
+        TranslationBatch((initial_source,)),
+        retry_count=0,
+    )
+
+    assert initial.outcome.suspected_untranslated == (initial_source,)
+    assert profile.cache.stats().automatic_entries == 0
+    assert len(transport.prompts) == 1
+
+    corrected_source = SourceText("credits", "corrected", 1, "石原つぼみ")
+    corrected = await service.translate(
+        TranslationBatch((corrected_source,)),
+        retry_count=1,
+    )
+    cached_source = SourceText("credits", "cached", 1, "石原つぼみ")
+    cached = await service.translate(
+        TranslationBatch((cached_source,)),
+        retry_count=2,
+    )
+
+    assert [item.translated_text for item in corrected.outcome.results] == [
+        "石原次博美"
+    ]
+    assert corrected.origins == ("model",)
+    assert corrected.outcome.suspected_untranslated == ()
+    assert [item.translated_text for item in cached.outcome.results] == [
+        "石原次博美"
+    ]
+    assert cached.origins == ("automatic",)
+    assert profile.cache.stats().automatic_entries == 1
+    assert len(transport.prompts) == 2
+
+
+@pytest.mark.asyncio
 async def test_existing_source_equal_cache_is_removed_without_invalidating_good_cache(
     tmp_path: Path,
 ) -> None:

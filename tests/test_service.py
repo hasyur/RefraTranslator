@@ -125,6 +125,36 @@ async def test_only_failed_items_receive_semantic_correction_retry() -> None:
 
 
 @pytest.mark.asyncio
+async def test_explicit_quality_stage_returns_without_running_later_stages() -> None:
+    source = SourceText("credits", "name", 1, "石原つぼみ")
+    transport = ScriptedTransport(
+        '<target><sn id="1">石原</sn></target>',
+        '<target><sn id="1">石原次博美</sn></target>',
+    )
+    service = TranslationService(transport, prompt_builder=HyMtPromptBuilder())
+
+    initial = await service.translate(
+        TranslationBatch((source,)),
+        retry_count=0,
+    )
+
+    assert [item.translated_text for item in initial.results] == ["石原"]
+    assert initial.suspected_untranslated == (source,)
+    assert len(transport.prompts) == 1
+    assert "第1次纠正" not in transport.prompts[0]
+
+    corrected = await service.translate(
+        TranslationBatch((source,)),
+        retry_count=1,
+    )
+
+    assert [item.translated_text for item in corrected.results] == ["石原次博美"]
+    assert corrected.suspected_untranslated == ()
+    assert len(transport.prompts) == 2
+    assert "第1次纠正" in transport.prompts[1]
+
+
+@pytest.mark.asyncio
 async def test_partial_japanese_copy_receives_semantic_then_phonetic_retry() -> None:
     source = SourceText("dialogue", "partial", 1, "解消すること。")
     transport = ScriptedTransport(
