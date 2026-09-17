@@ -2070,6 +2070,27 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     assert window.width() >= 980
     assert window.height() >= 700
 
+    home_metrics = window.findChild(QObject, "homeLastRunMetrics")
+    home_peak_cards = window.findChild(QObject, "homePeakCards")
+    home_ocr_peak_card = window.findChild(QObject, "homeOcrPeakCard")
+    home_llm_peak_card = window.findChild(QObject, "homeLlmPeakCard")
+    home_ocr_peak = window.findChild(QObject, "homeOcrPeakValue")
+    home_llm_peak = window.findChild(QObject, "homeLlmPeakValue")
+    assert home_metrics is not None
+    assert home_peak_cards is not None
+    assert home_ocr_peak_card is not None
+    assert home_llm_peak_card is not None
+    assert home_ocr_peak is not None
+    assert home_llm_peak is not None
+    assert home_metrics.property("visible") is True
+    assert home_peak_cards.property("visible") is True
+    assert home_ocr_peak.property("text") == "400 ms"
+    assert home_llm_peak.property("text") == "2.50 s"
+    assert home_ocr_peak.property("font").pixelSize() == 44
+    assert home_llm_peak.property("font").pixelSize() == 44
+    assert home_ocr_peak_card.property("height") >= 142
+    assert home_llm_peak_card.property("height") >= 142
+
     controller.setPage("OCR")
     app.processEvents()
     ocr_list = window.findChild(QObject, "ocrLastRunList")
@@ -2416,6 +2437,13 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     section_title = window.findChild(QObject, "sectionHeaderTitle")
     unavailable_title = window.findChild(QObject, "unavailableStateTitle")
     home_hero = window.findChild(QObject, "homeRunHero")
+    home_profile = window.findChild(QObject, "homeProfileName")
+    home_ocr_card = window.findChild(QObject, "homeOcrSignalCard")
+    home_translation_card = window.findChild(QObject, "homeTranslationSignalCard")
+    home_ocr_accent = window.findChild(QObject, "homeOcrSignalAccent")
+    home_translation_spectrum = window.findChild(QObject, "homeTranslationSignalSpectrum")
+    home_ocr_value = window.findChild(QObject, "homeOcrSignalValue")
+    home_translation_value = window.findChild(QObject, "homeTranslationSignalValue")
     save_button = window.findChild(QObject, "saveAllButton")
     panel_accent = window.findChild(QObject, "panelAccentEdge")
     panel_spectrum = window.findChild(QObject, "panelSpectrumEdge")
@@ -2432,6 +2460,13 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert section_title is not None
     assert unavailable_title is not None
     assert home_hero is not None
+    assert home_profile is not None
+    assert home_ocr_card is not None
+    assert home_translation_card is not None
+    assert home_ocr_accent is not None
+    assert home_translation_spectrum is not None
+    assert home_ocr_value is not None
+    assert home_translation_value is not None
     assert save_button is not None
     assert panel_accent is not None
     assert panel_spectrum is not None
@@ -2451,7 +2486,13 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert section_title.property("font").weight() == 600
     assert section_title.property("font").letterSpacing() == 2
     assert unavailable_title.property("font").pixelSize() == 22
-    assert home_hero.property("font").pixelSize() == 34
+    assert home_hero.property("font").pixelSize() == 54
+    assert home_hero.property("font").weight() == 700
+    assert home_profile.property("font").pixelSize() == 18
+    assert home_ocr_value.property("font").pixelSize() == 20
+    assert home_translation_value.property("font").pixelSize() == 20
+    assert home_ocr_accent.property("color") == theme.property("accent")
+    assert home_translation_spectrum.property("color") == theme.property("spectrum")
     assert button_label.property("font").pixelSize() == 11
     assert button_label.property("font").weight() == 600
     assert button_label.property("font").letterSpacing() >= 0.8

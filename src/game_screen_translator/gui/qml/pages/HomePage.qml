@@ -78,7 +78,7 @@ Item {
 
                 ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 5
+                    spacing: 7
                     Text {
                         objectName: "homeRunHero"
                         text: root.workbench.runState
@@ -86,80 +86,129 @@ Item {
                              : root.workbench.runTone === "warning" ? root.theme.amber
                              : root.workbench.running ? root.theme.accent : root.theme.text
                         font.family: root.theme.displayFontFor(text)
-                        font.pixelSize: 34
-                        font.weight: Font.DemiBold
+                        font.pixelSize: 54
+                        font.weight: Font.Bold
                     }
                     Text {
+                        objectName: "homeProfileName"
                         text: root.workbench.currentProfileName
                         color: root.theme.textSoft
                         font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 14
+                        font.pixelSize: 18
+                        font.weight: Font.Medium
                     }
                 }
 
-                Rectangle {
+                RowLayout {
+                    objectName: "homeSignalCards"
                     Layout.fillWidth: true
-                    implicitHeight: 118
-                    color: "transparent"
-                    border.color: root.theme.line
+                    Layout.preferredHeight: 132
+                    Layout.minimumHeight: 132
+                    spacing: 12
 
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 16
-                        spacing: 10
+                    Rectangle {
+                        objectName: "homeOcrSignalCard"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.08)
+                        border.color: root.theme.accent
+                        border.width: 1
+                        clip: true
+
+                        Rectangle {
+                            objectName: "homeOcrSignalAccent"
+                            width: 4
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            color: root.theme.accent
+                        }
 
                         ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 5
+                            anchors.fill: parent
+                            anchors.margins: 18
+                            anchors.leftMargin: 24
+                            spacing: 6
                             Text {
+                                objectName: "homeOcrSignalLabel"
                                 text: "OCR"
                                 color: root.theme.accent
                                 font.family: root.theme.monoFontFor(text)
-                                font.pixelSize: 10
-                                font.letterSpacing: 1
+                                font.pixelSize: 11
+                                font.letterSpacing: 1.4
                             }
                             Text {
+                                objectName: "homeOcrSignalValue"
                                 text: root.workbench.ocrStatus
                                 color: root.theme.text
                                 font.family: root.theme.uiFontFor(text)
-                                font.pixelSize: 14
+                                font.pixelSize: 20
+                                font.weight: Font.Medium
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
                             Text {
                                 text: root.workbench.detectionQualitySummary
-                                color: root.theme.textDim
+                                color: root.theme.textSoft
                                 font.family: root.theme.monoFontFor(text)
                                 font.pixelSize: 10
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
                             }
+                            Item { Layout.fillHeight: true }
+                        }
+                    }
+
+                    Rectangle {
+                        objectName: "homeTranslationSignalCard"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: Qt.rgba(root.theme.spectrum.r, root.theme.spectrum.g, root.theme.spectrum.b, 0.08)
+                        border.color: root.theme.spectrum
+                        border.width: 1
+                        clip: true
+
+                        Rectangle {
+                            objectName: "homeTranslationSignalSpectrum"
+                            width: 4
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            color: root.theme.spectrum
                         }
 
-                        Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: root.theme.line }
-
                         ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 5
+                            anchors.fill: parent
+                            anchors.margins: 18
+                            anchors.leftMargin: 24
+                            spacing: 6
                             Text {
+                                objectName: "homeTranslationSignalLabel"
                                 text: "TRANSLATION"
                                 color: root.theme.spectrum
                                 font.family: root.theme.monoFontFor(text)
-                                font.pixelSize: 10
-                                font.letterSpacing: 1
+                                font.pixelSize: 11
+                                font.letterSpacing: 1.4
                             }
                             Text {
+                                objectName: "homeTranslationSignalValue"
                                 text: root.workbench.backend === "builtin" ? "内置本地模型" : "外部 API"
                                 color: root.theme.text
                                 font.family: root.theme.uiFontFor(text)
-                                font.pixelSize: 14
+                                font.pixelSize: 20
+                                font.weight: Font.Medium
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
                             }
                             Text {
                                 text: root.workbench.backend === "builtin" ? root.workbench.builtinModel : root.workbench.model
-                                color: root.theme.textDim
+                                color: root.theme.textSoft
                                 font.family: root.theme.monoFontFor(text)
                                 font.pixelSize: 10
                                 elide: Text.ElideMiddle
                                 Layout.fillWidth: true
                             }
+                            Item { Layout.fillHeight: true }
                         }
                     }
                 }
@@ -180,52 +229,98 @@ Item {
                     visible: root.workbench.lastRunAvailable
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    color: "transparent"
+                    Layout.minimumHeight: 196
+                    implicitHeight: 196
+                    color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.025)
                     border.color: root.theme.line
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: 16
-                        spacing: 9
+                        spacing: 12
                         Text {
+                            objectName: "homeLastRunStatus"
                             text: root.workbench.lastRunStatus
                             color: root.theme.accent
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 10
+                            font.pixelSize: 11
+                            font.letterSpacing: 1.1
                             Layout.fillWidth: true
                         }
                         RowLayout {
+                            objectName: "homePeakCards"
                             Layout.fillWidth: true
+                            Layout.fillHeight: true
                             spacing: 12
-                            ColumnLayout {
+
+                            Rectangle {
+                                objectName: "homeOcrPeakCard"
                                 Layout.fillWidth: true
-                                Text {
-                                    text: "OCR 峰值"
-                                    color: root.theme.textDim
-                                    font.family: root.theme.uiFontFor(text)
-                                    font.pixelSize: 11
-                                }
-                                Text {
-                                    text: root.workbench.lastRunOcrPeakText
-                                    color: root.theme.accent
-                                    font.family: root.theme.displayFontFor(text)
-                                    font.pixelSize: 25
-                                    font.weight: Font.DemiBold
+                                Layout.fillHeight: true
+                                Layout.minimumHeight: 142
+                                color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.08)
+                                border.color: root.theme.accent
+                                border.width: 1
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 18
+                                    spacing: 7
+                                    Text {
+                                        text: "OCR 峰值"
+                                        color: root.theme.textSoft
+                                        font.family: root.theme.uiFontFor(text)
+                                        font.pixelSize: 12
+                                    }
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 2
+                                        color: root.theme.accent
+                                        opacity: 0.6
+                                    }
+                                    Text {
+                                        objectName: "homeOcrPeakValue"
+                                        text: root.workbench.lastRunOcrPeakText
+                                        color: root.theme.accent
+                                        font.family: root.theme.displayFontFor(text)
+                                        font.pixelSize: 44
+                                        font.weight: Font.Bold
+                                    }
+                                    Item { Layout.fillHeight: true }
                                 }
                             }
-                            ColumnLayout {
+
+                            Rectangle {
+                                objectName: "homeLlmPeakCard"
                                 Layout.fillWidth: true
-                                Text {
-                                    text: "LLM 峰值"
-                                    color: root.theme.textDim
-                                    font.family: root.theme.uiFontFor(text)
-                                    font.pixelSize: 11
-                                }
-                                Text {
-                                    text: root.workbench.lastRunLlmPeakText
-                                    color: root.theme.spectrum
-                                    font.family: root.theme.displayFontFor(text)
-                                    font.pixelSize: 25
-                                    font.weight: Font.DemiBold
+                                Layout.fillHeight: true
+                                Layout.minimumHeight: 142
+                                color: Qt.rgba(root.theme.spectrum.r, root.theme.spectrum.g, root.theme.spectrum.b, 0.08)
+                                border.color: root.theme.spectrum
+                                border.width: 1
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 18
+                                    spacing: 7
+                                    Text {
+                                        text: "LLM 峰值"
+                                        color: root.theme.textSoft
+                                        font.family: root.theme.uiFontFor(text)
+                                        font.pixelSize: 12
+                                    }
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 2
+                                        color: root.theme.spectrum
+                                        opacity: 0.6
+                                    }
+                                    Text {
+                                        objectName: "homeLlmPeakValue"
+                                        text: root.workbench.lastRunLlmPeakText
+                                        color: root.theme.spectrum
+                                        font.family: root.theme.displayFontFor(text)
+                                        font.pixelSize: 44
+                                        font.weight: Font.Bold
+                                    }
+                                    Item { Layout.fillHeight: true }
                                 }
                             }
                         }
@@ -233,7 +328,7 @@ Item {
                             text: "仅统计上次正常且有效运行；未产生的单项显示“未产生”。"
                             color: root.theme.textDim
                             font.family: root.theme.uiFontFor(text)
-                            font.pixelSize: 11
+                            font.pixelSize: 12
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
