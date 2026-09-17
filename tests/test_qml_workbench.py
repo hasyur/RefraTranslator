@@ -2072,14 +2072,14 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
 
     home_metrics = window.findChild(QObject, "homeLastRunMetrics")
     home_peak_cards = window.findChild(QObject, "homePeakCards")
-    home_ocr_peak_card = window.findChild(QObject, "homeOcrPeakCard")
-    home_llm_peak_card = window.findChild(QObject, "homeLlmPeakCard")
+    home_ocr_peak_group = window.findChild(QObject, "homeOcrPeakGroup")
+    home_llm_peak_group = window.findChild(QObject, "homeLlmPeakGroup")
     home_ocr_peak = window.findChild(QObject, "homeOcrPeakValue")
     home_llm_peak = window.findChild(QObject, "homeLlmPeakValue")
     assert home_metrics is not None
     assert home_peak_cards is not None
-    assert home_ocr_peak_card is not None
-    assert home_llm_peak_card is not None
+    assert home_ocr_peak_group is not None
+    assert home_llm_peak_group is not None
     assert home_ocr_peak is not None
     assert home_llm_peak is not None
     assert home_metrics.property("visible") is True
@@ -2088,8 +2088,10 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     assert home_llm_peak.property("text") == "2.50 s"
     assert home_ocr_peak.property("font").pixelSize() == 44
     assert home_llm_peak.property("font").pixelSize() == 44
-    assert home_ocr_peak_card.property("height") >= 142
-    assert home_llm_peak_card.property("height") >= 142
+    assert home_ocr_peak_group.property("color") is None
+    assert home_llm_peak_group.property("color") is None
+    assert home_ocr_peak_group.property("height") >= 142
+    assert home_llm_peak_group.property("height") >= 142
 
     controller.setPage("OCR")
     app.processEvents()
@@ -2438,8 +2440,8 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     unavailable_title = window.findChild(QObject, "unavailableStateTitle")
     home_hero = window.findChild(QObject, "homeRunHero")
     home_profile = window.findChild(QObject, "homeProfileName")
-    home_ocr_card = window.findChild(QObject, "homeOcrSignalCard")
-    home_translation_card = window.findChild(QObject, "homeTranslationSignalCard")
+    home_ocr_group = window.findChild(QObject, "homeOcrSignalGroup")
+    home_translation_group = window.findChild(QObject, "homeTranslationSignalGroup")
     home_ocr_accent = window.findChild(QObject, "homeOcrSignalAccent")
     home_translation_spectrum = window.findChild(QObject, "homeTranslationSignalSpectrum")
     home_ocr_value = window.findChild(QObject, "homeOcrSignalValue")
@@ -2461,12 +2463,14 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert unavailable_title is not None
     assert home_hero is not None
     assert home_profile is not None
-    assert home_ocr_card is not None
-    assert home_translation_card is not None
+    assert home_ocr_group is not None
+    assert home_translation_group is not None
     assert home_ocr_accent is not None
     assert home_translation_spectrum is not None
     assert home_ocr_value is not None
     assert home_translation_value is not None
+    assert home_ocr_group.property("color") is None
+    assert home_translation_group.property("color") is None
     assert save_button is not None
     assert panel_accent is not None
     assert panel_spectrum is not None

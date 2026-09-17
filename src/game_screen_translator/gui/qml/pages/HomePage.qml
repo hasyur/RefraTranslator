@@ -106,14 +106,10 @@ Item {
                     Layout.minimumHeight: 132
                     spacing: 12
 
-                    Rectangle {
-                        objectName: "homeOcrSignalCard"
+                    Item {
+                        objectName: "homeOcrSignalGroup"
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.08)
-                        border.color: root.theme.accent
-                        border.width: 1
-                        clip: true
 
                         Rectangle {
                             objectName: "homeOcrSignalAccent"
@@ -159,14 +155,10 @@ Item {
                         }
                     }
 
-                    Rectangle {
-                        objectName: "homeTranslationSignalCard"
+                    Item {
+                        objectName: "homeTranslationSignalGroup"
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        color: Qt.rgba(root.theme.spectrum.r, root.theme.spectrum.g, root.theme.spectrum.b, 0.08)
-                        border.color: root.theme.spectrum
-                        border.width: 1
-                        clip: true
 
                         Rectangle {
                             objectName: "homeTranslationSignalSpectrum"
@@ -252,14 +244,11 @@ Item {
                             Layout.fillHeight: true
                             spacing: 12
 
-                            Rectangle {
-                                objectName: "homeOcrPeakCard"
+                            Item {
+                                objectName: "homeOcrPeakGroup"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 Layout.minimumHeight: 142
-                                color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.08)
-                                border.color: root.theme.accent
-                                border.width: 1
                                 ColumnLayout {
                                     anchors.fill: parent
                                     anchors.margins: 18
@@ -288,14 +277,11 @@ Item {
                                 }
                             }
 
-                            Rectangle {
-                                objectName: "homeLlmPeakCard"
+                            Item {
+                                objectName: "homeLlmPeakGroup"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 Layout.minimumHeight: 142
-                                color: Qt.rgba(root.theme.spectrum.r, root.theme.spectrum.g, root.theme.spectrum.b, 0.08)
-                                border.color: root.theme.spectrum
-                                border.width: 1
                                 ColumnLayout {
                                     anchors.fill: parent
                                     anchors.margins: 18
