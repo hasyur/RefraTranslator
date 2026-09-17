@@ -1029,7 +1029,6 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
     for object_name in (
         "openCreateProfileDialogButton",
         "createProfileNameField",
-        "captureRegionSelectAction",
         "ocrProbeAction",
         "openDeleteModelDialogButton",
     ):
@@ -2600,7 +2599,7 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
 
     controller.setPage("CAPTURE")
     app.processEvents()
-    _click_quick_item(window, "captureRegionSelectAction")
+    custom_action = _click_quick_item(window, "captureCustomAction")
     assert int(stage.property("actionSequence")) == previous_sequence
     assert stage.property("actionPulseRunning") is False
     assert selectors[-1].opened is True
@@ -2626,7 +2625,7 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
     assert abs(float(capture_scan_line.property("y")) - resting_scan_y) > 10
     previous_sequence += 1
 
-    _click_quick_item(window, "captureRegionSelectAction")
+    _click_quick_item(window, "captureCustomAction")
     assert window.isVisible() is False
     selectors[-1].finished.emit(int(QDialog.DialogCode.Rejected))
     app.processEvents()
@@ -2639,7 +2638,7 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
     assert feedback_layer.property("visible") is False
 
     selector_failure.append(RuntimeError("selector unavailable"))
-    _click_quick_item(window, "captureRegionSelectAction")
+    _click_quick_item(window, "captureCustomAction")
     app.processEvents()
     QTest.qWait(1)
     app.processEvents()
@@ -2648,6 +2647,13 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
     assert stage.property("actionPulseRunning") is False
     assert capture_motif.property("actionLinked") is False
     assert feedback_layer.property("visible") is False
+
+    assert custom_action.property("text") == "自定义区域"
+    assert window.findChild(QObject, "captureRegionSelectAction") is None
+    assert not any(
+        str(item.property("text")) in {"框选区域", "保存区域"}
+        for item in window.findChildren(QObject)
+    )
 
     motif_names = ["captureStageMotif"]
     visual_states = [(capture_scan_line, "y", resting_scan_y)]
@@ -2719,6 +2725,117 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
     assert window.property("pageTransitioning") is False
     assert title.property("refractionRunning") is False
     assert float(title.property("refractionShift")) == 6
+    host.shutdown()
+
+
+def test_capture_custom_action_preserves_cancel_and_applies_boundary_edits(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setReducedMotion(True)
+    selectors: list[_SelectorStub] = []
+
+    def make_selector(_screen) -> _SelectorStub:
+        selector = _SelectorStub()
+        selectors.append(selector)
+        return selector
+
+    controller.setPage("CAPTURE")
+    host = QmlWorkbenchHost(
+        controller,
+        application=app,
+        selector_factory=make_selector,
+    )
+    host.show()
+    app.processEvents()
+    window = host.window
+    assert window is not None
+
+    custom_action = window.findChild(QObject, "captureCustomAction")
+    assert custom_action is not None
+    assert custom_action.property("text") == "自定义区域"
+    assert window.findChild(QObject, "captureRegionSelectAction") is None
+    assert controller.customRegion is False
+    original_region = (
+        controller.captureLeft,
+        controller.captureTop,
+        controller.captureWidth,
+        controller.captureHeight,
+    )
+
+    _click_quick_item(window, "captureCustomAction")
+    assert window.isVisible() is False
+    assert selectors[-1].opened is True
+    selectors[-1].finished.emit(int(QDialog.DialogCode.Rejected))
+    app.processEvents()
+    assert window.isVisible() is True
+    assert controller.customRegion is False
+    assert (
+        controller.captureLeft,
+        controller.captureTop,
+        controller.captureWidth,
+        controller.captureHeight,
+    ) == original_region
+
+    _click_quick_item(window, "captureCustomAction")
+    selectors[-1].selected_region = (10, 20, 640, 180)
+    selectors[-1].finished.emit(int(QDialog.DialogCode.Accepted))
+    app.processEvents()
+    assert window.isVisible() is True
+    assert controller.customRegion is True
+    assert (
+        controller.captureLeft,
+        controller.captureTop,
+        controller.captureWidth,
+        controller.captureHeight,
+    ) == (10, 20, 640, 180)
+    saved_profile = load_game_profile(config_path, load_config(config_path), "game")
+    assert saved_profile.capture_settings.region == (10, 20, 640, 180)
+
+    desired_values = {
+        "捕获区域左边界": 30,
+        "捕获区域上边界": 40,
+        "捕获区域宽度": 800,
+        "捕获区域高度": 400,
+    }
+    steppers = {
+        str(item.property("accessibleName")): item
+        for item in window.findChildren(QObject)
+        if str(item.property("accessibleName")) in desired_values
+    }
+    assert set(steppers) == set(desired_values)
+    for name, value in desired_values.items():
+        stepper = steppers[name]
+        assert stepper.property("enabled") is True
+        editor = stepper.findChild(QObject, "numberStepperEditor")
+        assert editor is not None
+        editor.forceActiveFocus()
+        editor.setProperty("text", str(value))
+        QTest.keyClick(window, Qt.Key.Key_Return)
+        app.processEvents()
+
+    assert (
+        controller.captureLeft,
+        controller.captureTop,
+        controller.captureWidth,
+        controller.captureHeight,
+    ) == (30, 40, 800, 400)
+    assert controller.settingsDirty is True
+
+    _click_quick_item(window, "saveAllButton")
+    app.processEvents()
+    assert controller.settingsDirty is False
+    saved_profile = load_game_profile(config_path, load_config(config_path), "game")
+    assert saved_profile.capture_settings.region == (30, 40, 800, 400)
     host.shutdown()
 
 
@@ -2829,8 +2946,10 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
     feedback_source = (
         qml_root / "components" / "TransientFeedbackLayer.qml"
     ).read_text(encoding="utf-8")
-    assert "setCustomRegion(true)" in capture_source
-    assert 'objectName: "captureRegionSelectAction"' in capture_source
+    assert 'objectName: "captureCustomAction"' in capture_source
+    assert "selectRegion()" in capture_source
+    assert 'text: "框选区域"' not in capture_source
+    assert 'text: "保存区域"' not in capture_source
     assert 'root.visualAction("scan")' in capture_source
     assert 'title: "捕获区域"' in capture_source
     assert 'title: "字幕区域"' not in capture_source

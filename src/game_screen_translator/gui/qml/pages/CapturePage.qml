@@ -241,16 +241,19 @@ Item {
                             }
                         }
                         PrismButton {
+                            objectName: "captureCustomAction"
                             theme: root.theme
                             text: "自定义区域"
-                            settingDescription: "将捕获范围改为可调整的矩形区域。"
+                            settingDescription: "框选或编辑四个边界来设置自定义捕获区域。"
                             settingKey: "capture-custom"
                             primary: root.workbench.customRegion
                             enabled: root.workbench.hasProfile
                             Layout.fillWidth: true
                             onClicked: {
-                                root.workbench.setCustomRegion(true)
-                                root.visualAction("scan")
+                                root.regionSelectionRequested = true
+                                root.regionSelectionWasHidden = false
+                                root.regionSelectionSaved = false
+                                root.workbench.selectRegion()
                             }
                         }
                     }
@@ -340,34 +343,6 @@ Item {
                         onEdited: value => root.updateRegion("height", value)
                     }
 
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        PrismButton {
-                            objectName: "captureRegionSelectAction"
-                            theme: root.theme
-                            text: "框选区域"
-                            enabled: root.workbench.hasProfile
-                            Layout.fillWidth: true
-                            onClicked: {
-                                root.regionSelectionRequested = true
-                                root.regionSelectionWasHidden = false
-                                root.regionSelectionSaved = false
-                                root.workbench.selectRegion()
-                            }
-                        }
-                        PrismButton {
-                            theme: root.theme
-                            primary: true
-                            text: "保存区域"
-                            enabled: root.workbench.hasProfile
-                            Layout.fillWidth: true
-                            onClicked: {
-                                root.workbench.saveCapture()
-                                root.visualAction("scan")
-                            }
-                        }
-                    }
                 }
             }
         }
