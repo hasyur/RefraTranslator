@@ -3378,10 +3378,12 @@ def run_live(
     config_path: Path,
     *,
     duration_seconds: float | None = None,
-    debug_border: bool = False,
+    debug_border: bool | None = None,
     test_source: Path | None = None,
     profile: GameProfile | None = None,
 ) -> int:
+    if debug_border is None:
+        debug_border = config.live.debug_border
     if not prefer_game_process_priority():
         print("警告：未能将翻译器进程调整为低于游戏的 CPU 优先级。")
     _live_message("creating QApplication")

@@ -4,6 +4,7 @@ import queue
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,11 +36,13 @@ from game_screen_translator.live.snapshot import CacheHit, SnapshotEntry, new_sn
 from game_screen_translator.live.runtime import LiveControlWindow
 from game_screen_translator.profiles import (
     ProfileCaptureSettings,
+    apply_profile_runtime_settings,
     create_game_profile,
     load_game_profile,
     save_profile_capture_settings,
     save_profile_custom_prompt,
     save_profile_glossary,
+    save_profile_runtime_settings,
 )
 
 
@@ -234,10 +237,36 @@ def test_select_profile_reloads_owned_state_and_saves_only_selected_profile(
         web,
         ProfileCaptureSettings(monitor_index=0, region=(30, 40, 900, 320)),
     )
+    save_profile_runtime_settings(
+        game,
+        replace(
+            config,
+            translation=replace(config.translation, model="game-model"),
+            ocr=replace(config.ocr, device="gpu:0"),
+            preview=replace(config.preview, overlay_opacity=0.0),
+            live=replace(config.live, change_poll_fps=8, debug_border=True),
+        ),
+    )
+    save_profile_runtime_settings(
+        web,
+        replace(
+            config,
+            translation=replace(config.translation, model="web-model"),
+            ocr=replace(config.ocr, device="gpu:1"),
+            preview=replace(config.preview, overlay_opacity=0.7),
+            live=replace(config.live, change_poll_fps=12, debug_border=False),
+        ),
+    )
 
+    machine_config_bytes = config_path.read_bytes()
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
     controller.selectProfile(controller.profileIds.index("game"))
     assert controller.customPrompt == "保持游戏角色口吻。"
+    assert controller.model == "game-model"
+    assert controller.ocrDevice == "gpu:0"
+    assert controller.overlayOpacity == 0.0
+    assert controller.changePollFps == 8
+    assert controller.debugEnabled is True
     assert (
         controller.captureLeft,
         controller.captureTop,
@@ -249,6 +278,11 @@ def test_select_profile_reloads_owned_state_and_saves_only_selected_profile(
     controller.selectProfile(controller.profileIds.index("web"))
     assert controller.profileRevision > revision
     assert controller.customPrompt == "保持技术文档术语。"
+    assert controller.model == "web-model"
+    assert controller.ocrDevice == "gpu:1"
+    assert controller.overlayOpacity == 0.7
+    assert controller.changePollFps == 12
+    assert controller.debugEnabled is False
     assert (
         controller.captureLeft,
         controller.captureTop,
@@ -264,6 +298,10 @@ def test_select_profile_reloads_owned_state_and_saves_only_selected_profile(
     assert load_game_profile(config_path, load_config(config_path), "game").custom_prompt == (
         "保持游戏角色口吻。"
     )
+    controller.selectProfile(controller.profileIds.index("game"))
+    assert controller.debugEnabled is True
+    assert controller.model == "game-model"
+    assert config_path.read_bytes() == machine_config_bytes
     controller.shutdown()
 
 
@@ -271,31 +309,41 @@ def test_controller_preserves_runtime_prompt_and_capture_save_boundaries(
     tmp_path: Path,
 ) -> None:
     controller, config_path = _controller_with_profile(tmp_path)
+    machine_config_bytes = config_path.read_bytes()
 
     controller.setBaseUrl("https://example.test/v1")
     controller.setModel("real-model")
     controller.setCustomPrompt("保持角色口吻。")
     controller.setCaptureRegion(10, 20, 800, 300)
+    controller.setDebugEnabled(True)
     assert controller.settingsDirty is True
 
     assert controller.saveRuntimeSettings() is True
     saved_config = load_config(config_path)
     saved_profile = load_game_profile(config_path, saved_config, "game")
-    assert saved_config.translation.base_url == "https://example.test/v1"
-    assert saved_config.translation.model == "real-model"
+    effective = apply_profile_runtime_settings(saved_config, saved_profile)
+    assert saved_config.translation.base_url == "http://127.0.0.1:1234/v1"
+    assert saved_config.translation.model == "hy-mt1.5-7b"
+    assert effective.translation.base_url == "https://example.test/v1"
+    assert effective.translation.model == "real-model"
+    assert effective.live.debug_border is True
     assert saved_profile.custom_prompt == ""
-    assert saved_profile.capture_settings.region is None
+    assert saved_profile.capture_settings.region == (1, 2, 3, 4)
+    assert config_path.read_bytes() == machine_config_bytes
+    assert saved_config.live.debug_border is False
     assert controller.settingsDirty is True
 
     assert controller.saveCustomPrompt() is True
     saved_profile = load_game_profile(config_path, load_config(config_path), "game")
     assert saved_profile.custom_prompt == "保持角色口吻。"
-    assert saved_profile.capture_settings.region is None
+    assert saved_profile.capture_settings.region == (1, 2, 3, 4)
+    assert config_path.read_bytes() == machine_config_bytes
     assert controller.settingsDirty is True
 
     assert controller.saveCapture() is True
     saved_profile = load_game_profile(config_path, load_config(config_path), "game")
     assert saved_profile.capture_settings.region == (10, 20, 800, 300)
+    assert config_path.read_bytes() == machine_config_bytes
     assert controller.settingsDirty is False
 
     controller.shutdown()
@@ -337,7 +385,13 @@ def test_overlay_opacity_draft_round_trips_exactly_only_after_save(
     assert load_config(config_path).preview.overlay_opacity == 0.375
 
     assert controller.saveRuntimeSettings() is True
-    assert load_config(config_path).preview.overlay_opacity == 0.37
+    machine = load_config(config_path)
+    saved_profile = load_game_profile(config_path, machine, "game")
+    assert machine.preview.overlay_opacity == 0.375
+    assert apply_profile_runtime_settings(
+        machine,
+        saved_profile,
+    ).preview.overlay_opacity == 0.37
     controller.shutdown()
 
     restored = WorkbenchController(config_path, probe_ocr_devices=False)
@@ -387,7 +441,11 @@ def test_controller_round_trips_complete_runtime_settings_and_preserves_external
     controller.setOcrCooldownMs(125)
 
     assert controller.saveRuntimeSettings() is True
-    saved = load_config(config_path)
+    machine = load_config(config_path)
+    saved_profile = load_game_profile(config_path, machine, "game")
+    saved = apply_profile_runtime_settings(machine, saved_profile)
+    assert machine.translation.backend == "external"
+    assert machine.ocr.device == "gpu:0"
     assert saved.translation.backend == "builtin"
     assert saved.translation.builtin_model == "Hy-MT2-7B-Q4_K_M.gguf"
     assert saved.translation.builtin_cuda_device == "gpu:1"
@@ -598,6 +656,8 @@ def test_empty_profile_list_clears_profile_owned_drafts(
     controller, _config_path = _controller_with_profile(tmp_path)
     controller.setCustomPrompt("不应泄漏")
     controller.setCaptureRegion(10, 20, 300, 200)
+    controller.setModel("不应泄漏的模型")
+    controller.setOverlayOpacity(0.0)
     monkeypatch.setattr(controller_module, "list_game_profiles", lambda *_args: ())
 
     controller.refreshProfiles()
@@ -605,6 +665,8 @@ def test_empty_profile_list_clears_profile_owned_drafts(
     assert controller.hasProfile is False
     assert controller.currentProfileIndex == -1
     assert controller.customPrompt == ""
+    assert controller.model == "hy-mt1.5-7b"
+    assert controller.overlayOpacity == 0.55
     assert controller.customRegion is False
     assert (
         controller.captureLeft,
@@ -697,10 +759,13 @@ def test_model_download_saves_only_runtime_scope(
     controller._local_install_thread.join(timeout=2)
     controller._check_local_install_events()
 
-    profile = load_game_profile(config_path, load_config(config_path), "game")
-    assert load_config(config_path).translation.model == "runtime-model"
+    machine = load_config(config_path)
+    profile = load_game_profile(config_path, machine, "game")
+    effective = apply_profile_runtime_settings(machine, profile)
+    assert machine.translation.model == "hy-mt1.5-7b"
+    assert effective.translation.model == "runtime-model"
     assert profile.custom_prompt == ""
-    assert profile.capture_settings.region is None
+    assert profile.capture_settings.region == (1, 2, 3, 4)
     assert controller.settingsDirty is True
 
     controller.shutdown()

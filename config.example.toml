@@ -1,3 +1,5 @@
+# 以下运行设置只作为新建 Profile 和旧 Profile 首次迁移时的初始模板。
+# GUI 后续把实际运行选择保存到各 Profile 的 settings.toml，不会回写共享模板。
 [translation]
 provider = "openai_compatible"
 # external 使用用户自己的 OpenAI-compatible API；builtin 使用程序管理的本地模型。
@@ -14,7 +16,7 @@ builtin_kv_cache_type = "f16"
 builtin_temperature = 0.2
 base_url = "http://127.0.0.1:1234/v1"
 model = "hy-mt1.5-7b"
-# 可在启动器中填写；非空值会明文保存在本机 config.toml（该文件已被 Git 忽略）。
+# 新 Profile 可从此模板继承；启动器后续把非空值明文保存到当前 Profile 的 settings.toml。
 api_key = ""
 # api_key 留空时从这个环境变量读取；兼容旧变量 GAME_SCREEN_TRANSLATOR_API_KEY。
 api_key_env = "REFRA_TRANSLATOR_API_KEY"

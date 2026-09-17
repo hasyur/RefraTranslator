@@ -4,6 +4,7 @@ import ctypes
 import math
 import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,7 +33,14 @@ from game_screen_translator.gui import workbench_controller as controller_module
 from game_screen_translator.gui.qml_workbench import QmlWorkbenchHost
 from game_screen_translator.gui.workbench_controller import WorkbenchController
 from game_screen_translator.live.snapshot import CacheHit, SnapshotEntry, new_snapshot, save_snapshot
-from game_screen_translator.profiles import create_game_profile
+from game_screen_translator.profiles import (
+    ProfileCaptureSettings,
+    apply_profile_runtime_settings,
+    create_game_profile,
+    load_game_profile,
+    save_profile_capture_settings,
+    save_profile_runtime_settings,
+)
 
 
 class _SignalRecorder:
@@ -772,6 +780,144 @@ def test_real_workbench_loads_exactly_seven_pages_without_qml_warnings(
     assert rebuilt_stack is not None
     assert rebuilt_stack.property("currentIndex") == 3
     assert qml_warnings == []
+    host.shutdown()
+
+
+def test_real_profile_dropdown_switches_and_restores_runtime_state(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    machine_config = load_config(config_path)
+    profile_a = create_game_profile(
+        config_path,
+        machine_config,
+        "galgame-a",
+        display_name="Galgame A",
+    )
+    profile_b = create_game_profile(
+        config_path,
+        machine_config,
+        "galgame-b",
+        display_name="Galgame B",
+    )
+    save_profile_capture_settings(
+        profile_a,
+        ProfileCaptureSettings(monitor_index=0, region=(10, 20, 320, 140)),
+    )
+    save_profile_runtime_settings(
+        profile_a,
+        replace(
+            machine_config,
+            translation=replace(machine_config.translation, model="profile-a-model"),
+            ocr=replace(
+                machine_config.ocr,
+                device="gpu:1",
+                text_filter_enabled=False,
+                detection_max_side=640,
+            ),
+            preview=replace(machine_config.preview, overlay_opacity=0.1),
+            live=replace(
+                machine_config.live,
+                dynamic_roi_enabled=True,
+                change_poll_fps=9,
+                debug_border=True,
+            ),
+        ),
+    )
+    save_profile_capture_settings(
+        profile_b,
+        ProfileCaptureSettings(monitor_index=0, region=(40, 50, 520, 220)),
+    )
+    save_profile_runtime_settings(
+        profile_b,
+        replace(
+            machine_config,
+            translation=replace(machine_config.translation, model="profile-b-model"),
+            ocr=replace(
+                machine_config.ocr,
+                device="gpu:0",
+                text_filter_enabled=True,
+                detection_max_side=2048,
+            ),
+            preview=replace(machine_config.preview, overlay_opacity=0.8),
+            live=replace(
+                machine_config.live,
+                dynamic_roi_enabled=False,
+                change_poll_fps=13,
+                debug_border=False,
+            ),
+        ),
+    )
+
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+    window = host.window
+    assert window is not None
+    selector = window.findChild(QObject, "homeProfileSelector")
+    assert isinstance(selector, QQuickItem)
+    assert controller.profileNames == ["Galgame A", "Galgame B"]
+    assert controller.currentProfileIndex == 0
+    assert selector.property("currentIndex") == 0
+    activated_indices: list[int] = []
+    selector.activated.connect(activated_indices.append)
+
+    def assert_profile_a() -> None:
+        assert controller.currentProfileId == "galgame-a"
+        assert controller.captureLeft == 10
+        assert controller.captureTop == 20
+        assert controller.captureWidth == 320
+        assert controller.captureHeight == 140
+        assert controller.ocrDevice == "gpu:1"
+        assert controller.ocrFilterEnabled is False
+        assert controller.model == "profile-a-model"
+        assert controller.overlayOpacity == 0.1
+        assert controller.dynamicRoiEnabled is True
+        assert controller.changePollFps == 9
+        assert controller.debugEnabled is True
+        assert selector.property("currentIndex") == 0
+
+    def assert_profile_b() -> None:
+        assert controller.currentProfileId == "galgame-b"
+        assert controller.captureLeft == 40
+        assert controller.captureTop == 50
+        assert controller.captureWidth == 520
+        assert controller.captureHeight == 220
+        assert controller.ocrDevice == "gpu:0"
+        assert controller.ocrFilterEnabled is True
+        assert controller.model == "profile-b-model"
+        assert controller.overlayOpacity == 0.8
+        assert controller.dynamicRoiEnabled is False
+        assert controller.changePollFps == 13
+        assert controller.debugEnabled is False
+        assert selector.property("currentIndex") == 1
+
+    def choose_with_dropdown(index: int, key: Qt.Key) -> None:
+        center = selector.mapToScene(
+            QPointF(selector.width() / 2, selector.height() / 2)
+        ).toPoint()
+        QTest.mouseClick(
+            window,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            center,
+        )
+        app.processEvents()
+        QTest.keyClick(window, key)
+        QTest.keyClick(window, Qt.Key.Key_Return)
+        app.processEvents()
+        assert controller.currentProfileIndex == index
+        assert selector.property("currentIndex") == index
+
+    assert_profile_a()
+    choose_with_dropdown(1, Qt.Key.Key_Down)
+    assert_profile_b()
+    choose_with_dropdown(0, Qt.Key.Key_Up)
+    assert_profile_a()
+    assert activated_indices == [1, 0]
     host.shutdown()
 
 
@@ -1667,7 +1813,7 @@ def test_capture_geometry_projects_bottom_right_region_against_full_display(
     host.shutdown()
 
 
-def test_real_overlay_slider_updates_draft_and_global_apply_persists_it(
+def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
     tmp_path: Path,
 ) -> None:
     app = _application()
@@ -1797,7 +1943,13 @@ def test_real_overlay_slider_updates_draft_and_global_apply_persists_it(
 
     _click_quick_item(window, "saveAllButton")
     assert controller.settingsDirty is False
-    assert load_config(config_path).preview.overlay_opacity == draft
+    machine = load_config(config_path)
+    saved_profile = load_game_profile(config_path, machine, "game")
+    assert machine.preview.overlay_opacity == configured
+    assert apply_profile_runtime_settings(
+        machine,
+        saved_profile,
+    ).preview.overlay_opacity == draft
     QTest.qWait(600)
     app.processEvents()
     assert overlay_motif.property("actionLinked") is False

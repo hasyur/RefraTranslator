@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from game_screen_translator.profiles import (
     ProfileCaptureSettings,
     ProfileError,
     apply_profile_capture_settings,
+    apply_profile_runtime_settings,
     create_game_profile,
     create_named_game_profile,
     list_game_profiles,
@@ -17,6 +19,7 @@ from game_screen_translator.profiles import (
     save_profile_capture_settings,
     save_profile_custom_prompt,
     save_profile_glossary,
+    save_profile_runtime_settings,
     validate_profile_id,
 )
 
@@ -110,12 +113,21 @@ def test_profile_must_be_initialized_explicitly(tmp_path: Path) -> None:
         load_game_profile(tmp_path / "config.toml", _config(), "missing")
 
 
-def test_profile_capture_settings_override_only_saved_values(tmp_path: Path) -> None:
+def test_profile_capture_settings_are_explicit_and_override_other_values(
+    tmp_path: Path,
+) -> None:
     config_path = tmp_path / "config.toml"
     profile = create_game_profile(config_path, _config(), "game")
     original = LiveConfig(left=5, top=6, width=700, height=200, monitor_index=0)
 
-    assert apply_profile_capture_settings(original, profile.capture_settings) == original
+    initial = apply_profile_capture_settings(original, profile.capture_settings)
+    assert (
+        initial.left,
+        initial.top,
+        initial.width,
+        initial.height,
+        initial.monitor_index,
+    ) == (0, 0, 0, 0, 0)
 
     saved = ProfileCaptureSettings(
         monitor_index=1,
@@ -133,6 +145,113 @@ def test_profile_capture_settings_override_only_saved_values(tmp_path: Path) -> 
         applied.height,
         applied.monitor_index,
     ) == (100, 700, 1800, 350, 1)
+
+
+def test_profile_runtime_settings_are_isolated_from_other_profiles(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    machine = _config()
+    game = create_game_profile(config_path, machine, "game")
+    web = create_game_profile(config_path, machine, "web")
+    game_config = apply_profile_runtime_settings(machine, game)
+    changed = replace(
+        game_config,
+        translation=replace(
+            game_config.translation,
+            backend="builtin",
+            model="game-model",
+            max_concurrency=6,
+        ),
+        ocr=replace(
+            game_config.ocr,
+            device="gpu:1",
+            detection_max_side=1920,
+            text_filter_enabled=False,
+        ),
+        preview=replace(game_config.preview, overlay_opacity=0.0),
+        recording=replace(game_config.recording, browser_overlay_enabled=True),
+        live=replace(
+            game_config.live,
+            change_poll_fps=10,
+            dynamic_roi_enabled=True,
+            debug_border=True,
+            idle_rescan_ms=4000,
+        ),
+    )
+
+    save_profile_runtime_settings(game, changed)
+    loaded_game = load_game_profile(config_path, machine, "game")
+    loaded_web = load_game_profile(config_path, machine, "web")
+    effective_game = apply_profile_runtime_settings(machine, loaded_game)
+    effective_web = apply_profile_runtime_settings(machine, loaded_web)
+
+    assert effective_game.translation.model == "game-model"
+    assert effective_game.translation.max_concurrency == 6
+    assert effective_game.ocr.device == "gpu:1"
+    assert effective_game.ocr.detection_max_side == 1920
+    assert effective_game.ocr.text_filter_enabled is False
+    assert effective_game.preview.overlay_opacity == 0.0
+    assert effective_game.recording.browser_overlay_enabled is True
+    assert effective_game.live.change_poll_fps == 10
+    assert effective_game.live.dynamic_roi_enabled is True
+    assert effective_game.live.debug_border is True
+    assert effective_game.live.idle_rescan_ms == 4000
+    assert effective_web.translation.model == machine.translation.model
+    assert effective_web.ocr.device == machine.ocr.device
+    assert effective_web.preview.overlay_opacity == machine.preview.overlay_opacity
+    assert effective_web.live.debug_border is False
+
+
+def test_legacy_profile_settings_migrate_once_to_an_independent_snapshot(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    original = _config()
+    profile = create_game_profile(config_path, original, "game")
+    profile.settings_path.write_text(
+        """
+[capture]
+monitor_index = 1
+left = 10
+top = 20
+width = 800
+height = 300
+
+[translation]
+custom_prompt = "保持角色口吻。"
+""",
+        encoding="utf-8",
+    )
+
+    migrated = load_game_profile(config_path, original, "game")
+    migrated_text = migrated.settings_path.read_text(encoding="utf-8")
+    assert "[ocr]" in migrated_text
+    assert "[preview]" in migrated_text
+    assert "[recording]" in migrated_text
+    assert "[live]" in migrated_text
+    assert "debug_border = false" in migrated_text
+
+    changed_machine = replace(
+        original,
+        translation=replace(original.translation, model="changed-global-model"),
+        ocr=replace(original.ocr, device="gpu:3", cache_dir="machine-cache"),
+        preview=replace(original.preview, overlay_opacity=0.0),
+        live=replace(original.live, debug_border=True),
+    )
+    reloaded = load_game_profile(config_path, changed_machine, "game")
+    effective = apply_profile_runtime_settings(changed_machine, reloaded)
+
+    assert effective.translation.model == original.translation.model
+    assert effective.ocr.device == original.ocr.device
+    assert effective.preview.overlay_opacity == original.preview.overlay_opacity
+    assert effective.live.debug_border is False
+    assert effective.ocr.cache_dir == "machine-cache"
+    assert reloaded.capture_settings == ProfileCaptureSettings(
+        monitor_index=1,
+        region=(10, 20, 800, 300),
+    )
+    assert reloaded.custom_prompt == "保持角色口吻。"
 
 
 def test_profile_custom_prompt_round_trips_and_survives_capture_updates(

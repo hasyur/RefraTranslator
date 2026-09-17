@@ -248,6 +248,7 @@ class LiveConfig:
     settle_rescan_ms: int = 500
     idle_rescan_ms: int = 2000
     dynamic_roi_enabled: bool = False
+    debug_border: bool = False
     dynamic_roi_response_target_ms: int = 500
     # Load-compatible legacy tuning fields. The adaptive response target is
     # the user-facing control; these values remain accepted for old configs.
@@ -294,6 +295,8 @@ class LiveConfig:
             raise ConfigError("live.idle_rescan_ms 必须在 0 到 60000 之间")
         if type(self.dynamic_roi_enabled) is not bool:
             raise ConfigError("live.dynamic_roi_enabled 必须是 true 或 false")
+        if type(self.debug_border) is not bool:
+            raise ConfigError("live.debug_border 必须是 true 或 false")
         if not 100 <= self.dynamic_roi_response_target_ms <= 5_000:
             raise ConfigError(
                 "live.dynamic_roi_response_target_ms 必须在 100 到 5000 之间"

@@ -268,13 +268,14 @@ Item {
                     theme: root.theme
                     title: "当前配置"
                     meta: root.workbench.hasProfile ? root.workbench.currentProfileId : "REQUIRED"
-                    description: "选择要读取和保存区域、提示词与术语的游戏配置。"
+                    description: "选择要整套读取和保存捕获、OCR、翻译、覆盖层与运行参数的游戏配置。"
                     settingKey: "home-profile"
                 }
                 PrismComboBox {
+                    objectName: "homeProfileSelector"
                     theme: root.theme
                     accessibleName: "当前配置"
-                    settingDescription: "选择要读取和保存区域、提示词与术语的游戏配置。"
+                    settingDescription: "选择要整套读取和保存捕获、OCR、翻译、覆盖层与运行参数的游戏配置。"
                     settingKey: "home-profile"
                     model: root.workbench.profileNames
                     currentIndex: root.workbench.currentProfileIndex

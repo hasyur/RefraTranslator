@@ -6,6 +6,7 @@ from game_screen_translator.config import (
     ConfigError,
     DEFAULT_BROWSER_OVERLAY_PORT,
     DEFAULT_DARK_OVERLAY_OPACITY,
+    LiveConfig,
     PreviewConfig,
     RecordingConfig,
     TranslationConfig,
@@ -71,6 +72,7 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.live.settle_rescan_ms == 500
     assert config.live.idle_rescan_ms == 2000
     assert config.live.dynamic_roi_enabled is False
+    assert config.live.debug_border is False
     assert config.live.dynamic_roi_response_target_ms == 500
     assert config.live.dynamic_roi_settle_ms == 180
     assert config.live.dynamic_roi_ocr_interval_ms == 333
@@ -235,6 +237,11 @@ def test_load_config_rejects_non_boolean_dynamic_roi_option(tmp_path: Path) -> N
 
     with pytest.raises(ConfigError, match="dynamic_roi_enabled"):
         load_config(path)
+
+
+def test_live_config_rejects_non_boolean_debug_border() -> None:
+    with pytest.raises(ConfigError, match="debug_border"):
+        LiveConfig(debug_border=1)  # type: ignore[arg-type]
 
 
 def test_recording_config_rejects_invalid_browser_overlay_values() -> None:

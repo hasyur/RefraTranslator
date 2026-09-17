@@ -40,19 +40,20 @@ from game_screen_translator.config import (
     DEFAULT_DARK_OVERLAY_OPACITY,
     MAX_CHANGE_POLL_FPS,
     load_config,
-    save_runtime_selection,
 )
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.profiles import (
     GameProfile,
     ProfileCaptureSettings,
     ProfileError,
+    apply_profile_runtime_settings,
     create_named_game_profile,
     list_game_profiles,
     load_game_profile,
     save_profile_capture_settings,
     save_profile_custom_prompt,
     save_profile_glossary,
+    save_profile_runtime_settings,
 )
 from game_screen_translator.translation.local_backend import (
     BUILTIN_MODELS,
@@ -342,7 +343,8 @@ class WorkbenchController(QObject):
     def __init__(self, config_path: Path, *, probe_ocr_devices: bool = True) -> None:
         super().__init__()
         self._config_path = config_path.resolve()
-        self._config: AppConfig = load_config(self._config_path)
+        self._machine_config: AppConfig = load_config(self._config_path)
+        self._config: AppConfig = self._machine_config
         self._current_page = "HOME"
         try:
             preferences = load_gui_preferences(self._config_path)
@@ -371,7 +373,7 @@ class WorkbenchController(QObject):
         self._live_force_stop_available = False
         self._live_force_stop_requested = False
         self._live_log_path = self._config_path.parent / "output" / "live.log"
-        self._debug_enabled = False
+        self._debug_enabled = self._config.live.debug_border
         self._runtime_dirty = False
         self._prompt_dirty = False
         self._capture_dirty = False
@@ -1062,8 +1064,8 @@ class WorkbenchController(QObject):
         if self._profile is None:
             return "暂无真实 Profile 数据。请从 HOME 新建或选择一个配置。"
         capture = self._profile.capture_settings
-        region = ",".join(map(str, capture.region)) if capture.region is not None else "使用 config.toml"
-        monitor = str(capture.monitor_index) if capture.monitor_index is not None else "使用 config.toml"
+        region = ",".join(map(str, capture.region)) if capture.region is not None else "未设置"
+        monitor = str(capture.monitor_index) if capture.monitor_index is not None else "未设置"
         return (
             f"配置：{self._profile.display_name}\n"
             f"内部 ID：{self._profile.profile_id}\n"
@@ -1122,7 +1124,7 @@ class WorkbenchController(QObject):
             self._profile.profile_id if self._profile else None
         )
         try:
-            profiles = list_game_profiles(self._config_path, self._config)
+            profiles = list_game_profiles(self._config_path, self._machine_config)
         except (ProfileError, RuntimeError, ValueError) as exc:
             self._show_error("无法读取配置", exc)
             return
@@ -1140,6 +1142,7 @@ class WorkbenchController(QObject):
                 and (
                     self._prompt_dirty
                     or self._capture_dirty
+                    or self._runtime_dirty
                     or self._glossary_dirty
                     or self._corrections_dirty
                 )
@@ -1150,6 +1153,37 @@ class WorkbenchController(QObject):
                 self._load_profile(selected_id, self._current_profile_index)
         else:
             self._profile = None
+            self._config = self._machine_config
+            translation = self._config.translation
+            ocr = self._config.ocr
+            live = self._config.live
+            self._backend = translation.backend
+            self._builtin_model = translation.builtin_model
+            self._builtin_cuda_device = translation.builtin_cuda_device
+            self._builtin_parallel = translation.builtin_parallel
+            self._builtin_kv_cache_type = translation.builtin_kv_cache_type
+            self._base_url = translation.base_url
+            self._api_key = translation.api_key
+            self._model = translation.model
+            self._model_ids = [
+                self._model,
+                *[model for model in self._model_ids if model != self._model],
+            ]
+            self._max_concurrency = translation.max_concurrency
+            self._ocr_device = ocr.device
+            self._ocr_filter_enabled = ocr.text_filter_enabled
+            self._ocr_merge_enabled = ocr.text_merge_enabled
+            self._overlay_opacity = self._config.preview.overlay_opacity
+            self._browser_overlay_enabled = self._config.recording.browser_overlay_enabled
+            self._dynamic_roi_enabled = live.dynamic_roi_enabled
+            self._debug_enabled = live.debug_border
+            self._change_poll_fps = live.change_poll_fps
+            self._roi_response_target_ms = live.dynamic_roi_response_target_ms
+            self._clear_after_ms = live.clear_after_ms
+            self._settle_rescan_ms = live.settle_rescan_ms
+            self._idle_rescan_ms = live.idle_rescan_ms
+            self._ocr_cooldown_ms = live.ocr_cooldown_ms
+            self._restore_detection_quality_from_config()
             self._last_run_snapshot = None
             self._profile_revision += 1
             self._glossary = []
@@ -1173,13 +1207,18 @@ class WorkbenchController(QObject):
             self._manual_hits = 0
             self._prompt_dirty = False
             self._capture_dirty = False
+            self._runtime_dirty = False
             self._set_status("请先在 HOME 创建一个 Profile", "warning")
             self._emit_state()
 
     @Slot(str)
     def createProfile(self, display_name: str) -> None:
         try:
-            profile = create_named_game_profile(self._config_path, self._config, display_name)
+            profile = create_named_game_profile(
+                self._config_path,
+                self._machine_config,
+                display_name,
+            )
         except (ProfileError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("新建配置失败", exc)
             return
@@ -1189,26 +1228,31 @@ class WorkbenchController(QObject):
 
     def _load_profile(self, profile_id: str, index: int) -> None:
         try:
-            profile = load_game_profile(self._config_path, self._config, profile_id)
+            profile = load_game_profile(
+                self._config_path,
+                self._machine_config,
+                profile_id,
+            )
+            effective_config = apply_profile_runtime_settings(
+                self._machine_config,
+                profile,
+            )
             corrections = profile.cache.list_manual_corrections(
-                source_language=self._config.ocr.language,
-                target_language=self._config.translation.target_language,
+                source_language=effective_config.ocr.language,
+                target_language=effective_config.translation.target_language,
             )
             stats = profile.cache.stats()
         except (ProfileError, RuntimeError, ValueError) as exc:
             self._show_error("加载配置失败", exc)
             return
         self._profile = profile
+        self._config = effective_config
         self._last_run_snapshot = load_snapshot(profile.directory)
         self._profile_revision += 1
         self._current_profile_index = index
         self._custom_prompt = profile.custom_prompt
         capture = profile.capture_settings
-        configured_monitor = (
-            capture.monitor_index
-            if capture.monitor_index is not None
-            else self._config.live.monitor_index
-        )
+        configured_monitor = self._config.live.monitor_index
         monitor_warning = configured_monitor not in self._monitor_values
         self._monitor_index = 0 if monitor_warning and self._monitor_values else configured_monitor
         region = capture.region or (
@@ -1219,6 +1263,36 @@ class WorkbenchController(QObject):
         )
         self._capture_left, self._capture_top, self._capture_width, self._capture_height = region
         self._custom_region = self._capture_width > 0 and self._capture_height > 0
+        translation = self._config.translation
+        ocr = self._config.ocr
+        live = self._config.live
+        self._backend = translation.backend
+        self._builtin_model = translation.builtin_model
+        self._builtin_cuda_device = translation.builtin_cuda_device
+        self._builtin_parallel = translation.builtin_parallel
+        self._builtin_kv_cache_type = translation.builtin_kv_cache_type
+        self._base_url = translation.base_url
+        self._api_key = translation.api_key
+        self._model = translation.model
+        self._model_ids = [
+            self._model,
+            *[model for model in self._model_ids if model != self._model],
+        ]
+        self._max_concurrency = translation.max_concurrency
+        self._ocr_device = ocr.device
+        self._ocr_filter_enabled = ocr.text_filter_enabled
+        self._ocr_merge_enabled = ocr.text_merge_enabled
+        self._overlay_opacity = self._config.preview.overlay_opacity
+        self._browser_overlay_enabled = self._config.recording.browser_overlay_enabled
+        self._dynamic_roi_enabled = live.dynamic_roi_enabled
+        self._debug_enabled = live.debug_border
+        self._change_poll_fps = live.change_poll_fps
+        self._roi_response_target_ms = live.dynamic_roi_response_target_ms
+        self._clear_after_ms = live.clear_after_ms
+        self._settle_rescan_ms = live.settle_rescan_ms
+        self._idle_rescan_ms = live.idle_rescan_ms
+        self._ocr_cooldown_ms = live.ocr_cooldown_ms
+        self._restore_detection_quality_from_config()
         self._glossary = [{"source": entry.source, "target": entry.target} for entry in profile.glossary]
         self._corrections = [
             {"source": entry.source_text, "target": entry.translated_text}
@@ -1232,6 +1306,7 @@ class WorkbenchController(QObject):
         self._manual_hits = stats.manual_hits
         self._prompt_dirty = False
         self._capture_dirty = False
+        self._runtime_dirty = False
         self.profilesChanged.emit()
         self._emit_state()
         if monitor_warning:
@@ -1376,7 +1451,15 @@ class WorkbenchController(QObject):
                 ),
             )
             save_profile_capture_settings(self._profile, settings)
-            self._profile = load_game_profile(self._config_path, self._config, self._profile.profile_id)
+            self._profile = load_game_profile(
+                self._config_path,
+                self._machine_config,
+                self._profile.profile_id,
+            )
+            self._config = apply_profile_runtime_settings(
+                self._machine_config,
+                self._profile,
+            )
         except (ProfileError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("保存区域失败", exc)
             return False
@@ -1712,7 +1795,7 @@ class WorkbenchController(QObject):
         if value == self._debug_enabled:
             return
         self._debug_enabled = value
-        self._emit_state()
+        self._mark_runtime_dirty()
 
     def _translation_candidate(self, *, require_model: bool = True):
         model = self._model.strip()
@@ -1751,6 +1834,7 @@ class WorkbenchController(QObject):
             ocr_cooldown_ms=self._ocr_cooldown_ms,
             clear_after_ms=self._clear_after_ms,
             dynamic_roi_enabled=self._dynamic_roi_enabled,
+            debug_border=self._debug_enabled,
             change_poll_fps=self._change_poll_fps,
             dynamic_roi_response_target_ms=self._roi_response_target_ms,
             monitor_index=self._monitor_index,
@@ -1761,35 +1845,36 @@ class WorkbenchController(QObject):
         )
 
     def _save_runtime_settings(self, *, announce: bool) -> bool:
+        if self._profile is None:
+            self._show_error("保存运行设置失败", "请先选择一个 Profile")
+            return False
         try:
             translation = self._translation_candidate()
             ocr = self._ocr_candidate()
             live = self._live_candidate()
-            self._config = save_runtime_selection(
+            candidate = replace(
+                self._config,
+                translation=translation,
+                ocr=ocr,
+                preview=replace(
+                    self._config.preview,
+                    overlay_opacity=self._overlay_opacity,
+                ),
+                recording=replace(
+                    self._config.recording,
+                    browser_overlay_enabled=self._browser_overlay_enabled,
+                ),
+                live=live,
+            )
+            save_profile_runtime_settings(self._profile, candidate)
+            self._profile = load_game_profile(
                 self._config_path,
-                base_url=translation.base_url,
-                model=translation.model,
-                backend=translation.backend,
-                builtin_model=translation.builtin_model,
-                builtin_cuda_device=translation.builtin_cuda_device,
-                builtin_parallel=translation.builtin_parallel,
-                builtin_kv_cache_type=translation.builtin_kv_cache_type,
-                api_key=translation.api_key,
-                ocr_device=ocr.device,
-                max_concurrency=translation.max_concurrency,
-                ocr_detection_max_side=ocr.detection_max_side,
-                ocr_text_filter_enabled=ocr.text_filter_enabled,
-                ocr_text_merge_enabled=ocr.text_merge_enabled,
-                preview_overlay_opacity=self._overlay_opacity,
-                recording_browser_overlay_enabled=self._browser_overlay_enabled,
-                recording_browser_overlay_port=self._config.recording.browser_overlay_port,
-                settle_rescan_ms=live.settle_rescan_ms,
-                idle_rescan_ms=live.idle_rescan_ms,
-                ocr_cooldown_ms=live.ocr_cooldown_ms,
-                clear_after_ms=live.clear_after_ms,
-                dynamic_roi_enabled=live.dynamic_roi_enabled,
-                change_poll_fps=live.change_poll_fps,
-                dynamic_roi_response_target_ms=live.dynamic_roi_response_target_ms,
+                self._machine_config,
+                self._profile.profile_id,
+            )
+            self._config = apply_profile_runtime_settings(
+                self._machine_config,
+                self._profile,
             )
         except (ConfigError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("保存运行设置失败", exc)
@@ -1818,6 +1903,7 @@ class WorkbenchController(QObject):
             self._config.recording.browser_overlay_enabled
         )
         self._dynamic_roi_enabled = live.dynamic_roi_enabled
+        self._debug_enabled = live.debug_border
         self._change_poll_fps = live.change_poll_fps
         self._roi_response_target_ms = live.dynamic_roi_response_target_ms
         self._clear_after_ms = live.clear_after_ms
@@ -1844,8 +1930,12 @@ class WorkbenchController(QObject):
             save_profile_custom_prompt(self._profile, self._custom_prompt)
             self._profile = load_game_profile(
                 self._config_path,
-                self._config,
+                self._machine_config,
                 self._profile.profile_id,
+            )
+            self._config = apply_profile_runtime_settings(
+                self._machine_config,
+                self._profile,
             )
             self._custom_prompt = self._profile.custom_prompt
         except (ProfileError, OSError, RuntimeError, ValueError) as exc:

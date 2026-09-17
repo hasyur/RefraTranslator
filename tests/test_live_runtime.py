@@ -2,6 +2,7 @@ import json
 import os
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -85,7 +86,8 @@ def test_run_live_initializes_cuda_ocr_before_managed_local_model(
             builtin_model="Hy-MT2-1.8B-Q8_0.gguf",
             base_url="http://external.test/v1",
             model="external-model",
-        )
+        ),
+        live=LiveConfig(debug_border=True),
     )
 
     class OrderedOcr:
@@ -103,6 +105,7 @@ def test_run_live_initializes_cuda_ocr_before_managed_local_model(
     def ready(*_args, **kwargs):
         assert kwargs["app"] is app
         assert isinstance(kwargs["ocr"], OrderedOcr)
+        assert kwargs["debug_border"] is True
         events.append("runtime")
         return 7
 
@@ -113,6 +116,26 @@ def test_run_live_initializes_cuda_ocr_before_managed_local_model(
 
     assert live_runtime.run_live(config, tmp_path / "config.toml") == 7
     assert events == ["ocr", "backend-enter", "runtime", "backend-exit"]
+
+    without_profile_debug = replace(config, live=replace(config.live, debug_border=False))
+    assert (
+        live_runtime.run_live(
+            without_profile_debug,
+            tmp_path / "config.toml",
+            debug_border=True,
+        )
+        == 7
+    )
+    assert events == [
+        "ocr",
+        "backend-enter",
+        "runtime",
+        "backend-exit",
+        "ocr",
+        "backend-enter",
+        "runtime",
+        "backend-exit",
+    ]
 
 
 class FakeEmptyOcr:

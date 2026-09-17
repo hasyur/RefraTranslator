@@ -35,7 +35,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
-    commands.add_parser("doctor", help="检查 API 连通性和模型名称")
+    doctor = commands.add_parser("doctor", help="检查 Profile 的 API 连通性和模型名称")
+    doctor.add_argument("--profile", dest="profile_id", required=True)
 
     gui = commands.add_parser("gui", help="打开图形化 Profile、区域和启动管理器")
     gui.add_argument("--duration", type=float, help="指定秒数后自动关闭（用于测试）")
@@ -48,7 +49,8 @@ def _parser() -> argparse.ArgumentParser:
     translate.add_argument(
         "--profile",
         dest="profile_id",
-        help="使用指定游戏的术语表和独立翻译缓存",
+        required=True,
+        help="使用指定游戏的独立运行设置、术语表和翻译缓存",
     )
 
     preview = commands.add_parser("preview", help="对静态截图执行 OCR、翻译并渲染预览")
@@ -62,7 +64,8 @@ def _parser() -> argparse.ArgumentParser:
     preview.add_argument(
         "--profile",
         dest="profile_id",
-        help="使用指定游戏的术语表和独立翻译缓存",
+        required=True,
+        help="使用指定游戏的独立运行设置、术语表和翻译缓存",
     )
 
     live = commands.add_parser("live", help="启动实时屏幕捕获与透明翻译覆盖层")
@@ -70,12 +73,13 @@ def _parser() -> argparse.ArgumentParser:
         "--region",
         type=_parse_region,
         metavar="LEFT,TOP,WIDTH,HEIGHT",
-        help="临时覆盖 config.toml 的捕获区域；宽高为 0 表示延伸到屏幕边缘",
+        help="临时覆盖当前 Profile 的捕获区域；宽高为 0 表示延伸到屏幕边缘",
     )
     live.add_argument("--monitor", type=int, help="临时覆盖显示器索引")
     live.add_argument(
         "--debug-border",
         action="store_true",
+        default=None,
         help="显示翻译区域及动态 ROI 诊断边框，并记录 ROI 决策",
     )
     live.add_argument("--duration", type=float, help="指定秒数后自动停止（用于测试）")
@@ -87,7 +91,8 @@ def _parser() -> argparse.ArgumentParser:
     live.add_argument(
         "--profile",
         dest="profile_id",
-        help="使用指定游戏的术语表和独立翻译缓存",
+        required=True,
+        help="使用指定游戏的独立运行设置、术语表和翻译缓存",
     )
 
     profile = commands.add_parser("profile", help="管理每个游戏独立的资料库")
@@ -127,13 +132,18 @@ def _parse_region(value: str) -> tuple[int, int, int, int]:
     return values  # type: ignore[return-value]
 
 
-async def _doctor(config_path: Path) -> int:
+async def _doctor(config_path: Path, profile_id: str) -> int:
     from game_screen_translator.translation.local_backend import (
         managed_translation_backend,
     )
     from game_screen_translator.translation.transport import OpenAICompatibleTransport
 
     config = load_config(config_path)
+    profile = _optional_profile(config_path, config, profile_id)
+    if profile is not None:
+        from game_screen_translator.profiles import apply_profile_runtime_settings
+
+        config = apply_profile_runtime_settings(config, profile)
     with managed_translation_backend(config, config_path) as runtime_config:
         async with OpenAICompatibleTransport(runtime_config.translation) as transport:
             models = await transport.list_models()
@@ -177,6 +187,10 @@ async def _translate(
 
     config = load_config(config_path)
     profile = _optional_profile(config_path, config, profile_id)
+    if profile is not None:
+        from game_screen_translator.profiles import apply_profile_runtime_settings
+
+        config = apply_profile_runtime_settings(config, profile)
     with managed_translation_backend(config, config_path) as runtime_config:
         async with OpenAICompatibleTransport(runtime_config.translation) as transport:
             prompt_builder = HyMtPromptBuilder(
@@ -223,6 +237,10 @@ async def _preview(
 
     config = load_config(config_path)
     profile = _optional_profile(config_path, config, profile_id)
+    if profile is not None:
+        from game_screen_translator.profiles import apply_profile_runtime_settings
+
+        config = apply_profile_runtime_settings(config, profile)
     engine = PaddleOcrEngine(
         language=config.ocr.language,
         min_score=config.ocr.min_score,
@@ -325,6 +343,9 @@ def _profile_command(config_path: Path, args: argparse.Namespace) -> int:
         return 0
 
     profile = load_game_profile(config_path, config, args.profile_id)
+    from game_screen_translator.profiles import apply_profile_runtime_settings
+
+    config = apply_profile_runtime_settings(config, profile)
     if args.profile_command == "info":
         stats = profile.cache.stats()
         print(f"Profile：{profile.display_name} ({profile.profile_id})")
@@ -368,7 +389,7 @@ def _profile_command(config_path: Path, args: argparse.Namespace) -> int:
 
 async def _run(args: argparse.Namespace) -> int:
     if args.command == "doctor":
-        return await _doctor(args.config)
+        return await _doctor(args.config, args.profile_id)
     if args.command == "translate":
         from game_screen_translator.domain import SourceText
 
@@ -397,16 +418,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_launcher(args.config, duration_seconds=args.duration)
         if args.command == "live":
             from game_screen_translator.live.runtime import run_live
-            from game_screen_translator.profiles import apply_profile_capture_settings
+            from game_screen_translator.profiles import apply_profile_runtime_settings
 
             config = load_config(args.config)
             profile = _optional_profile(args.config, config, args.profile_id)
             live_config = config.live
             if profile is not None:
-                live_config = apply_profile_capture_settings(
-                    live_config,
-                    profile.capture_settings,
-                )
+                config = apply_profile_runtime_settings(config, profile)
+                live_config = config.live
             if args.region is not None:
                 left, top, width, height = args.region
                 live_config = replace(
