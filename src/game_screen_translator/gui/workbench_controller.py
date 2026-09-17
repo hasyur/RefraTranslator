@@ -1369,8 +1369,12 @@ class WorkbenchController(QObject):
         self._monitor_names = []
         for index, screen in enumerate(screens):
             geometry = screen.geometry()
+            scale = max(1.0, float(screen.devicePixelRatio()))
+            capture_width = max(1, round(geometry.width() * scale))
+            capture_height = max(1, round(geometry.height() * scale))
             self._monitor_names.append(
-                f"{index}: {screen.name()} · {geometry.width()}×{geometry.height()} · {screen.devicePixelRatio():g}x"
+                f"{index}: {screen.name()} · {capture_width}×{capture_height} · "
+                f"系统缩放 {round(scale * 100)}%"
             )
         if self._monitor_values and self._monitor_index not in self._monitor_values:
             self._monitor_index = 0

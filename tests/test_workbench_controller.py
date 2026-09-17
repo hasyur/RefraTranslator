@@ -145,6 +145,32 @@ def test_controller_exposes_selected_display_size_in_capture_pixels(
     controller.shutdown()
 
 
+def test_controller_monitor_label_uses_capture_pixel_size(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, _config_path = _controller_with_profile(tmp_path)
+
+    screen = SimpleNamespace(
+        name=lambda: "DISPLAY1",
+        geometry=lambda: SimpleNamespace(width=lambda: 2048, height=lambda: 1152),
+        devicePixelRatio=lambda: 1.25,
+    )
+    application = SimpleNamespace(screens=lambda: [screen])
+    monkeypatch.setattr(
+        controller_module,
+        "QApplication",
+        SimpleNamespace(instance=lambda: application),
+    )
+
+    controller._refresh_monitors()
+
+    assert controller.monitorNames == [
+        "0: DISPLAY1 · 2560×1440 · 系统缩放 125%"
+    ]
+    controller.shutdown()
+
+
 def test_controller_loads_last_run_snapshot_and_reloads_on_profile_switch(
     tmp_path: Path,
 ) -> None:
