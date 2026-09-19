@@ -5,6 +5,7 @@ include bootstrap.ps1
 include config.example.toml
 include install.bat
 include start_gui.bat
+include start_gui.vbs
 include start_test_scenes.bat
 include update.bat
 include update.ps1

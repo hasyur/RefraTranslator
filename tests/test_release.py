@@ -24,6 +24,7 @@ SOURCE_RELEASE_FILES = (
     "config.example.toml",
     "install.bat",
     "start_gui.bat",
+    "start_gui.vbs",
     "start_test_scenes.bat",
     "update.bat",
     "update.ps1",
@@ -254,7 +255,56 @@ def test_gui_batch_preserves_native_crash_diagnostics() -> None:
     assert 'set "QT_PLUGIN_PATH="' in script
     assert 'if not "%launcher_exit%"=="0" goto :launch_failed' in script
     assert "launcher exited unexpectedly" in script
+    assert "if defined REFRA_LAUNCH_HIDDEN exit /b %launcher_exit%" in script
+    assert script.count("if not defined REFRA_LAUNCH_HIDDEN pause") == 4
     assert "if errorlevel 1 pause" not in script.lower()
+
+
+def test_hidden_gui_launcher_runs_batch_without_a_console_window() -> None:
+    script = (PROJECT_ROOT / "start_gui.vbs").read_text(encoding="ascii")
+
+    assert 'shell.Environment("PROCESS")("REFRA_LAUNCH_HIDDEN") = "1"' in script
+    assert "shell.Run(command, 0, True)" in script
+    assert 'fileSystem.BuildPath(projectRoot, "start_gui.bat")' in script
+    assert 'fileSystem.BuildPath(projectRoot, "output")' in script
+    assert "WScript.Arguments" in script
+    assert "MsgBox" in script
+
+
+@pytest.mark.skipif(os.name != "nt", reason="VBScript launcher requires Windows")
+def test_hidden_gui_launcher_invokes_the_batch_with_arguments(tmp_path: Path) -> None:
+    cscript = shutil.which("cscript.exe")
+    if cscript is None:
+        pytest.skip("Windows Script Host is required")
+
+    shutil.copy2(PROJECT_ROOT / "start_gui.vbs", tmp_path / "start_gui.vbs")
+    (tmp_path / "start_gui.bat").write_text(
+        "@echo off\n"
+        'if not "%REFRA_LAUNCH_HIDDEN%"=="1" exit /b 9\n'
+        '> "%~dp0arguments.txt" echo %*\n'
+        "exit /b 0\n",
+        encoding="ascii",
+    )
+
+    completed = subprocess.run(
+        [
+            cscript,
+            "//nologo",
+            str(tmp_path / "start_gui.vbs"),
+            "--duration",
+            "0.25",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert (tmp_path / "arguments.txt").read_text(encoding="ascii").strip() == (
+        '"--duration" "0.25"'
+    )
 
 
 def test_install_batch_runs_gui_bootstrap_and_preserves_exit_code() -> None:
@@ -264,7 +314,7 @@ def test_install_batch_runs_gui_bootstrap_and_preserves_exit_code() -> None:
     assert '-File "%~dp0bootstrap.ps1" -WithGui' in script
     assert 'set "install_exit=%ERRORLEVEL%"' in script
     assert 'exit /b %install_exit%' in script
-    assert "start_gui.bat" in script
+    assert "start_gui.vbs" in script
 
 
 def test_update_batch_runs_powershell_updater_and_preserves_exit_code() -> None:

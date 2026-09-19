@@ -16,19 +16,19 @@ set "QT_QPA_PLATFORM_PLUGIN_PATH="
 if not exist "%VENV_PYTHON%" (
   echo Error: project virtual environment not found.
   echo Double-click install.bat first.
-  pause
+  if not defined REFRA_LAUNCH_HIDDEN pause
   exit /b 1
 )
 if not exist "config.toml" (
   if not exist "config.example.toml" (
     echo Error: config.example.toml not found.
-    pause
+    if not defined REFRA_LAUNCH_HIDDEN pause
     exit /b 1
   )
   copy /y "config.example.toml" "config.toml" >nul
   if errorlevel 1 (
     echo Error: failed to create config.toml.
-    pause
+    if not defined REFRA_LAUNCH_HIDDEN pause
     exit /b 1
   )
   echo Created config.toml from the public template.
@@ -37,7 +37,7 @@ if not exist "config.toml" (
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 if not exist "%LOG_DIR%" (
   echo Error: failed to create the output directory.
-  pause
+  if not defined REFRA_LAUNCH_HIDDEN pause
   exit /b 1
 )
 
@@ -57,6 +57,7 @@ if not "%launcher_exit%"=="0" goto :launch_failed
 exit /b 0
 
 :launch_failed
+if defined REFRA_LAUNCH_HIDDEN exit /b %launcher_exit%
 echo.
 echo Error: RefraTranslator launcher exited unexpectedly ^(exit code %launcher_exit%^).
 echo Diagnostic log: "%CD%\%LOG_FILE%"

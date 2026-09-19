@@ -116,4 +116,4 @@ elseif ($sourceChanged) {
     Write-Host "Python dependencies did not change; keeping the existing .venv."
 }
 
-Write-Host "Update ready. Double-click start_gui.bat to launch RefraTranslator."
+Write-Host "Update ready. Double-click start_gui.vbs to launch RefraTranslator without a console window."
