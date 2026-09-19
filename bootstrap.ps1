@@ -242,7 +242,7 @@ else {
 }
 
 Write-Host "Isolated environment is ready: $venvPython"
-Write-Host "Launch by double-clicking start_gui.vbs (no console window)"
+Write-Host "Launch by double-clicking start_gui.bat"
 if ($WithDev) {
     Write-Host "Test command: & '$venvPython' -m pytest"
 }

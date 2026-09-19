@@ -12,7 +12,7 @@ if not "%install_exit%"=="0" goto :install_failed
 
 echo.
 echo Installation completed successfully.
-echo Double-click start_gui.vbs to launch RefraTranslator without a console window.
+echo Double-click start_gui.bat to launch RefraTranslator.
 echo.
 pause
 exit /b 0

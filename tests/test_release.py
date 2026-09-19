@@ -24,7 +24,7 @@ SOURCE_RELEASE_FILES = (
     "config.example.toml",
     "install.bat",
     "start_gui.bat",
-    "start_gui.vbs",
+    "start_gui(debug).bat",
     "start_test_scenes.bat",
     "update.bat",
     "update.ps1",
@@ -144,22 +144,32 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
     }
 
     with zipfile.ZipFile(wheels[0]) as archive:
+        wheel_names = set(archive.namelist())
         wheel_qml = {
             name.split("game_screen_translator/gui/qml/", 1)[1]
-            for name in archive.namelist()
+            for name in wheel_names
             if "game_screen_translator/gui/qml/" in name
             and name.endswith(".qml")
         }
     with tarfile.open(source_archives[0], "r:gz") as archive:
+        sdist_names = set(archive.getnames())
         sdist_qml = {
             name.split("game_screen_translator/gui/qml/", 1)[1]
-            for name in archive.getnames()
+            for name in sdist_names
             if "game_screen_translator/gui/qml/" in name
             and name.endswith(".qml")
         }
 
     assert wheel_qml == expected
     assert sdist_qml == expected
+    assert any(
+        name.endswith("game_screen_translator/gui_entry.py")
+        for name in wheel_names
+    )
+    assert any(
+        name.endswith("game_screen_translator/gui_entry.py")
+        for name in sdist_names
+    )
 
 
 def test_launcher_preview_uses_the_production_qml_workbench() -> None:
@@ -240,71 +250,39 @@ def test_bootstrap_removes_only_pip_cache_after_success_unless_kept() -> None:
     assert 'Write-Host "Keeping installer download cache: $pipCache"' in script
 
 
-def test_gui_batch_preserves_native_crash_diagnostics() -> None:
-    script = (PROJECT_ROOT / "start_gui.bat").read_text(encoding="ascii")
+def test_gui_batch_entrypoints_delegate_to_the_same_backend() -> None:
+    normal = (PROJECT_ROOT / "start_gui.bat").read_text(encoding="ascii")
+    debug = (PROJECT_ROOT / "start_gui(debug).bat").read_text(encoding="ascii")
+    shared_invocation = "-s -X utf8 -m game_screen_translator.gui_entry %*"
 
-    assert "-X faulthandler" in script
+    assert shared_invocation in normal
+    assert shared_invocation in debug
+    assert 'start "" /b "%LAUNCHER_PYTHON%"' in normal
+    assert ">nul 2>&1" in normal
+    assert ".venv\\Scripts\\pythonw.exe" in normal
+    assert ".venv\\Scripts\\python.exe" in debug
+    assert "start " not in debug
+    assert "QApplication" not in normal + debug
+    assert "QT_QPA_PLATFORM" not in normal + debug
+
+
+def test_shared_gui_backend_preserves_native_crash_diagnostics() -> None:
+    script = (
+        PROJECT_ROOT / "src" / "game_screen_translator" / "gui_entry.py"
+    ).read_text(encoding="utf-8")
+
+    assert "-X" in script
+    assert "faulthandler" in script
     assert "QApplication([])" in script
     assert "QQmlApplicationEngine" in script
     assert "QQuickWindow" in script
     assert "QQuickStyle" in script
     assert "game_screen_translator.gui.qml_workbench" in script
-    assert "game_screen_translator.gui.launcher" not in script
-    assert "launcher.log" in script
-    assert 'set "QT_QPA_PLATFORM=windows"' in script
-    assert 'set "QT_PLUGIN_PATH="' in script
-    assert 'if not "%launcher_exit%"=="0" goto :launch_failed' in script
-    assert "launcher exited unexpectedly" in script
-    assert "if defined REFRA_LAUNCH_HIDDEN exit /b %launcher_exit%" in script
-    assert script.count("if not defined REFRA_LAUNCH_HIDDEN pause") == 4
-    assert "if errorlevel 1 pause" not in script.lower()
-
-
-def test_hidden_gui_launcher_runs_batch_without_a_console_window() -> None:
-    script = (PROJECT_ROOT / "start_gui.vbs").read_text(encoding="ascii")
-
-    assert 'shell.Environment("PROCESS")("REFRA_LAUNCH_HIDDEN") = "1"' in script
-    assert "shell.Run(command, 0, True)" in script
-    assert 'fileSystem.BuildPath(projectRoot, "start_gui.bat")' in script
-    assert 'fileSystem.BuildPath(projectRoot, "output")' in script
-    assert "WScript.Arguments" in script
-    assert "MsgBox" in script
-
-
-@pytest.mark.skipif(os.name != "nt", reason="VBScript launcher requires Windows")
-def test_hidden_gui_launcher_invokes_the_batch_with_arguments(tmp_path: Path) -> None:
-    cscript = shutil.which("cscript.exe")
-    if cscript is None:
-        pytest.skip("Windows Script Host is required")
-
-    shutil.copy2(PROJECT_ROOT / "start_gui.vbs", tmp_path / "start_gui.vbs")
-    (tmp_path / "start_gui.bat").write_text(
-        "@echo off\n"
-        'if not "%REFRA_LAUNCH_HIDDEN%"=="1" exit /b 9\n'
-        '> "%~dp0arguments.txt" echo %*\n'
-        "exit /b 0\n",
-        encoding="ascii",
-    )
-
-    completed = subprocess.run(
-        [
-            cscript,
-            "//nologo",
-            str(tmp_path / "start_gui.vbs"),
-            "--duration",
-            "0.25",
-        ],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert (tmp_path / "arguments.txt").read_text(encoding="ascii").strip() == (
-        '"--duration" "0.25"'
-    )
+    assert '"launcher.log"' in script
+    assert '"QT_QPA_PLATFORM": "windows"' in script
+    assert '"QT_PLUGIN_PATH": ""' in script
+    assert "subprocess.CREATE_NO_WINDOW" in script
+    assert '"game_screen_translator"' in script
 
 
 def test_install_batch_runs_gui_bootstrap_and_preserves_exit_code() -> None:
@@ -314,7 +292,7 @@ def test_install_batch_runs_gui_bootstrap_and_preserves_exit_code() -> None:
     assert '-File "%~dp0bootstrap.ps1" -WithGui' in script
     assert 'set "install_exit=%ERRORLEVEL%"' in script
     assert 'exit /b %install_exit%' in script
-    assert "start_gui.vbs" in script
+    assert "start_gui.bat" in script
 
 
 def test_update_batch_runs_powershell_updater_and_preserves_exit_code() -> None:
