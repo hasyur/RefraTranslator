@@ -177,6 +177,17 @@ def _application() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
+def test_refra_icon_matches_the_old_prototype_mark() -> None:
+    _application()
+    image = host_module._build_refra_icon().pixmap(64, 64).toImage()
+
+    assert image.pixelColor(0, 0) == QColor("#080a0e")
+    assert image.pixelColor(4, 31) == QColor("#55d9ff")
+    assert image.pixelColor(55, 36) == QColor("#e96ecf")
+    assert image.pixelColor(16, 13) == QColor("#39434c")
+    assert image.pixelColor(24, 55).blue() > image.pixelColor(24, 55).red()
+
+
 def _find_quick_item(
     root: QQuickWindow | QQuickItem,
     object_name: str,
@@ -349,6 +360,10 @@ def test_host_tray_recalls_workbench_and_running_close_returns_to_tray() -> None
     app = _application()
     host, _engine = _host(controller, tray_factory=lambda _app: tray)
 
+    assert tray.icon is not None
+    assert tray.icon.cacheKey() == app.windowIcon().cacheKey()
+    assert host.window is not None
+    assert host.window.icon().cacheKey() == app.windowIcon().cacheKey()
     assert app.quitOnLastWindowClosed() is True
     host.show()
     controller.liveReady.emit()

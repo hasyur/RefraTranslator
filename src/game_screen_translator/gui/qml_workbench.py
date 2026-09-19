@@ -4,7 +4,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRect, Qt, QTimer, QUrl
+from PySide6.QtCore import QObject, QPointF, QRect, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QScreen, QWindow
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
@@ -54,23 +54,85 @@ def _set_windows_immersive_dark_mode(window_id: int, dark: bool) -> None:
     )
 
 
-def _build_prism_tray_icon(dark: bool) -> QIcon:
-    """Build the small tray mark locally so the live path needs no asset."""
+def _build_refra_icon() -> QIcon:
+    """Recreate the old prototype brand mark for every native icon surface."""
 
-    pixmap = QPixmap(32, 32)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    accent = QColor("#62e1ff" if dark else "#00758f")
-    spectrum = QColor("#f27bd7" if dark else "#992477")
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(accent, 2.2))
-    painter.drawLine(7, 7, 16, 25)
-    painter.drawLine(16, 25, 25, 7)
-    painter.setPen(QPen(spectrum, 1.6))
-    painter.drawLine(11, 7, 16, 17)
-    painter.drawLine(16, 17, 21, 7)
-    painter.end()
-    return QIcon(pixmap)
+    icon = QIcon()
+    for size in (16, 20, 24, 32, 48, 64, 128, 256):
+        scale = size / 64
+        stroke = max(1, round(scale))
+        pixmap = QPixmap(size, size)
+        pixmap.fill(QColor("#080a0e"))
+        painter = QPainter(pixmap)
+
+        def scaled(value: float) -> float:
+            return value * scale
+
+        # The beam sits behind the clipped instrument frame in the prototype.
+        painter.fillRect(
+            round(scaled(4)),
+            round(scaled(31)),
+            max(1, round(scaled(53))),
+            stroke,
+            QColor("#55d9ff"),
+        )
+        painter.fillRect(
+            round(scaled(33)),
+            round(scaled(36)),
+            max(1, round(scaled(23))),
+            stroke,
+            QColor("#e96ecf"),
+        )
+
+        frame = QColor("#39434c")
+        painter.fillRect(
+            round(scaled(16)),
+            round(scaled(13)),
+            max(1, round(scaled(20))),
+            stroke,
+            frame,
+        )
+        painter.fillRect(
+            round(scaled(16)),
+            round(scaled(13)),
+            stroke,
+            max(1, round(scaled(35))),
+            frame,
+        )
+        painter.fillRect(
+            round(scaled(16)),
+            round(scaled(47)),
+            max(1, round(scaled(30))),
+            stroke,
+            frame,
+        )
+        painter.fillRect(
+            round(scaled(45)),
+            round(scaled(22)),
+            stroke,
+            max(1, round(scaled(26))),
+            frame,
+        )
+
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        frame_pen = QPen(frame, stroke)
+        frame_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        painter.setPen(frame_pen)
+        painter.drawLine(
+            QPointF(scaled(36), scaled(13)),
+            QPointF(scaled(45), scaled(22)),
+        )
+
+        slice_pen = QPen(QColor("#55d9ff"), stroke)
+        slice_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        painter.setPen(slice_pen)
+        painter.drawLine(
+            QPointF(scaled(38), scaled(8)),
+            QPointF(scaled(24), scaled(56)),
+        )
+        painter.end()
+        icon.addPixmap(pixmap)
+    return icon
 
 
 def _apply_workbench_window_theme(
@@ -146,6 +208,7 @@ class QmlWorkbenchHost(QObject):
         self._source_path = (qml_path or _DEFAULT_QML_PATH).resolve()
         self._selector_factory = selector_factory
         self._theme_applier = theme_applier or _apply_workbench_window_theme
+        self._app_icon = _build_refra_icon()
         self._selector: RegionSelector | None = None
         self._restore_after_selector = False
         self._hidden_for_live = False
@@ -156,6 +219,10 @@ class QmlWorkbenchHost(QObject):
         self._was_maximized = False
         self._last_theme_signature: tuple[int, str, str] | None = None
         self._tray_icon: QSystemTrayIcon | None = None
+
+        set_window_icon = getattr(self._application, "setWindowIcon", None)
+        if callable(set_window_icon):
+            set_window_icon(self._app_icon)
 
         # The workbench must retain QApplication's normal last-window exit
         # behavior whenever live translation is not running.  Background
@@ -177,9 +244,7 @@ class QmlWorkbenchHost(QObject):
         elif isinstance(self._application, QApplication):
             self._tray_icon = QSystemTrayIcon(self._application)
         if self._tray_icon is not None:
-            self._tray_icon.setIcon(
-                _build_prism_tray_icon(self._controller.effectiveTheme == "dark")
-            )
+            self._tray_icon.setIcon(self._app_icon)
             self._tray_icon.setToolTip(f"{PRODUCT_NAME} · 双击打开工作台")
             self._tray_icon.activated.connect(self._on_tray_activated)
             self._tray_icon.hide()
@@ -212,6 +277,7 @@ class QmlWorkbenchHost(QObject):
                 f"QML 工作台必须从 {self._source_path} 加载唯一的 QQuickWindow 根对象"
             )
         window = roots[0]
+        window.setIcon(self._app_icon)
         window.setPersistentGraphics(False)
         window.setPersistentSceneGraph(False)
         if self._last_geometry is not None:
