@@ -73,11 +73,13 @@ Item {
 
 
         Rectangle {
+            objectName: "prismPanelFacetLine"
             width: Math.min(parent.width * 0.24, 110)
             height: 2
             x: -12
             y: 18
             rotation: -12
+            antialiasing: true
             color: root.theme.accent
             opacity: root.raised ? 0.5 : 0.32
         }

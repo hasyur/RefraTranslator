@@ -188,6 +188,21 @@ def test_refra_icon_matches_the_old_prototype_mark() -> None:
     assert image.pixelColor(24, 55).blue() > image.pixelColor(24, 55).red()
 
 
+def test_workbench_uses_curve_glyphs_as_the_global_text_default() -> None:
+    original = QQuickWindow.textRenderType()
+    try:
+        QQuickWindow.setTextRenderType(
+            QQuickWindow.TextRenderType.QtTextRendering,
+        )
+        host_module._use_smooth_quick_rendering()
+        assert (
+            QQuickWindow.textRenderType()
+            == QQuickWindow.TextRenderType.CurveTextRendering
+        )
+    finally:
+        QQuickWindow.setTextRenderType(original)
+
+
 def _find_quick_item(
     root: QQuickWindow | QQuickItem,
     object_name: str,
@@ -352,6 +367,20 @@ def test_host_exposes_only_workbench_and_rebuilds_engine_around_live() -> None:
     assert restored_window.isVisible()
 
     restored_window.close()
+
+
+def test_host_configures_smooth_rendering_before_loading_qml(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        host_module,
+        "_use_smooth_quick_rendering",
+        lambda: calls.append("smooth"),
+    )
+
+    host, _ = _host(_ControllerStub())
+
+    assert calls == ["smooth"]
+    host.shutdown()
 
 
 def test_host_tray_recalls_workbench_and_running_close_returns_to_tray() -> None:
@@ -721,6 +750,10 @@ def test_real_workbench_loads_exactly_seven_pages_without_qml_warnings(
     assert window.minimumWidth() == 980
     assert window.minimumHeight() == 700
     assert window.property("animationsRunning") is False
+    assert (
+        QQuickWindow.textRenderType()
+        == QQuickWindow.TextRenderType.CurveTextRendering
+    )
     assert all(window.findChild(QObject, name) is not None for name in page_names)
 
     page_stack = window.findChild(QObject, "pageStack")
@@ -2232,6 +2265,7 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     spectrum_slice = window.findChild(QObject, "pageTitleSpectrumSlice")
     cyan_edge = window.findChild(QObject, "pageTitleCyanEdge")
     spectrum_edge = window.findChild(QObject, "pageTitleSpectrumEdge")
+    header_underline = window.findChild(QObject, "pageHeaderUnderline")
     cyan_counter_rotation = window.findChild(
         QObject,
         "pageTitleCyanCounterRotation",
@@ -2251,6 +2285,7 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     assert spectrum_slice is not None
     assert cyan_edge is not None
     assert spectrum_edge is not None
+    assert header_underline is not None
     assert cyan_counter_rotation is not None
     assert spectrum_counter_rotation is not None
     assert header_bar is not None
@@ -2285,6 +2320,9 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     assert spectrum_edge.property("rotation") == title.property("facetAngle")
     assert cyan_edge.property("width") >= 1.5
     assert spectrum_edge.property("width") >= 1.5
+    assert cyan_edge.property("antialiasing") is True
+    assert spectrum_edge.property("antialiasing") is True
+    assert header_underline.property("antialiasing") is True
     assert cyan_counter_rotation.property("angle") == -title.property("facetAngle")
     assert spectrum_counter_rotation.property("angle") == -title.property(
         "facetAngle"
@@ -2464,6 +2502,8 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     save_button = window.findChild(QObject, "saveAllButton")
     panel_accent = window.findChild(QObject, "panelAccentEdge")
     panel_spectrum = window.findChild(QObject, "panelSpectrumEdge")
+    panel_facet = window.findChild(QObject, "prismPanelFacetLine")
+    button_facet = window.findChild(QObject, "prismButtonSweepFacet")
     stage = window.findChild(QObject, "opticalStage")
     stage_frame = window.findChild(QObject, "opticalStageFrame")
     ambient_aura = window.findChild(QObject, "opticalAmbientAura")
@@ -2476,6 +2516,7 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     transition_sweep = window.findChild(QObject, "pageTransitionSweep")
     transition_core = window.findChild(QObject, "pageTransitionSweepCore")
     stage_core = window.findChild(QObject, "stagePrismSweepCore")
+    stage_sweep = window.findChild(QObject, "stagePrismSweep")
     feedback_layer = window.findChild(QObject, "transientFeedbackLayer")
     capture_scan_line = window.findChild(QObject, "captureStageScanLine")
     start_beam = window.findChild(QObject, "startFeedbackBeam")
@@ -2496,6 +2537,8 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert save_button is not None
     assert panel_accent is not None
     assert panel_spectrum is not None
+    assert panel_facet is not None
+    assert button_facet is not None
     assert stage is not None
     assert stage_frame is not None
     assert ambient_aura is not None
@@ -2505,6 +2548,7 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert transition_sweep is not None
     assert transition_core is not None
     assert stage_core is not None
+    assert stage_sweep is not None
     assert feedback_layer is not None
     assert capture_scan_line is not None
     assert start_beam is not None
@@ -2530,6 +2574,8 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert panel_accent.property("width") == 2
     assert panel_accent.property("opacity") >= 0.7
     assert panel_spectrum.property("height") == 2
+    assert panel_facet.property("antialiasing") is True
+    assert button_facet.property("antialiasing") is True
     assert stage.property("opacity") == theme.property("opticalStageOpacity")
     assert stage_frame.property("opacity") == 1
     assert float(stage.property("hairlineWidth")) <= 1
@@ -2538,8 +2584,10 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert ambient_spectrum_beam.property("antialiasing") is True
     assert transition_sweep.property("accentAlpha") >= 0.48
     assert transition_sweep.property("spectrumAlpha") >= 0.42
+    assert transition_sweep.property("antialiasing") is True
     assert transition_core.property("width") == 2
     assert stage_core.property("width") == 2
+    assert stage_sweep.property("antialiasing") is True
     assert feedback_layer.property("lineWidth") == 3
     assert capture_scan_line.property("height") == 3
     assert start_beam.property("height") == 4
@@ -3058,6 +3106,13 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
     assert stage_source.count("preferredRendererType: Shape.CurveRenderer") == 5
     assert "style: Text.Raised" not in title_source
     assert "facetWidthRatio: 0.11" in title_source
+    assert title_source.count("renderType: Text.CurveRendering") == 4
+    assert title_source.count(
+        "renderTypeQuality: Text.VeryHighRenderTypeQuality"
+    ) == 4
+    assert title_source.count("layer.enabled: true") == 2
+    assert title_source.count("layer.samples: 4") == 2
+    assert 'objectName: "pageHeaderUnderline"' in main_source
 
 
 def test_cache_page_hides_numeric_metrics_without_a_profile(tmp_path: Path) -> None:

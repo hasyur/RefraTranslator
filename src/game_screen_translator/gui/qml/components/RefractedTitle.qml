@@ -63,6 +63,8 @@ Item {
         font.pixelSize: root.titleSize
         font.weight: Font.Light
         font.letterSpacing: -root.titleSize * 0.035
+        renderType: Text.CurveRendering
+        renderTypeQuality: Text.VeryHighRenderTypeQuality
     }
 
     Text {
@@ -77,6 +79,8 @@ Item {
         font.pixelSize: root.heavyTitleSize
         font.weight: Font.Bold
         font.letterSpacing: -root.titleSize * 0.035
+        renderType: Text.CurveRendering
+        renderTypeQuality: Text.VeryHighRenderTypeQuality
     }
 
     Item {
@@ -100,6 +104,9 @@ Item {
             rotation: root.facetAngle
             transformOrigin: Item.Center
             clip: true
+            layer.enabled: true
+            layer.smooth: true
+            layer.samples: 4
 
             Item {
                 x: -cyanFacet.x
@@ -120,6 +127,8 @@ Item {
                     color: root.theme.accent
                     opacity: root.cyanFacetOpacity
                     font: displayTitleHeavy.font
+                    renderType: Text.CurveRendering
+                    renderTypeQuality: Text.VeryHighRenderTypeQuality
                 }
             }
         }
@@ -135,6 +144,9 @@ Item {
             rotation: cyanFacet.rotation
             transformOrigin: Item.Center
             clip: true
+            layer.enabled: true
+            layer.smooth: true
+            layer.samples: 4
 
             Item {
                 x: -spectrumFacet.x
@@ -155,6 +167,8 @@ Item {
                     color: root.theme.spectrum
                     opacity: root.spectrumFacetOpacity
                     font: displayTitleHeavy.font
+                    renderType: Text.CurveRendering
+                    renderTypeQuality: Text.VeryHighRenderTypeQuality
                 }
             }
         }
@@ -170,6 +184,7 @@ Item {
             opacity: 0.72 + root.refractionEnergy * 0.18
             rotation: root.facetAngle
             transformOrigin: Item.Center
+            antialiasing: true
         }
 
         Rectangle {
@@ -182,6 +197,7 @@ Item {
             opacity: 0.58 + root.refractionEnergy * 0.2
             rotation: root.facetAngle
             transformOrigin: Item.Center
+            antialiasing: true
         }
     }
 

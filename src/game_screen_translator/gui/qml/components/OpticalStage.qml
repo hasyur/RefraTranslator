@@ -716,6 +716,7 @@ Item {
         height: root.height * 1.35
         y: -root.height * 0.18
         rotation: -11
+        antialiasing: true
         opacity: 0
         gradient: Gradient {
             orientation: Gradient.Horizontal

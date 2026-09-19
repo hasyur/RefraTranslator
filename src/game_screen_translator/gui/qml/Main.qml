@@ -402,6 +402,7 @@ ApplicationWindow {
                                     motionEnabled: root.animationsRunning
                                 }
                                 Rectangle {
+                                    objectName: "pageHeaderUnderline"
                                     width: Math.min(parent.width * 0.72, 420)
                                     height: 1
                                     anchors.left: parent.left
@@ -409,6 +410,7 @@ ApplicationWindow {
                                     color: prism.accent
                                     opacity: 0.46
                                     rotation: -1.2
+                                    antialiasing: true
                                 }
                             }
                             Text {
@@ -546,6 +548,7 @@ ApplicationWindow {
                         height: parent.height * 1.3
                         y: -parent.height * 0.15
                         rotation: -12
+                        antialiasing: true
                         opacity: 0
                         gradient: Gradient {
                             orientation: Gradient.Horizontal

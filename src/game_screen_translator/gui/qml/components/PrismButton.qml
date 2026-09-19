@@ -56,11 +56,13 @@ Button {
         Behavior on color { ColorAnimation { duration: root.theme.fast } }
 
         Rectangle {
+            objectName: "prismButtonSweepFacet"
             width: parent.width * 0.48
             height: parent.height * 1.8
             x: root.down ? parent.width * 0.72 : -width
             y: -parent.height * 0.4
             rotation: -18
+            antialiasing: true
             color: Qt.rgba(root.theme.text.r, root.theme.text.g, root.theme.text.b, 0.12)
             opacity: root.primary || root.hovered ? 1 : 0
             Behavior on x { NumberAnimation { duration: root.theme.ui; easing.type: Easing.OutCubic } }

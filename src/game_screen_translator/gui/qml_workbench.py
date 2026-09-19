@@ -32,6 +32,14 @@ def _use_customizable_quick_style() -> None:
     QQuickStyle.setStyle("Basic")
 
 
+def _use_smooth_quick_rendering() -> None:
+    """Use curve glyphs as the default for every Text item in the workbench."""
+
+    QQuickWindow.setTextRenderType(
+        QQuickWindow.TextRenderType.CurveTextRendering,
+    )
+
+
 def _set_windows_immersive_dark_mode(window_id: int, dark: bool) -> None:
     """Apply the supported per-window DWM title-bar hint when available."""
 
@@ -201,6 +209,7 @@ class QmlWorkbenchHost(QObject):
             raise RuntimeError("QmlWorkbenchHost 需要已经创建的 QApplication")
 
         _use_customizable_quick_style()
+        _use_smooth_quick_rendering()
 
         self._application = app
         self._controller = controller
