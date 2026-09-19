@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Shapes
+import QtQuick.Window
 
 Item {
     id: root
@@ -21,6 +22,8 @@ Item {
     readonly property bool pageTransitionRunning: pageEntry.running
     readonly property bool actionPulseRunning: actionPulse.running
     readonly property bool startPreludeRunning: startPrelude.running
+    readonly property real devicePixelRatio: Math.max(1, Screen.devicePixelRatio)
+    readonly property real hairlineWidth: 1 / devicePixelRatio
     readonly property real actionEmphasis: actionPulseRunning
                                                    ? Math.sin(Math.PI * actionProgress)
                                                    : 0
@@ -28,6 +31,10 @@ Item {
     readonly property real deviceVisualOpacity: device.opacity
 
     clip: true
+
+    function snapToDevicePixel(value) {
+        return Math.round(value * devicePixelRatio) / devicePixelRatio
+    }
 
     function pulseWarning() {
         if (!reducedMotion && motionEnabled)
@@ -139,8 +146,8 @@ Item {
         model: 11
         Rectangle {
             required property int index
-            x: index * root.width / 10
-            width: 1
+            x: root.snapToDevicePixel(index * root.width / 10)
+            width: root.hairlineWidth
             height: root.height
             color: root.theme.line
             opacity: 0.17
@@ -150,9 +157,9 @@ Item {
         model: 8
         Rectangle {
             required property int index
-            y: index * root.height / 7
+            y: root.snapToDevicePixel(index * root.height / 7)
             width: root.width
-            height: 1
+            height: root.hairlineWidth
             color: root.theme.line
             opacity: 0.17
         }
@@ -169,11 +176,13 @@ Item {
 
         Rectangle {
             id: aura
+            objectName: "opticalAmbientAura"
             width: parent.width * 0.7
             height: parent.height * 0.28
             x: parent.width * 0.24
             y: -parent.height * 0.04
             rotation: -10
+            antialiasing: true
             color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, root.theme.dark ? 0.075 : 0.05)
             opacity: 0.65
 
@@ -187,11 +196,13 @@ Item {
 
         Rectangle {
             id: cyanBeam
+            objectName: "opticalAmbientCyanBeam"
             width: parent.width * 0.9
             height: 2
             x: parent.width * 0.06
             y: parent.height * 0.46
             rotation: 4
+            antialiasing: true
             color: root.theme.accent
             opacity: 0.36
 
@@ -203,11 +214,13 @@ Item {
             }
         }
         Rectangle {
+            objectName: "opticalAmbientSpectrumBeam"
             width: parent.width * 0.76
             height: 2
             x: parent.width * 0.19
             y: parent.height * 0.55
             rotation: -5
+            antialiasing: true
             color: root.theme.spectrum
             opacity: 0.3
         }
@@ -229,7 +242,9 @@ Item {
                 Rectangle { x: 490; y: 266; width: 438; height: 3; color: root.theme.accent; opacity: 0.6 }
                 Rectangle { x: 478; y: 324; width: 450; height: 3; color: root.theme.spectrum; opacity: 0.56 }
                 Shape {
+                    objectName: "homeRefractionShape"
                     anchors.fill: parent
+                    preferredRendererType: Shape.CurveRenderer
                     ShapePath {
                         strokeColor: root.theme.accent
                         strokeWidth: 3
@@ -462,7 +477,9 @@ Item {
                     opacity: 0.68 + translationMotif.emphasis * 0.3
                 }
                 Shape {
+                    objectName: "translationRefractionShape"
                     anchors.fill: parent
+                    preferredRendererType: Shape.CurveRenderer
                     scale: 1 + translationMotif.emphasis * 0.035
                     opacity: 0.72 + translationMotif.emphasis * 0.28
                     ShapePath {
@@ -504,6 +521,7 @@ Item {
 
                 Shape {
                     objectName: "overlayStageFarPlane"
+                    preferredRendererType: Shape.CurveRenderer
                     width: parent.width
                     height: parent.height
                     x: -overlayMotif.spread
@@ -525,6 +543,7 @@ Item {
                 }
                 Shape {
                     objectName: "overlayStageMiddlePlane"
+                    preferredRendererType: Shape.CurveRenderer
                     width: parent.width
                     height: parent.height
                     opacity: 0.82 + overlayMotif.emphasis * 0.18
@@ -544,6 +563,7 @@ Item {
                 }
                 Shape {
                     objectName: "overlayStageNearPlane"
+                    preferredRendererType: Shape.CurveRenderer
                     width: parent.width
                     height: parent.height
                     x: overlayMotif.spread

@@ -2466,6 +2466,13 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     panel_spectrum = window.findChild(QObject, "panelSpectrumEdge")
     stage = window.findChild(QObject, "opticalStage")
     stage_frame = window.findChild(QObject, "opticalStageFrame")
+    ambient_aura = window.findChild(QObject, "opticalAmbientAura")
+    ambient_cyan_beam = window.findChild(QObject, "opticalAmbientCyanBeam")
+    ambient_spectrum_beam = window.findChild(
+        QObject,
+        "opticalAmbientSpectrumBeam",
+    )
+    home_refraction = window.findChild(QObject, "homeRefractionShape")
     transition_sweep = window.findChild(QObject, "pageTransitionSweep")
     transition_core = window.findChild(QObject, "pageTransitionSweepCore")
     stage_core = window.findChild(QObject, "stagePrismSweepCore")
@@ -2491,6 +2498,10 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert panel_spectrum is not None
     assert stage is not None
     assert stage_frame is not None
+    assert ambient_aura is not None
+    assert ambient_cyan_beam is not None
+    assert ambient_spectrum_beam is not None
+    assert home_refraction is not None
     assert transition_sweep is not None
     assert transition_core is not None
     assert stage_core is not None
@@ -2521,6 +2532,10 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert panel_spectrum.property("height") == 2
     assert stage.property("opacity") == theme.property("opticalStageOpacity")
     assert stage_frame.property("opacity") == 1
+    assert float(stage.property("hairlineWidth")) <= 1
+    assert ambient_aura.property("antialiasing") is True
+    assert ambient_cyan_beam.property("antialiasing") is True
+    assert ambient_spectrum_beam.property("antialiasing") is True
     assert transition_sweep.property("accentAlpha") >= 0.48
     assert transition_sweep.property("spectrumAlpha") >= 0.42
     assert transition_core.property("width") == 2
@@ -3037,6 +3052,10 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
         "settingsStageMotif",
     ):
         assert motif_name in stage_source
+    assert "x: root.snapToDevicePixel(index * root.width / 10)" in stage_source
+    assert "y: root.snapToDevicePixel(index * root.height / 7)" in stage_source
+    assert stage_source.count("root.hairlineWidth") == 2
+    assert stage_source.count("preferredRendererType: Shape.CurveRenderer") == 5
     assert "style: Text.Raised" not in title_source
     assert "facetWidthRatio: 0.11" in title_source
 
