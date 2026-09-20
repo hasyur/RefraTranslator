@@ -75,7 +75,7 @@ SCENES = (
     SceneDefinition(
         "dynamic-roi",
         "动态 ROI 效果",
-        "四个固定文字区域依次局部更新，用诊断边框观察 ROI 是否跟随变化",
+        "夜间遗迹里的对白、任务和拾取提示依次局部更新，用 ROI 边框观察扫描区域是否跟随变化",
     ),
 )
 
@@ -158,16 +158,12 @@ def _fade_opacity(elapsed_s: float) -> float:
     return 0.0
 
 
-_DYNAMIC_ROI_HEADINGS = (
-    "ローカルエリアテスト",
-    "ひとつずつ、ことばがかわります",
-)
-_DYNAMIC_ROI_PANEL_LABELS = ("クエスト", "そうび", "アイテム", "まわり")
+_DYNAMIC_ROI_REGION_KEYS = ("dialogue", "quest", "pickup")
+_DYNAMIC_ROI_REGION_LABELS = ("ルナ", "クエスト", "アイテム")
 _DYNAMIC_ROI_TEXT_PAIRS = (
-    ("きたのもんへむかう", "にしのとうをしらべる"),
-    ("ぼうぎょ　＋１２", "ぼうぎょ　＋１８"),
-    ("やくそうをてにいれた", "ふるいかぎをてにいれた"),
-    ("かぜがやんだ。", "とおくでかねがなった。"),
+    ("ここからさきはくらやみだ。", "あかりをかざしてすすもう。"),
+    ("はいきょのもんをさがす", "みぎのとうへすすむ"),
+    ("やくそうをひろった", "ふるいかぎをひろった"),
 )
 
 
@@ -388,6 +384,11 @@ class AnimatedOcrSceneWindow(QWidget):
             self._paint_changing_background(painter, elapsed_s)
             return
 
+        if scene_index == 5:
+            self._paint_jrpg_background(painter)
+            self._paint_dynamic_roi(painter, elapsed_s)
+            return
+
         self._paint_static_background(painter)
         if scene_index == 0:
             self._paint_typewriter(painter, elapsed_s)
@@ -397,8 +398,123 @@ class AnimatedOcrSceneWindow(QWidget):
             self._paint_vertical_menu(painter, elapsed_s)
         elif scene_index == 3:
             self._paint_horizontal_menu(painter, elapsed_s)
-        elif scene_index == 5:
-            self._paint_dynamic_roi(painter, elapsed_s)
+
+    @staticmethod
+    def _paint_jrpg_background(painter: QPainter) -> None:
+        """Paint the static night-ruins layer behind the JRPG HUD."""
+
+        sky = QLinearGradient(0, 0, 0, CANVAS_HEIGHT)
+        sky.setColorAt(0.0, QColor(5, 12, 31))
+        sky.setColorAt(0.52, QColor(18, 29, 55))
+        sky.setColorAt(1.0, QColor(7, 10, 21))
+        painter.fillRect(QRectF(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT), sky)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        moon_glow = QRadialGradient(1275, 148, 185)
+        moon_glow.setColorAt(0.0, QColor(220, 231, 255, 90))
+        moon_glow.setColorAt(0.55, QColor(127, 159, 218, 36))
+        moon_glow.setColorAt(1.0, QColor(60, 86, 147, 0))
+        painter.setBrush(moon_glow)
+        painter.drawEllipse(QRectF(1090, -38, 370, 370))
+        painter.setBrush(QColor(219, 229, 249, 235))
+        painter.drawEllipse(QRectF(1210, 82, 132, 132))
+
+        for x, y, radius, alpha in (
+            (125, 115, 3, 190),
+            (250, 62, 2, 175),
+            (372, 155, 3, 155),
+            (520, 88, 2, 210),
+            (695, 142, 3, 170),
+            (840, 70, 2, 185),
+            (970, 164, 2, 160),
+            (1105, 64, 2, 185),
+            (1450, 118, 3, 175),
+            (1530, 218, 2, 160),
+        ):
+            painter.setBrush(QColor(227, 236, 255, alpha))
+            painter.drawEllipse(QRectF(x - radius, y - radius, radius * 2, radius * 2))
+
+        distant_hills = QPainterPath(QPointF(-40, 500))
+        for point in (
+            (130, 405),
+            (275, 462),
+            (455, 350),
+            (635, 438),
+            (820, 328),
+            (1025, 430),
+            (1190, 360),
+            (1410, 455),
+            (1650, 382),
+        ):
+            distant_hills.lineTo(QPointF(*point))
+        distant_hills.lineTo(QPointF(1650, 610))
+        distant_hills.lineTo(QPointF(-40, 610))
+        distant_hills.closeSubpath()
+        painter.setBrush(QColor(12, 22, 43, 235))
+        painter.drawPath(distant_hills)
+
+        far_ruins = (
+            (120, 287, 76, 185),
+            (245, 338, 54, 135),
+            (1320, 300, 72, 180),
+            (1450, 352, 46, 128),
+        )
+        painter.setBrush(QColor(22, 34, 55, 245))
+        for x, top, width, height in far_ruins:
+            painter.drawRect(QRectF(x, top, width, height))
+            painter.drawRect(QRectF(x - 10, top - 14, width + 20, 14))
+            painter.drawRect(QRectF(x + width * 0.26, top + 45, width * 0.16, 58))
+            painter.drawRect(QRectF(x + width * 0.64, top + 84, width * 0.15, 72))
+
+        arch = QPainterPath()
+        arch.moveTo(QPointF(600, 585))
+        arch.lineTo(QPointF(600, 365))
+        arch.cubicTo(QPointF(600, 188), QPointF(1000, 188), QPointF(1000, 365))
+        arch.lineTo(QPointF(1000, 585))
+        arch.closeSubpath()
+        painter.setBrush(QColor(10, 18, 34, 250))
+        painter.drawPath(arch)
+
+        arch_opening = QPainterPath()
+        arch_opening.moveTo(QPointF(676, 585))
+        arch_opening.lineTo(QPointF(676, 372))
+        arch_opening.cubicTo(
+            QPointF(676, 274), QPointF(924, 274), QPointF(924, 372)
+        )
+        arch_opening.lineTo(QPointF(924, 585))
+        arch_opening.closeSubpath()
+        painter.setBrush(QColor(18, 29, 53, 255))
+        painter.drawPath(arch_opening)
+        painter.setPen(QPen(QColor(74, 91, 121, 145), 8))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(arch)
+
+        ground = QLinearGradient(0, 525, 0, CANVAS_HEIGHT)
+        ground.setColorAt(0.0, QColor(18, 25, 40, 180))
+        ground.setColorAt(1.0, QColor(5, 8, 16, 250))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(ground)
+        painter.drawRect(QRectF(0, 525, CANVAS_WIDTH, 375))
+
+        painter.setPen(QPen(QColor(65, 79, 104, 95), 3))
+        for x, y, width in (
+            (38, 612, 225),
+            (315, 570, 160),
+            (1060, 585, 250),
+            (1365, 620, 190),
+        ):
+            painter.drawLine(x, y, x + width, y - 9)
+            painter.drawLine(x + 35, y + 33, x + width - 22, y + 25)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(30, 43, 62, 230))
+        for x, y, width, height in (
+            (22, 734, 208, 54),
+            (1320, 748, 245, 62),
+            (80, 535, 120, 34),
+            (1120, 530, 165, 38),
+        ):
+            painter.drawRoundedRect(QRectF(x, y, width, height), 16, 16)
 
     @staticmethod
     def _paint_static_background(painter: QPainter) -> None:
@@ -688,55 +804,110 @@ class AnimatedOcrSceneWindow(QWidget):
         )
 
     def _paint_dynamic_roi(self, painter: QPainter, elapsed_s: float) -> None:
-        self._draw_text(
+        dialogue_text, quest_text, pickup_text = _dynamic_roi_values(elapsed_s)
+
+        dialogue_panel = QRectF(150, 625, 1300, 225)
+        quest_panel = QRectF(1070, 55, 475, 188)
+        pickup_panel = QRectF(55, 72, 505, 172)
+
+        self._draw_jrpg_panel(
             painter,
-            90,
-            92,
-            _DYNAMIC_ROI_HEADINGS[0],
-            size=42,
-            color=QColor(142, 204, 255),
+            dialogue_panel,
+            accent=QColor(121, 173, 230, 220),
         )
-        self._draw_text(
+        self._draw_jrpg_panel(
             painter,
-            90,
-            142,
-            _DYNAMIC_ROI_HEADINGS[1],
-            size=25,
-            color=QColor(190, 204, 222),
-            weight=QFont.Weight.Normal,
-            outline=False,
+            quest_panel,
+            accent=QColor(231, 194, 103, 225),
+        )
+        self._draw_jrpg_panel(
+            painter,
+            pickup_panel,
+            accent=QColor(106, 219, 184, 220),
         )
 
-        panels = (
-            (QRectF(90, 185, 670, 245), _DYNAMIC_ROI_PANEL_LABELS[0]),
-            (QRectF(840, 185, 670, 245), _DYNAMIC_ROI_PANEL_LABELS[1]),
-            (QRectF(90, 520, 670, 245), _DYNAMIC_ROI_PANEL_LABELS[2]),
-            (QRectF(840, 520, 670, 245), _DYNAMIC_ROI_PANEL_LABELS[3]),
+        # A static character bust gives the dialogue box the silhouette of a
+        # game HUD while keeping the only changing pixels inside the text ROI.
+        painter.setPen(QPen(QColor(8, 13, 25, 245), 6))
+        painter.setBrush(QColor(44, 67, 101, 245))
+        painter.drawEllipse(QRectF(196, 658, 92, 92))
+        painter.setBrush(QColor(30, 47, 76, 250))
+        painter.drawEllipse(QRectF(175, 728, 136, 130))
+        painter.setPen(QPen(QColor(171, 212, 255, 180), 4))
+        painter.drawLine(211, 700, 226, 700)
+        painter.drawLine(256, 700, 271, 700)
+
+        self._draw_text(
+            painter,
+            360,
+            688,
+            _DYNAMIC_ROI_REGION_LABELS[0],
+            size=30,
+            color=QColor(145, 205, 255),
+            outline=False,
         )
-        for (panel, label), value in zip(
-            panels,
-            _dynamic_roi_values(elapsed_s),
-            strict=True,
-        ):
-            painter.setPen(QPen(QColor(102, 134, 174, 180), 2))
-            painter.setBrush(QColor(10, 15, 25, 232))
-            painter.drawRoundedRect(panel, 20, 20)
-            self._draw_text(
-                painter,
-                panel.left() + 42,
-                panel.top() + 70,
-                label,
-                size=27,
-                color=QColor(142, 204, 255),
-                outline=False,
-            )
-            self._draw_text(
-                painter,
-                panel.left() + 42,
-                panel.top() + 165,
-                value,
-                size=42,
-            )
+        self._draw_text(painter, 360, 794, dialogue_text, size=43)
+
+        # Quest marker and pickup icon are static so a tracker can attribute
+        # the changing pixels to their adjacent body text.
+        painter.setPen(QPen(QColor(244, 209, 117, 220), 4))
+        painter.setBrush(QColor(65, 53, 30, 220))
+        painter.drawEllipse(QRectF(1105, 82, 42, 42))
+        painter.drawLine(1126, 92, 1126, 115)
+        painter.drawLine(1116, 104, 1136, 104)
+        self._draw_text(
+            painter,
+            1175,
+            111,
+            _DYNAMIC_ROI_REGION_LABELS[1],
+            size=29,
+            color=QColor(248, 220, 143),
+            outline=False,
+        )
+        self._draw_text(painter, 1110, 183, quest_text, size=33)
+
+        painter.setPen(QPen(QColor(127, 240, 202, 230), 4))
+        painter.setBrush(QColor(24, 75, 72, 235))
+        painter.drawRoundedRect(QRectF(90, 115, 58, 66), 12, 12)
+        painter.drawRect(QRectF(102, 101, 34, 17))
+        painter.setPen(QPen(QColor(184, 255, 224, 210), 3))
+        painter.drawLine(106, 144, 132, 144)
+        self._draw_text(
+            painter,
+            190,
+            122,
+            _DYNAMIC_ROI_REGION_LABELS[2],
+            size=29,
+            color=QColor(151, 242, 215),
+            outline=False,
+        )
+        self._draw_text(painter, 190, 184, pickup_text, size=32)
+
+    @staticmethod
+    def _draw_jrpg_panel(
+        painter: QPainter,
+        panel: QRectF,
+        *,
+        accent: QColor,
+    ) -> None:
+        painter.setPen(QPen(QColor(6, 11, 22, 238), 7))
+        painter.setBrush(QColor(7, 13, 25, 226))
+        painter.drawRoundedRect(panel, 20, 20)
+        painter.setPen(QPen(QColor(84, 111, 149, 185), 2))
+        painter.drawRoundedRect(panel.adjusted(7, 7, -7, -7), 14, 14)
+        painter.setPen(QPen(accent, 3))
+        painter.drawLine(
+            panel.left() + 26,
+            panel.top() + 13,
+            panel.left() + 165,
+            panel.top() + 13,
+        )
+        painter.drawLine(
+            panel.right() - 165,
+            panel.bottom() - 13,
+            panel.right() - 26,
+            panel.bottom() - 13,
+        )
 
     def _paint_help(self, painter: QPainter) -> None:
         painter.setPen(QPen(QColor(158, 183, 215, 190), 2))

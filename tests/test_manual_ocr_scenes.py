@@ -62,7 +62,7 @@ def test_typewriter_and_fade_timelines_repeat() -> None:
 def test_dynamic_roi_timeline_changes_exactly_one_region_at_a_time() -> None:
     states = [
         SCENE_MODULE._dynamic_roi_values((step + 0.1) * 1.8)
-        for step in range(16)
+        for step in range(8)
     ]
     states.append(states[0])
 
@@ -70,10 +70,41 @@ def test_dynamic_roi_timeline_changes_exactly_one_region_at_a_time() -> None:
         assert sum(left != right for left, right in zip(previous, current)) == 1
 
 
+def test_dynamic_roi_uses_three_named_jrpg_regions_and_gray_code() -> None:
+    assert SCENE_MODULE._DYNAMIC_ROI_REGION_KEYS == (
+        "dialogue",
+        "quest",
+        "pickup",
+    )
+    assert SCENE_MODULE._DYNAMIC_ROI_REGION_LABELS == (
+        "ルナ",
+        "クエスト",
+        "アイテム",
+    )
+    states = [
+        SCENE_MODULE._dynamic_roi_values((step + 0.1) * 1.8)
+        for step in range(8)
+    ]
+    expected_bits = (
+        (0, 0, 0),
+        (1, 0, 0),
+        (1, 1, 0),
+        (0, 1, 0),
+        (0, 1, 1),
+        (1, 1, 1),
+        (1, 0, 1),
+        (0, 0, 1),
+    )
+    for values, bits in zip(states, expected_bits, strict=True):
+        assert values == tuple(
+            pair[bit]
+            for pair, bit in zip(SCENE_MODULE._DYNAMIC_ROI_TEXT_PAIRS, bits, strict=True)
+        )
+
+
 def test_dynamic_roi_visible_text_contains_no_han_characters() -> None:
     visible_text = (
-        *SCENE_MODULE._DYNAMIC_ROI_HEADINGS,
-        *SCENE_MODULE._DYNAMIC_ROI_PANEL_LABELS,
+        *SCENE_MODULE._DYNAMIC_ROI_REGION_LABELS,
         *(
             text
             for pair in SCENE_MODULE._DYNAMIC_ROI_TEXT_PAIRS
