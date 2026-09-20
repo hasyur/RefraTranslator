@@ -158,11 +158,16 @@ def _fade_opacity(elapsed_s: float) -> float:
     return 0.0
 
 
+_DYNAMIC_ROI_HEADINGS = (
+    "ローカルエリアテスト",
+    "ひとつずつ、ことばがかわります",
+)
+_DYNAMIC_ROI_PANEL_LABELS = ("クエスト", "そうび", "アイテム", "まわり")
 _DYNAMIC_ROI_TEXT_PAIRS = (
-    ("北門へ向かう", "西の塔を調べる"),
-    ("防御力　＋１２", "防御力　＋１８"),
-    ("薬草を手に入れた", "古い鍵を手に入れた"),
-    ("風が止んだ。", "遠くで鐘が鳴った。"),
+    ("きたのもんへむかう", "にしのとうをしらべる"),
+    ("ぼうぎょ　＋１２", "ぼうぎょ　＋１８"),
+    ("やくそうをてにいれた", "ふるいかぎをてにいれた"),
+    ("かぜがやんだ。", "とおくでかねがなった。"),
 )
 
 
@@ -687,7 +692,7 @@ class AnimatedOcrSceneWindow(QWidget):
             painter,
             90,
             92,
-            "局所更新モニター",
+            _DYNAMIC_ROI_HEADINGS[0],
             size=42,
             color=QColor(142, 204, 255),
         )
@@ -695,7 +700,7 @@ class AnimatedOcrSceneWindow(QWidget):
             painter,
             90,
             142,
-            "一度に一つの文字領域だけが変化します",
+            _DYNAMIC_ROI_HEADINGS[1],
             size=25,
             color=QColor(190, 204, 222),
             weight=QFont.Weight.Normal,
@@ -703,10 +708,10 @@ class AnimatedOcrSceneWindow(QWidget):
         )
 
         panels = (
-            (QRectF(90, 185, 670, 245), "任務目標"),
-            (QRectF(840, 185, 670, 245), "装備情報"),
-            (QRectF(90, 520, 670, 245), "入手通知"),
-            (QRectF(840, 520, 670, 245), "周辺の様子"),
+            (QRectF(90, 185, 670, 245), _DYNAMIC_ROI_PANEL_LABELS[0]),
+            (QRectF(840, 185, 670, 245), _DYNAMIC_ROI_PANEL_LABELS[1]),
+            (QRectF(90, 520, 670, 245), _DYNAMIC_ROI_PANEL_LABELS[2]),
+            (QRectF(840, 520, 670, 245), _DYNAMIC_ROI_PANEL_LABELS[3]),
         )
         for (panel, label), value in zip(
             panels,

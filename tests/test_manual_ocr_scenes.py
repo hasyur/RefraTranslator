@@ -70,6 +70,23 @@ def test_dynamic_roi_timeline_changes_exactly_one_region_at_a_time() -> None:
         assert sum(left != right for left, right in zip(previous, current)) == 1
 
 
+def test_dynamic_roi_visible_text_contains_no_han_characters() -> None:
+    visible_text = (
+        *SCENE_MODULE._DYNAMIC_ROI_HEADINGS,
+        *SCENE_MODULE._DYNAMIC_ROI_PANEL_LABELS,
+        *(
+            text
+            for pair in SCENE_MODULE._DYNAMIC_ROI_TEXT_PAIRS
+            for text in pair
+        ),
+    )
+
+    assert all(
+        not any("\u3400" <= character <= "\u9fff" for character in text)
+        for text in visible_text
+    )
+
+
 def test_scene_font_can_render_japanese() -> None:
     _app()
     window = SCENE_MODULE.AnimatedOcrSceneWindow(fps=30)
