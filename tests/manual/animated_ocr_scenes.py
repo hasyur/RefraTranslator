@@ -20,7 +20,6 @@ try:
         QColor,
         QFont,
         QFontDatabase,
-        QFontMetricsF,
         QImage,
         QLinearGradient,
         QPainter,
@@ -72,6 +71,11 @@ SCENES = (
         "changing-background",
         "文字背景变化",
         "字幕保持不变，背后的光斑、色带和字幕底色持续变化",
+    ),
+    SceneDefinition(
+        "dynamic-roi",
+        "动态 ROI 效果",
+        "四个固定文字区域依次局部更新，用诊断边框观察 ROI 是否跟随变化",
     ),
 )
 
@@ -152,6 +156,25 @@ def _fade_opacity(elapsed_s: float) -> float:
     if phase < fade_s:
         return 1.0 - _smoothstep(phase / fade_s)
     return 0.0
+
+
+_DYNAMIC_ROI_TEXT_PAIRS = (
+    ("北門へ向かう", "西の塔を調べる"),
+    ("防御力　＋１２", "防御力　＋１８"),
+    ("薬草を手に入れた", "古い鍵を手に入れた"),
+    ("風が止んだ。", "遠くで鐘が鳴った。"),
+)
+
+
+def _dynamic_roi_values(elapsed_s: float) -> tuple[str, ...]:
+    """Return a cyclic state where each transition changes exactly one region."""
+
+    step = int(max(0.0, elapsed_s) // 1.8) % (1 << len(_DYNAMIC_ROI_TEXT_PAIRS))
+    gray_code = step ^ (step >> 1)
+    return tuple(
+        choices[(gray_code >> index) & 1]
+        for index, choices in enumerate(_DYNAMIC_ROI_TEXT_PAIRS)
+    )
 
 
 class AnimatedOcrSceneWindow(QWidget):
@@ -266,7 +289,7 @@ class AnimatedOcrSceneWindow(QWidget):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt virtual method
         key = event.key()
-        if Qt.Key.Key_1 <= key <= Qt.Key.Key_5:
+        if Qt.Key.Key_1 <= key <= Qt.Key.Key_6:
             self.set_scene(key - Qt.Key.Key_1)
             return
         if key == Qt.Key.Key_Space:
@@ -369,6 +392,8 @@ class AnimatedOcrSceneWindow(QWidget):
             self._paint_vertical_menu(painter, elapsed_s)
         elif scene_index == 3:
             self._paint_horizontal_menu(painter, elapsed_s)
+        elif scene_index == 5:
+            self._paint_dynamic_roi(painter, elapsed_s)
 
     @staticmethod
     def _paint_static_background(painter: QPainter) -> None:
@@ -657,6 +682,57 @@ class AnimatedOcrSceneWindow(QWidget):
             size=48,
         )
 
+    def _paint_dynamic_roi(self, painter: QPainter, elapsed_s: float) -> None:
+        self._draw_text(
+            painter,
+            90,
+            92,
+            "局所更新モニター",
+            size=42,
+            color=QColor(142, 204, 255),
+        )
+        self._draw_text(
+            painter,
+            90,
+            142,
+            "一度に一つの文字領域だけが変化します",
+            size=25,
+            color=QColor(190, 204, 222),
+            weight=QFont.Weight.Normal,
+            outline=False,
+        )
+
+        panels = (
+            (QRectF(90, 185, 670, 245), "任務目標"),
+            (QRectF(840, 185, 670, 245), "装備情報"),
+            (QRectF(90, 520, 670, 245), "入手通知"),
+            (QRectF(840, 520, 670, 245), "周辺の様子"),
+        )
+        for (panel, label), value in zip(
+            panels,
+            _dynamic_roi_values(elapsed_s),
+            strict=True,
+        ):
+            painter.setPen(QPen(QColor(102, 134, 174, 180), 2))
+            painter.setBrush(QColor(10, 15, 25, 232))
+            painter.drawRoundedRect(panel, 20, 20)
+            self._draw_text(
+                painter,
+                panel.left() + 42,
+                panel.top() + 70,
+                label,
+                size=27,
+                color=QColor(142, 204, 255),
+                outline=False,
+            )
+            self._draw_text(
+                painter,
+                panel.left() + 42,
+                panel.top() + 165,
+                value,
+                size=42,
+            )
+
     def _paint_help(self, painter: QPainter) -> None:
         painter.setPen(QPen(QColor(158, 183, 215, 190), 2))
         painter.setBrush(QColor(5, 8, 14, 242))
@@ -671,7 +747,7 @@ class AnimatedOcrSceneWindow(QWidget):
             outline=False,
         )
         help_lines = (
-            "数字一至五：切换测试场景",
+            "数字一至六：切换测试场景",
             "空格：暂停或继续    R：从头播放",
             "A：自动轮换场景    F11：全屏",
             "F1 或 H：隐藏帮助    Esc：退出全屏或关闭",

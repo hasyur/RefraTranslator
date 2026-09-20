@@ -14,11 +14,12 @@
 2. 整行淡入淡出：测试低对比度阶段何时触发 OCR，以及清晰后能否补全；
 3. 菜单上下滚动：文字会移动、停稳并进出裁剪边界；
 4. 菜单左右滚动：卡片标题与说明横向移动并停稳；
-5. 文字背景变化：字幕本身不变，背景光斑、色带和字幕底色持续变化。
+5. 文字背景变化：字幕本身不变，背景光斑、色带和字幕底色持续变化；
+6. 动态 ROI 效果：四块固定文字区每 1.8 秒只更新一块，配合动态 ROI 诊断边框观察局部扫描范围是否跟随变化。
 
 窗口内按键：
 
-- `1`–`5`：切换场景；
+- `1`–`6`：切换场景；
 - `Space`：暂停或继续；
 - `R`：从当前场景开头重播；
 - `A`：每 14 秒自动轮换场景；
@@ -30,6 +31,7 @@
 
 ```powershell
 .\.venv\Scripts\python.exe .\tests\manual\animated_ocr_scenes.py --scene fade --fullscreen
+.\.venv\Scripts\python.exe .\tests\manual\animated_ocr_scenes.py --scene dynamic-roi
 .\.venv\Scripts\python.exe .\tests\manual\animated_ocr_scenes.py --auto-cycle 20
 .\.venv\Scripts\python.exe .\tests\manual\animated_ocr_scenes.py --duration 30
 .\.venv\Scripts\python.exe .\tests\manual\animated_ocr_scenes.py --list-scenes

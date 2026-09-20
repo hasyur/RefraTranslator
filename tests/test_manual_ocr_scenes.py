@@ -39,13 +39,14 @@ def test_manual_scene_script_is_standalone() -> None:
     source = SCENE_SCRIPT.read_text(encoding="utf-8")
 
     assert "game_screen_translator" not in source
-    assert len(SCENE_MODULE.SCENES) == 5
+    assert len(SCENE_MODULE.SCENES) == 6
     assert tuple(scene.key for scene in SCENE_MODULE.SCENES) == (
         "typewriter",
         "fade",
         "vertical-menu",
         "horizontal-menu",
         "changing-background",
+        "dynamic-roi",
     )
 
 
@@ -56,6 +57,17 @@ def test_typewriter_and_fade_timelines_repeat() -> None:
     assert SCENE_MODULE._fade_opacity(1.8) == pytest.approx(1.0)
     assert SCENE_MODULE._motion_progress(0.2) == 0.0
     assert SCENE_MODULE._motion_progress(3.2) == 1.0
+
+
+def test_dynamic_roi_timeline_changes_exactly_one_region_at_a_time() -> None:
+    states = [
+        SCENE_MODULE._dynamic_roi_values((step + 0.1) * 1.8)
+        for step in range(16)
+    ]
+    states.append(states[0])
+
+    for previous, current in zip(states[:-1], states[1:], strict=True):
+        assert sum(left != right for left, right in zip(previous, current)) == 1
 
 
 def test_scene_font_can_render_japanese() -> None:
@@ -70,7 +82,7 @@ def test_scene_font_can_render_japanese() -> None:
     window.close()
 
 
-@pytest.mark.parametrize("scene_index", range(5))
+@pytest.mark.parametrize("scene_index", range(6))
 def test_each_manual_scene_renders_offscreen(scene_index: int) -> None:
     _app()
     window = SCENE_MODULE.AnimatedOcrSceneWindow(scene_index=scene_index, fps=30)
