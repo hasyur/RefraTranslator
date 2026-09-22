@@ -320,8 +320,17 @@ def _load_profile_settings(
     translation = _settings_section(
         data,
         "translation",
-        (*_TRANSLATION_SETTING_FIELDS, "custom_prompt"),
+        (*_TRANSLATION_SETTING_FIELDS, "custom_prompt", "provider"),
     )
+    if "provider" in translation:
+        legacy_provider = translation["provider"]
+        if (
+            not isinstance(legacy_provider, str)
+            or legacy_provider != "openai_compatible"
+        ):
+            raise ProfileError(
+                f"settings.toml 的 translation.provider 无效：{legacy_provider!r}"
+            )
     custom_prompt = _normalize_custom_prompt(translation.get("custom_prompt", ""))
     translation_config = _replace_settings(
         base_config.translation,

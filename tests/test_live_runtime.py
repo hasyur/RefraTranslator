@@ -81,7 +81,6 @@ def test_run_live_initializes_cuda_ocr_before_managed_local_model(
     events = []
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             backend="builtin",
             builtin_model="Hy-MT2-1.8B-Q8_0.gguf",
             base_url="http://external.test/v1",
@@ -290,7 +289,6 @@ def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -326,7 +324,6 @@ def test_capture_stall_reports_recovery_and_forces_fresh_scan(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -390,7 +387,6 @@ def test_capture_geometry_clears_scene_drops_old_translation_and_rescans(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
             max_concurrency=1,
@@ -520,7 +516,6 @@ def test_same_size_pixel_change_does_not_reset_capture_scene() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -553,7 +548,6 @@ def test_live_controller_publishes_and_closes_browser_overlay() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         )
@@ -588,7 +582,6 @@ def test_live_controller_uses_configured_translation_concurrency() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
             max_concurrency=6,
@@ -613,7 +606,6 @@ def test_live_controller_collects_completed_work_on_independent_timer(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -648,7 +640,6 @@ def test_completion_timer_collects_finished_ocr_without_change_tick() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -679,7 +670,6 @@ def test_live_controller_starts_and_stops_both_runtime_timers() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         )
@@ -708,7 +698,6 @@ def test_ocr_filter_rejects_noise_before_tracking_and_translation() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -741,7 +730,6 @@ def test_layout_fragments_merge_before_language_filtering() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -772,7 +760,6 @@ def test_layout_fragments_remain_separate_when_text_merge_is_disabled() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -803,7 +790,6 @@ def test_ambiguous_layout_uses_shared_llm_slot_before_translation(monkeypatch) -
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
             max_concurrency=1,
@@ -869,7 +855,6 @@ def test_layout_arbitration_failure_caches_rule_fallback(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
             max_concurrency=1,
@@ -921,7 +906,6 @@ def test_stale_layout_arbitration_result_is_discarded(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
             max_concurrency=1,
@@ -998,7 +982,6 @@ def test_layout_arbitration_worker_uses_deterministic_short_request(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
             temperature=0.8,
@@ -1052,7 +1035,6 @@ def test_layout_arbitration_can_be_disabled_without_disabling_rule_merge() -> No
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1083,7 +1065,6 @@ def test_live_v2_keeps_atomic_lines_below_one_translation_group() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1115,7 +1096,6 @@ def test_live_translation_path_uses_profile_manual_correction(tmp_path: Path) ->
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://127.0.0.1:1/v1",
             model="hy-mt1.5-7b",
         )
@@ -1156,7 +1136,6 @@ def test_live_translation_path_includes_profile_custom_prompt(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         )
@@ -1206,7 +1185,6 @@ def test_ocr_backlog_waits_for_cooldown_after_completion(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1251,7 +1229,6 @@ def test_live_controller_confirms_once_after_scene_settles(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1300,7 +1277,6 @@ def test_live_controller_rechecks_an_unchanged_frame_at_idle_interval(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1343,7 +1319,6 @@ def test_failed_ocr_retries_on_idle_interval_without_new_frame_change(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1391,7 +1366,6 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1516,7 +1490,6 @@ def test_dynamic_roi_empty_result_retries_once_with_a_wider_fresh_crop(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1609,7 +1582,6 @@ def test_dynamic_roi_empty_retry_stops_after_one_failed_retry(monkeypatch) -> No
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1682,7 +1654,6 @@ def test_dynamic_roi_debug_reports_full_frame_fallback(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1748,7 +1719,6 @@ def test_dynamic_roi_full_frame_confirmation_does_not_replay_static_scene(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1839,7 +1809,6 @@ def test_dynamic_roi_new_frame_during_confirmation_gets_own_confirmation(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -1940,7 +1909,6 @@ def test_dynamic_roi_empty_plan_recovers_with_a_full_scan(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -2015,7 +1983,6 @@ def test_legacy_runtime_confirms_changed_visible_text_without_idle_timers(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -2086,7 +2053,6 @@ def test_live_controller_has_no_pause_surface_and_keeps_ocr_pipeline() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -2123,7 +2089,6 @@ def test_dynamic_roi_retries_until_visible_text_revision_is_confirmed(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -2204,7 +2169,6 @@ def test_dynamic_roi_empty_results_back_off_without_losing_next_text(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -2294,7 +2258,6 @@ def test_dynamic_roi_initial_failure_retries_without_legacy_idle_scan(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -2339,7 +2302,6 @@ def test_live_latency_display_covers_ocr_queue_and_cached_translation(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://127.0.0.1:1/v1",
             model="hy-mt1.5-7b",
         ),
@@ -2402,7 +2364,6 @@ def test_initial_success_publishes_while_failed_item_continues_quality_retries(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -2534,7 +2495,6 @@ def test_quality_correction_updates_only_tracks_still_on_the_current_scene(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -2684,7 +2644,6 @@ def test_close_drain_drops_prior_retry_barrier_but_publishes_later_completed_bat
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
@@ -2759,7 +2718,6 @@ def test_translation_scheduler_bounds_pending_work(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-1.8b",
             max_concurrency=2,
@@ -2803,7 +2761,6 @@ def test_pending_translation_is_replaced_by_latest_track_revision(monkeypatch) -
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-1.8b",
             max_concurrency=1,
@@ -2874,7 +2831,6 @@ def test_deferred_visible_text_returns_when_queue_has_capacity(monkeypatch) -> N
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-1.8b",
             max_concurrency=1,
@@ -2925,7 +2881,6 @@ def test_concurrent_batches_publish_in_top_to_bottom_order(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-1.8b",
             max_concurrency=2,
@@ -3022,7 +2977,6 @@ def test_protocol_failure_splits_batch_and_recovers_every_visible_text(
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-1.8b",
         ),
@@ -3079,7 +3033,6 @@ def test_split_retries_share_the_configured_concurrency_limit(monkeypatch) -> No
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-1.8b",
             max_concurrency=1,
@@ -3136,7 +3089,6 @@ def test_http_500_retries_same_batch_once_then_splits(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-1.8b",
         ),
@@ -3192,7 +3144,6 @@ def test_late_result_reattaches_when_same_text_moves_to_a_new_track(monkeypatch)
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-1.8b",
         ),

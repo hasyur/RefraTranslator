@@ -88,7 +88,6 @@ async def _wait_for_calls(transport: ControlledTransport, count: int) -> None:
 def _config() -> AppConfig:
     return AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         )

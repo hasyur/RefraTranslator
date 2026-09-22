@@ -27,7 +27,6 @@ from game_screen_translator.profiles import (
 def _config() -> AppConfig:
     return AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         )
@@ -48,6 +47,7 @@ def test_create_and_load_isolated_game_profile(tmp_path: Path) -> None:
     assert created.glossary_path.is_file()
     assert created.settings_path.is_file()
     assert created.database_path.is_file()
+    assert "provider =" not in created.settings_path.read_text(encoding="utf-8")
 
     created.glossary_path.write_text(
         '[[terms]]\nsource = "フィクサー"\ntarget = "中间人"\n',
@@ -219,6 +219,7 @@ width = 800
 height = 300
 
 [translation]
+provider = "openai_compatible"
 custom_prompt = "保持角色口吻。"
 """,
         encoding="utf-8",
@@ -231,6 +232,7 @@ custom_prompt = "保持角色口吻。"
     assert "[recording]" in migrated_text
     assert "[live]" in migrated_text
     assert "debug_border = false" in migrated_text
+    assert "provider =" not in migrated_text
 
     changed_machine = replace(
         original,
@@ -252,6 +254,27 @@ custom_prompt = "保持角色口吻。"
         region=(10, 20, 800, 300),
     )
     assert reloaded.custom_prompt == "保持角色口吻。"
+
+
+@pytest.mark.parametrize("provider", ['"unsupported"', "123"])
+def test_profile_rejects_invalid_legacy_provider(
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config = _config()
+    profile = create_game_profile(config_path, config, "game")
+    settings = profile.settings_path.read_text(encoding="utf-8")
+    profile.settings_path.write_text(
+        settings.replace(
+            "[translation]\n",
+            f"[translation]\nprovider = {provider}\n",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProfileError, match="provider"):
+        load_game_profile(config_path, config, "game")
 
 
 def test_profile_custom_prompt_round_trips_and_survives_capture_updates(

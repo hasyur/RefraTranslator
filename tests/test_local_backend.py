@@ -321,7 +321,6 @@ def test_managed_server_is_loopback_only_cuda_scoped_and_ephemeral(
 
     effective = server.effective_translation(
         TranslationConfig(
-            provider="openai_compatible",
             base_url="https://external.test/v1",
             model="external-model",
             api_key="external-secret",

@@ -1,7 +1,6 @@
 # 以下运行设置只作为新建 Profile 和旧 Profile 首次迁移时的初始模板。
 # GUI 后续把实际运行选择保存到各 Profile 的 settings.toml，不会回写共享模板。
 [translation]
-provider = "openai_compatible"
 # external 使用用户自己的 OpenAI-compatible API；builtin 使用程序管理的本地模型。
 backend = "external"
 # 切换后端不会覆盖下面的外部 API 地址、模型或 API Key。

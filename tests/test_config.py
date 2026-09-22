@@ -34,6 +34,7 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
 
     config = load_config(path)
 
+    assert not hasattr(config.translation, "provider")
     assert config.translation.normalized_base_url == "http://127.0.0.1:1234/v1/"
     assert config.translation.max_concurrency == 3
     assert config.translation.backend == "external"
@@ -82,7 +83,6 @@ def test_default_api_key_name_falls_back_to_legacy_name(monkeypatch) -> None:
     monkeypatch.delenv("REFRA_TRANSLATOR_API_KEY", raising=False)
     monkeypatch.setenv("GAME_SCREEN_TRANSLATOR_API_KEY", "legacy-secret")
     config = TranslationConfig(
-        provider="openai_compatible",
         base_url="http://127.0.0.1:1234/v1",
         model="model",
     )
@@ -94,7 +94,6 @@ def test_new_api_key_name_takes_priority(monkeypatch) -> None:
     monkeypatch.setenv("REFRA_TRANSLATOR_API_KEY", "new-secret")
     monkeypatch.setenv("GAME_SCREEN_TRANSLATOR_API_KEY", "legacy-secret")
     config = TranslationConfig(
-        provider="openai_compatible",
         base_url="http://127.0.0.1:1234/v1",
         model="model",
     )
@@ -105,7 +104,6 @@ def test_new_api_key_name_takes_priority(monkeypatch) -> None:
 def test_explicit_api_key_takes_priority_over_environment(monkeypatch) -> None:
     monkeypatch.setenv("REFRA_TRANSLATOR_API_KEY", "environment-secret")
     config = TranslationConfig(
-        provider="openai_compatible",
         base_url="http://127.0.0.1:1234/v1",
         model="model",
         api_key=" explicit-secret ",
@@ -128,6 +126,28 @@ def test_load_config_requires_translation_section(tmp_path: Path) -> None:
     path.write_text("[ocr]\nlanguage='japan'\n", encoding="utf-8")
 
     with pytest.raises(ConfigError, match="translation"):
+        load_config(path)
+
+
+@pytest.mark.parametrize("provider", ["unsupported", 123])
+def test_load_config_rejects_invalid_legacy_provider(
+    tmp_path: Path,
+    provider: object,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path)
+    provider_literal = (
+        f'"{provider}"' if isinstance(provider, str) else repr(provider)
+    )
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            'provider = "openai_compatible"',
+            f"provider = {provider_literal}",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="provider"):
         load_config(path)
 
 
@@ -263,7 +283,6 @@ def test_load_config_rejects_excessive_rescan_interval(
 def test_translation_config_rejects_unknown_backend(backend: str) -> None:
     with pytest.raises(ConfigError, match="backend"):
         TranslationConfig(
-            provider="openai_compatible",
             backend=backend,
             base_url="http://127.0.0.1:1234/v1",
             model="model",
@@ -273,7 +292,6 @@ def test_translation_config_rejects_unknown_backend(backend: str) -> None:
 def test_translation_config_rejects_non_string_builtin_model() -> None:
     with pytest.raises(ConfigError, match="builtin_model"):
         TranslationConfig(
-            provider="openai_compatible",
             base_url="http://127.0.0.1:1234/v1",
             model="model",
             builtin_model=123,  # type: ignore[arg-type]
@@ -298,7 +316,6 @@ def test_translation_config_rejects_invalid_builtin_cuda_setting(
 ) -> None:
     with pytest.raises(ConfigError, match=message):
         TranslationConfig(
-            provider="openai_compatible",
             base_url="http://127.0.0.1:1234/v1",
             model="model",
             **{field: value},

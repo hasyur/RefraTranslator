@@ -28,7 +28,6 @@ BUILTIN_KV_CACHE_TYPES = frozenset({"f16", "q8_0"})
 
 @dataclass(frozen=True, slots=True)
 class TranslationConfig:
-    provider: str
     base_url: str
     model: str
     target_language: str = "简体中文"
@@ -47,8 +46,6 @@ class TranslationConfig:
     builtin_temperature: float = 0.2
 
     def __post_init__(self) -> None:
-        if self.provider != "openai_compatible":
-            raise ConfigError(f"暂不支持 translation.provider={self.provider!r}")
         if not isinstance(self.backend, str) or self.backend not in {
             "external",
             "builtin",
@@ -365,9 +362,19 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
     if not isinstance(data, Mapping):
         raise ConfigError("配置文件根节点必须是 TOML 表")
 
-    translation_values = _section(data, "translation")
+    translation_values = dict(_section(data, "translation"))
     if not translation_values:
         raise ConfigError("缺少必需的 [translation] 配置")
+    # `provider` was formerly a single-value selector. Keep loading old
+    # config files, but do not carry this dead setting into runtime state.
+    legacy_provider = translation_values.pop("provider", None)
+    if legacy_provider is not None and (
+        not isinstance(legacy_provider, str)
+        or legacy_provider != "openai_compatible"
+    ):
+        raise ConfigError(
+            f"暂不支持 translation.provider={legacy_provider!r}"
+        )
 
     return AppConfig(
         translation=_build(TranslationConfig, translation_values, "translation"),

@@ -13,7 +13,6 @@ from game_screen_translator.translation.transport import (
 
 def _config(**overrides) -> TranslationConfig:
     values = {
-        "provider": "openai_compatible",
         "base_url": "http://server.test/v1",
         "model": "hy-mt1.5-7b",
     }

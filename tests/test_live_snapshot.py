@@ -53,7 +53,6 @@ def _controller_with_profile(tmp_path):
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
-            provider="openai_compatible",
             base_url="http://server.test/v1",
             model="test-model",
         )
