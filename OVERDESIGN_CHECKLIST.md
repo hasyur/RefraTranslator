@@ -6,14 +6,14 @@
 
 - [x] 删除无生产调用的全局配置写入链。
 - [x] 收口旧配置兼容项和只有单一取值的扩展字段。
-- [ ] 在真实基准后只保留一套 OCR 调度路径。
+- [x] 明确保留 legacy 全帧与动态 ROI 两套 OCR 调度路径。
 - [ ] 验证收益后决定是否移除阻塞式 LLM 版面仲裁。
 - [x] 删除自动缓存中没有读取者的字段和索引。
 - [x] 简化非关键快照与调试日志的持久化。
-- [ ] 完成上述删减后，再拆分 `LiveController` 和 `WorkbenchController`。
 
 ## 暂不清理
 
+- `LiveController` 和 `WorkbenchController` 的拆分。
 - Revision/过期结果保护。
 - 用于测试隔离的轻量 Protocol。
 - Live 与本地模型的进程隔离。
