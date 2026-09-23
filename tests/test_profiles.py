@@ -157,7 +157,7 @@ def test_profile_runtime_settings_are_isolated_from_other_profiles(
     config_path = tmp_path / "config.toml"
     machine = _config()
     game = create_game_profile(config_path, machine, "game")
-    web = create_game_profile(config_path, machine, "web")
+    create_game_profile(config_path, machine, "web")
     game_config = apply_profile_runtime_settings(machine, game)
     changed = replace(
         game_config,

@@ -28,7 +28,7 @@ from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
 from game_screen_translator.ocr.contextual_roi import (
-    ContextualOcrRegion,
+    ContextualOcrRegion as ContextualOcrRegion,
     ContextualRoiPlan,
     ContextualRoiPlanner,
     TextAnchor,

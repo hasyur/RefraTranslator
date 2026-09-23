@@ -1,4 +1,4 @@
-from game_screen_translator.domain import SourceText, TranslationResult
+from game_screen_translator.domain import TranslationResult
 from game_screen_translator.live.tracker import StableTextTracker
 from game_screen_translator.ocr.types import OcrText
 

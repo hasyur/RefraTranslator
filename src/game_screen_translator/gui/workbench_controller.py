@@ -35,7 +35,6 @@ from game_screen_translator.config import (
     BUILTIN_KV_CACHE_TYPES,
     BUILTIN_MAX_OUTPUT_TOKENS,
     BUILTIN_PARALLEL_MAX,
-    CAPTURE_FPS_PER_CHANGE_POLL,
     ConfigError,
     DEFAULT_DARK_OVERLAY_OPACITY,
     MAX_CHANGE_POLL_FPS,

@@ -177,7 +177,7 @@ def test_controller_loads_last_run_snapshot_and_reloads_on_profile_switch(
     _write_config(config_path)
     config = load_config(config_path)
     first = create_game_profile(config_path, config, "first", display_name="第一组")
-    second = create_game_profile(config_path, config, "second", display_name="第二组")
+    create_game_profile(config_path, config, "second", display_name="第二组")
     save_snapshot(
         first.directory,
         new_snapshot(

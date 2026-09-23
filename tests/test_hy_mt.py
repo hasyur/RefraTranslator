@@ -113,7 +113,7 @@ def test_profile_custom_prompt_is_included_and_revises_cache_contract() -> None:
 def test_parser_accepts_code_fence_and_preserves_requested_order() -> None:
     batch = _batch()
     first, second = (item.wire_id for item in batch.items)
-    response = f"""```xml
+    response = """```xml
 <target>
   <sn id="2">快点。</sn>
   <sn id="1">A 小于 B。</sn>
