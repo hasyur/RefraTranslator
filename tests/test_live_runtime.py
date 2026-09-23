@@ -1374,9 +1374,6 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
             dynamic_roi_enabled=True,
             change_poll_fps=5,
             dynamic_roi_response_target_ms=500,
-            dynamic_roi_settle_ms=100,
-            dynamic_roi_ocr_interval_ms=250,
-            dynamic_roi_max_coalesce_ms=450,
         ),
     )
     capture = MutableCapture(_dynamic_roi_frame())
@@ -1498,9 +1495,6 @@ def test_dynamic_roi_empty_result_retries_once_with_a_wider_fresh_crop(
             dynamic_roi_enabled=True,
             change_poll_fps=10,
             dynamic_roi_response_target_ms=500,
-            dynamic_roi_settle_ms=0,
-            dynamic_roi_ocr_interval_ms=250,
-            dynamic_roi_max_coalesce_ms=250,
         ),
     )
     capture = MutableCapture(_dynamic_roi_frame())
@@ -1589,9 +1583,6 @@ def test_dynamic_roi_empty_retry_stops_after_one_failed_retry(monkeypatch) -> No
             stable_observations=99,
             dynamic_roi_enabled=True,
             change_poll_fps=10,
-            dynamic_roi_settle_ms=0,
-            dynamic_roi_ocr_interval_ms=250,
-            dynamic_roi_max_coalesce_ms=250,
         ),
     )
     capture = MutableCapture(_dynamic_roi_frame())
@@ -1728,9 +1719,6 @@ def test_dynamic_roi_full_frame_confirmation_does_not_replay_static_scene(
             dynamic_roi_enabled=True,
             change_poll_fps=10,
             dynamic_roi_response_target_ms=500,
-            dynamic_roi_settle_ms=0,
-            dynamic_roi_ocr_interval_ms=250,
-            dynamic_roi_max_coalesce_ms=250,
         ),
     )
     capture = MutableCapture(_dynamic_roi_frame())
@@ -1818,9 +1806,6 @@ def test_dynamic_roi_new_frame_during_confirmation_gets_own_confirmation(
             dynamic_roi_enabled=True,
             change_poll_fps=10,
             dynamic_roi_response_target_ms=500,
-            dynamic_roi_settle_ms=0,
-            dynamic_roi_ocr_interval_ms=250,
-            dynamic_roi_max_coalesce_ms=250,
         ),
     )
     initial = _dynamic_roi_frame()
@@ -2096,9 +2081,6 @@ def test_dynamic_roi_retries_until_visible_text_revision_is_confirmed(
             stable_observations=1,
             dynamic_roi_enabled=True,
             change_poll_fps=10,
-            dynamic_roi_settle_ms=0,
-            dynamic_roi_ocr_interval_ms=250,
-            dynamic_roi_max_coalesce_ms=250,
         ),
     )
     capture = MutableCapture(_dynamic_roi_frame())
@@ -2176,9 +2158,6 @@ def test_dynamic_roi_empty_results_back_off_without_losing_next_text(
             stable_observations=99,
             dynamic_roi_enabled=True,
             change_poll_fps=10,
-            dynamic_roi_settle_ms=0,
-            dynamic_roi_ocr_interval_ms=250,
-            dynamic_roi_max_coalesce_ms=250,
         ),
     )
 

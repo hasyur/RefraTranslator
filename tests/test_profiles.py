@@ -47,7 +47,11 @@ def test_create_and_load_isolated_game_profile(tmp_path: Path) -> None:
     assert created.glossary_path.is_file()
     assert created.settings_path.is_file()
     assert created.database_path.is_file()
-    assert "provider =" not in created.settings_path.read_text(encoding="utf-8")
+    settings_text = created.settings_path.read_text(encoding="utf-8")
+    assert "provider =" not in settings_text
+    assert "dynamic_roi_settle_ms" not in settings_text
+    assert "dynamic_roi_ocr_interval_ms" not in settings_text
+    assert "dynamic_roi_max_coalesce_ms" not in settings_text
 
     created.glossary_path.write_text(
         '[[terms]]\nsource = "フィクサー"\ntarget = "中间人"\n',
@@ -254,6 +258,63 @@ custom_prompt = "保持角色口吻。"
         region=(10, 20, 800, 300),
     )
     assert reloaded.custom_prompt == "保持角色口吻。"
+
+
+def test_legacy_dynamic_roi_timing_is_validated_and_removed_on_migration(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    original = _config()
+    profile = create_game_profile(config_path, original, "game")
+    profile.settings_path.write_text(
+        """
+[live]
+dynamic_roi_settle_ms = 0
+dynamic_roi_ocr_interval_ms = 50
+dynamic_roi_max_coalesce_ms = 10000
+""",
+        encoding="utf-8",
+    )
+
+    migrated = load_game_profile(config_path, original, "game")
+    migrated_text = migrated.settings_path.read_text(encoding="utf-8")
+
+    assert not hasattr(migrated.runtime_settings.live, "dynamic_roi_settle_ms")
+    assert not hasattr(migrated.runtime_settings.live, "dynamic_roi_ocr_interval_ms")
+    assert not hasattr(migrated.runtime_settings.live, "dynamic_roi_max_coalesce_ms")
+    assert "dynamic_roi_settle_ms" not in migrated_text
+    assert "dynamic_roi_ocr_interval_ms" not in migrated_text
+    assert "dynamic_roi_max_coalesce_ms" not in migrated_text
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("dynamic_roi_settle_ms", -1),
+        ("dynamic_roi_ocr_interval_ms", 49),
+        ("dynamic_roi_max_coalesce_ms", 10_001),
+    ),
+)
+def test_profile_rejects_invalid_legacy_dynamic_roi_timing(
+    tmp_path: Path,
+    field: str,
+    value: int,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config = _config()
+    profile = create_game_profile(config_path, config, "game")
+    settings = profile.settings_path.read_text(encoding="utf-8")
+    profile.settings_path.write_text(
+        settings.replace(
+            "[live]\n",
+            f"[live]\n{field} = {value}\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProfileError, match=field):
+        load_game_profile(config_path, config, "game")
 
 
 @pytest.mark.parametrize("provider", ['"unsupported"', "123"])

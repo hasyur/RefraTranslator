@@ -145,9 +145,6 @@ def _create_profile_with_runtime_settings(config_path: Path):
                 dynamic_roi_enabled=True,
                 debug_border=True,
                 dynamic_roi_response_target_ms=650,
-                dynamic_roi_settle_ms=220,
-                dynamic_roi_ocr_interval_ms=450,
-                dynamic_roi_max_coalesce_ms=480,
             ),
         ),
     )

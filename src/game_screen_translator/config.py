@@ -26,6 +26,43 @@ BUILTIN_PARALLEL_MAX = 32
 BUILTIN_KV_CACHE_TYPES = frozenset({"f16", "q8_0"})
 
 
+LEGACY_DYNAMIC_ROI_TIMING_FIELDS = frozenset(
+    {
+        "dynamic_roi_settle_ms",
+        "dynamic_roi_ocr_interval_ms",
+        "dynamic_roi_max_coalesce_ms",
+    }
+)
+_LEGACY_DYNAMIC_ROI_TIMING_RANGES = {
+    "dynamic_roi_settle_ms": (0, 10_000),
+    "dynamic_roi_ocr_interval_ms": (50, 10_000),
+    "dynamic_roi_max_coalesce_ms": (50, 10_000),
+}
+
+
+def _validate_legacy_dynamic_roi_timing(
+    values: Mapping[str, Any],
+    *,
+    section_name: str = "live",
+) -> None:
+    """Validate obsolete timing keys before dropping them from runtime state."""
+
+    for field_name, (minimum, maximum) in _LEGACY_DYNAMIC_ROI_TIMING_RANGES.items():
+        if field_name not in values:
+            continue
+        value = values[field_name]
+        try:
+            valid = minimum <= value <= maximum
+        except TypeError as exc:
+            raise ConfigError(
+                f"{section_name}.{field_name} 必须在 {minimum} 到 {maximum} 之间"
+            ) from exc
+        if not valid:
+            raise ConfigError(
+                f"{section_name}.{field_name} 必须在 {minimum} 到 {maximum} 之间"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class TranslationConfig:
     base_url: str
@@ -246,11 +283,6 @@ class LiveConfig:
     dynamic_roi_enabled: bool = False
     debug_border: bool = False
     dynamic_roi_response_target_ms: int = 500
-    # Load-compatible legacy tuning fields. The adaptive response target is
-    # the user-facing control; these values remain accepted for old configs.
-    dynamic_roi_settle_ms: int = 180
-    dynamic_roi_ocr_interval_ms: int = 333
-    dynamic_roi_max_coalesce_ms: int = 333
 
     def __post_init__(self) -> None:
         if self.left < 0 or self.top < 0:
@@ -296,16 +328,6 @@ class LiveConfig:
         if not 100 <= self.dynamic_roi_response_target_ms <= 5_000:
             raise ConfigError(
                 "live.dynamic_roi_response_target_ms 必须在 100 到 5000 之间"
-            )
-        if not 0 <= self.dynamic_roi_settle_ms <= 10_000:
-            raise ConfigError("live.dynamic_roi_settle_ms 必须在 0 到 10000 之间")
-        if not 50 <= self.dynamic_roi_ocr_interval_ms <= 10_000:
-            raise ConfigError(
-                "live.dynamic_roi_ocr_interval_ms 必须在 50 到 10000 之间"
-            )
-        if not 50 <= self.dynamic_roi_max_coalesce_ms <= 10_000:
-            raise ConfigError(
-                "live.dynamic_roi_max_coalesce_ms 必须在 50 到 10000 之间"
             )
 
 
@@ -376,11 +398,19 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
             f"暂不支持 translation.provider={legacy_provider!r}"
         )
 
+    live_values = dict(_section(data, "live"))
+    legacy_dynamic_roi_timing = {
+        field_name: live_values.pop(field_name)
+        for field_name in LEGACY_DYNAMIC_ROI_TIMING_FIELDS
+        if field_name in live_values
+    }
+    _validate_legacy_dynamic_roi_timing(legacy_dynamic_roi_timing)
+
     return AppConfig(
         translation=_build(TranslationConfig, translation_values, "translation"),
         ocr=_build(OcrConfig, _section(data, "ocr"), "ocr"),
         preview=_build(PreviewConfig, _section(data, "preview"), "preview"),
         recording=_build(RecordingConfig, _section(data, "recording"), "recording"),
-        live=_build(LiveConfig, _section(data, "live"), "live"),
+        live=_build(LiveConfig, live_values, "live"),
         profiles=_build(ProfileConfig, _section(data, "profiles"), "profiles"),
     )

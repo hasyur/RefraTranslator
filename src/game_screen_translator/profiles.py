@@ -13,11 +13,14 @@ from typing import Any, Iterable, Mapping
 
 from game_screen_translator.config import (
     AppConfig,
+    ConfigError,
+    LEGACY_DYNAMIC_ROI_TIMING_FIELDS,
     LiveConfig,
     OcrConfig,
     PreviewConfig,
     RecordingConfig,
     TranslationConfig,
+    _validate_legacy_dynamic_roi_timing,
 )
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.translation.cache import (
@@ -351,8 +354,24 @@ def _load_profile_settings(
         recording,
         _RECORDING_SETTING_FIELDS,
     )
-    live = _settings_section(data, "live", _LIVE_SETTING_FIELDS)
-    live_config = _replace_settings(base_config.live, live, _LIVE_SETTING_FIELDS)
+    live = _settings_section(
+        data,
+        "live",
+        (*_LIVE_SETTING_FIELDS, *LEGACY_DYNAMIC_ROI_TIMING_FIELDS),
+    )
+    try:
+        _validate_legacy_dynamic_roi_timing(live)
+    except ConfigError as exc:
+        raise ProfileError(f"Profile 运行设置无效：{exc}") from exc
+    live_config = _replace_settings(
+        base_config.live,
+        {
+            name: value
+            for name, value in live.items()
+            if name in _LIVE_SETTING_FIELDS
+        },
+        _LIVE_SETTING_FIELDS,
+    )
     live_config = apply_profile_capture_settings(live_config, capture_settings)
     runtime_settings = ProfileRuntimeSettings(
         translation=translation_config,

@@ -73,10 +73,32 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.live.dynamic_roi_enabled is False
     assert config.live.debug_border is False
     assert config.live.dynamic_roi_response_target_ms == 500
-    assert config.live.dynamic_roi_settle_ms == 180
-    assert config.live.dynamic_roi_ocr_interval_ms == 333
-    assert config.live.dynamic_roi_max_coalesce_ms == 333
+    assert not hasattr(config.live, "dynamic_roi_settle_ms")
+    assert not hasattr(config.live, "dynamic_roi_ocr_interval_ms")
+    assert not hasattr(config.live, "dynamic_roi_max_coalesce_ms")
     assert config.profiles.root_dir == "profiles"
+
+
+def test_load_config_accepts_legacy_dynamic_roi_timing_without_runtime_fields(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(
+        path,
+        """
+[live]
+dynamic_roi_settle_ms = 0
+dynamic_roi_ocr_interval_ms = 50
+dynamic_roi_max_coalesce_ms = 10000
+""",
+    )
+
+    config = load_config(path)
+
+    assert config.live.dynamic_roi_response_target_ms == 500
+    assert not hasattr(config.live, "dynamic_roi_settle_ms")
+    assert not hasattr(config.live, "dynamic_roi_ocr_interval_ms")
+    assert not hasattr(config.live, "dynamic_roi_max_coalesce_ms")
 
 
 def test_default_api_key_name_falls_back_to_legacy_name(monkeypatch) -> None:
