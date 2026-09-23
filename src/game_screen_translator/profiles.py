@@ -226,7 +226,7 @@ _OCR_SETTING_FIELDS = tuple(
 _PREVIEW_SETTING_FIELDS = tuple(field.name for field in fields(PreviewConfig))
 _RECORDING_SETTING_FIELDS = tuple(field.name for field in fields(RecordingConfig))
 _LIVE_CAPTURE_FIELDS = frozenset(
-    {"left", "top", "width", "height", "monitor_index", "capture_fps"}
+    {"left", "top", "width", "height", "monitor_index"}
 )
 _LIVE_SETTING_FIELDS = tuple(
     field.name for field in fields(LiveConfig)

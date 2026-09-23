@@ -327,7 +327,7 @@ def test_capture_stall_reports_recovery_and_forces_fresh_scan(
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
-        live=LiveConfig(capture_fps=30, stable_observations=99),
+        live=LiveConfig(change_poll_fps=15, stable_observations=99),
     )
 
     class StallingCapture:

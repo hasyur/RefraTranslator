@@ -266,9 +266,6 @@ class LiveConfig:
     width: int = 0
     height: int = 0
     monitor_index: int = 0
-    # Retained as a load-compatible field for older config.toml files.  The
-    # effective value is always derived from change_poll_fps in __post_init__.
-    capture_fps: int = 12
     change_poll_fps: int = 6
     change_threshold: float = 3.0
     stable_observations: int = 1
@@ -298,11 +295,6 @@ class LiveConfig:
             raise ConfigError(
                 f"live.change_poll_fps 必须在 1 到 {MAX_CHANGE_POLL_FPS} 之间"
             )
-        object.__setattr__(
-            self,
-            "capture_fps",
-            self.change_poll_fps * CAPTURE_FPS_PER_CHANGE_POLL,
-        )
         if self.change_threshold < 0:
             raise ConfigError("live.change_threshold 不能为负数")
         if self.stable_observations < 1:
@@ -329,6 +321,10 @@ class LiveConfig:
             raise ConfigError(
                 "live.dynamic_roi_response_target_ms 必须在 100 到 5000 之间"
             )
+
+    @property
+    def capture_fps(self) -> int:
+        return self.change_poll_fps * CAPTURE_FPS_PER_CHANGE_POLL
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,6 +395,10 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         )
 
     live_values = dict(_section(data, "live"))
+    # `capture_fps` was formerly stored in config.toml, but its effective
+    # value has always been derived from change_poll_fps.  Ignore the legacy
+    # key regardless of its value instead of validating dead state.
+    live_values.pop("capture_fps", None)
     legacy_dynamic_roi_timing = {
         field_name: live_values.pop(field_name)
         for field_name in LEGACY_DYNAMIC_ROI_TIMING_FIELDS

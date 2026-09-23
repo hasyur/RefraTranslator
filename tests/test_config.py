@@ -348,7 +348,7 @@ def test_live_capture_fps_follows_change_poll_frequency(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     _write(
         path,
-        "\n[live]\ncapture_fps=99\nchange_poll_fps=7\n",
+        '\n[live]\ncapture_fps="legacy value ignored"\nchange_poll_fps=7\n',
     )
 
     config = load_config(path)
