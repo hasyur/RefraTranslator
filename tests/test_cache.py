@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 from game_screen_translator.domain import ContextPair
@@ -105,6 +106,34 @@ def test_manual_correction_has_priority_over_all_model_cache_dimensions(tmp_path
         source_language="japan",
         target_language="简体中文",
     )
+
+
+def test_new_cache_omits_unused_source_index_without_changing_hits_or_stats(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "translations.sqlite3"
+    cache = TranslationCache(database)
+    environment = _environment()
+
+    cache.store_automatic("仕事 だ。", "是工作。", environment, ())
+    hit = cache.lookup("仕事 だ。", environment, ())
+    stats = cache.stats()
+
+    with sqlite3.connect(database) as connection:
+        indexes = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            )
+        }
+
+    assert "idx_automatic_source" not in indexes
+    assert hit is not None
+    assert (hit.translated_text, hit.origin) == ("是工作。", "automatic")
+    assert stats.automatic_entries == 1
+    assert stats.automatic_hits == 1
+    assert stats.manual_corrections == 0
+    assert stats.manual_hits == 0
 
 
 def test_source_normalization_is_unicode_and_whitespace_stable() -> None:

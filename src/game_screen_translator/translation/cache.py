@@ -184,9 +184,6 @@ class TranslationCache:
                         hit_count INTEGER NOT NULL DEFAULT 0
                     );
 
-                    CREATE INDEX IF NOT EXISTS idx_automatic_source
-                    ON automatic_translations(source_key);
-
                     CREATE TABLE IF NOT EXISTS manual_corrections (
                         source_key TEXT NOT NULL,
                         source_language TEXT NOT NULL,
