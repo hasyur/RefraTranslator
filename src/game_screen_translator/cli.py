@@ -80,7 +80,7 @@ def _parser() -> argparse.ArgumentParser:
         "--debug-border",
         action="store_true",
         default=None,
-        help="显示翻译区域及动态 ROI 诊断边框，并记录 ROI 决策",
+        help="显示翻译区域及动态 ROI 可视化边框",
     )
     live.add_argument("--duration", type=float, help="指定秒数后自动停止（用于测试）")
     live.add_argument(

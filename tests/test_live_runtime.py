@@ -1,4 +1,3 @@
-import json
 import os
 import threading
 from contextlib import contextmanager
@@ -285,7 +284,7 @@ def _ambiguous_atomic_observations() -> tuple[OcrText, ...]:
     )
 
 
-def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
+def test_debug_tick_preserves_ocr_result_and_overlay_state() -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
         translation=TranslationConfig(
@@ -311,7 +310,6 @@ def test_debug_tick_logs_only_after_ocr_result(capsys) -> None:
     controller._tick()
 
     assert controller._ocr_scan_count == 1
-    assert "OCR 保留：待って。" in capsys.readouterr().out
     assert overlay.scenes == 2
     controller.close()
     assert capture.closed
@@ -806,13 +804,8 @@ def test_ambiguous_layout_uses_shared_llm_slot_before_translation(monkeypatch) -
     )
     monkeypatch.setattr(
         controller,
-        "_arbitrate_layout_blocking_timed",
-        lambda request: live_runtime._LayoutArbitrationWorkerResult(
-            ((0, 1, 2),),
-            1.0,
-            1.1,
-            0.1,
-        ),
+        "_arbitrate_layout_blocking",
+        lambda request: ((0, 1, 2),),
     )
     monkeypatch.setattr(
         controller,
@@ -873,7 +866,7 @@ def test_layout_arbitration_failure_caches_rule_fallback(
     def fail(_request):
         raise RuntimeError("classifier unavailable")
 
-    monkeypatch.setattr(controller, "_arbitrate_layout_blocking_timed", fail)
+    monkeypatch.setattr(controller, "_arbitrate_layout_blocking", fail)
     monkeypatch.setattr(
         controller,
         "_translate_blocking_timed",
@@ -926,14 +919,9 @@ def test_stale_layout_arbitration_result_is_discarded(monkeypatch) -> None:
     def arbitrate(_request):
         started.set()
         release.wait(timeout=5)
-        return live_runtime._LayoutArbitrationWorkerResult(
-            ((0, 1, 2),),
-            1.0,
-            1.1,
-            0.1,
-        )
+        return ((0, 1, 2),)
 
-    monkeypatch.setattr(controller, "_arbitrate_layout_blocking_timed", arbitrate)
+    monkeypatch.setattr(controller, "_arbitrate_layout_blocking", arbitrate)
     controller._ocr_line_tracker.observe(_ambiguous_atomic_observations(), now=1.0)
     controller._build_translation_layout(controller._active_ocr_lines())
     controller._dispatch_translation_work()
@@ -1002,7 +990,6 @@ def test_layout_arbitration_worker_uses_deterministic_short_request(
     class FakeTransport:
         def __init__(self, transport_config):
             seen_configs.append(transport_config)
-            self.completion_durations = (0.02,)
 
         async def __aenter__(self):
             return self
@@ -1019,10 +1006,9 @@ def test_layout_arbitration_worker_uses_deterministic_short_request(
     controller._build_translation_layout(controller._active_ocr_lines())
     request = controller._pending_layout_arbitrations[0].request
 
-    result = controller._arbitrate_layout_blocking_timed(request)
+    result = controller._arbitrate_layout_blocking(request)
 
-    assert result.partition == ((0, 1, 2),)
-    assert result.llm_seconds == 0.02
+    assert result == ((0, 1, 2),)
     assert seen_configs[0].model == config.translation.model
     assert seen_configs[0].base_url == config.translation.base_url
     assert seen_configs[0].temperature == 0
@@ -1429,18 +1415,6 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
         region.roi for region in controller._active_roi_plan.regions
     )
     assert not debug_snapshot.fallback_full_frame
-    roi_plan_line = next(
-        line
-        for line in capsys.readouterr().out.splitlines()
-        if line.startswith("[ROI_PLAN] ")
-    )
-    roi_plan_log = json.loads(roi_plan_line.removeprefix("[ROI_PLAN] "))
-    assert roi_plan_log["job_id"] == 1
-    assert roi_plan_log["scan_kind"] == "local"
-    assert roi_plan_log["rect_format"] == "left,top,width,height"
-    assert roi_plan_log["change_rois"]
-    assert roi_plan_log["candidate_rois"]
-    assert roi_plan_log["executed_rois"]
     controller._ocr_future.result(timeout=2)
 
     clock[0] = 10.5
@@ -1477,12 +1451,29 @@ def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     assert "执行ROI 1 次" in control.cost_status
     assert "候选 ROI 1 次" in control.cost_status
     assert "整屏的" in control.cost_status
+    assert overlay.scenes >= 2
+    source = controller._tracker.visible_tracks[0].source(controller._tracker.zone_id)
+    monkeypatch.setattr(
+        controller,
+        "_translate_blocking_timed",
+        lambda batch, context: _successful_worker_result(batch),
+    )
+    controller._submit_translations((source,))
+    translation_future = next(iter(controller._translation_futures))
+    translation_future.result(timeout=2)
+    controller._collect_translations()
+    target = f"译文：{source.text}"
+    assert controller._tracker.visible_tracks[0].translated_text == target
+    captured = capsys.readouterr().out
+    assert source.text not in captured
+    assert target not in captured
+    assert "翻译：" not in captured
+    assert "[ROI_PLAN]" not in captured
     controller.close()
 
 
 def test_dynamic_roi_empty_result_retries_once_with_a_wider_fresh_crop(
     monkeypatch,
-    capsys,
 ) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
@@ -1563,12 +1554,6 @@ def test_dynamic_roi_empty_result_retries_once_with_a_wider_fresh_crop(
     assert controller._roi_full_fallback_count == 0
     assert not controller._pending_roi_empty_retry
     assert "止まれ。" in [track.text for track in controller._tracker.visible_tracks]
-    roi_plan_logs = [
-        json.loads(line.removeprefix("[ROI_PLAN] "))
-        for line in capsys.readouterr().out.splitlines()
-        if line.startswith("[ROI_PLAN] ")
-    ]
-    assert [item["empty_retry"] for item in roi_plan_logs] == [False, True]
     controller.close()
 
 
@@ -1640,7 +1625,6 @@ def test_dynamic_roi_empty_retry_stops_after_one_failed_retry(monkeypatch) -> No
 
 def test_dynamic_roi_debug_reports_full_frame_fallback(
     monkeypatch,
-    capsys,
 ) -> None:
     app = QApplication.instance() or QApplication([])
     config = AppConfig(
@@ -1691,15 +1675,6 @@ def test_dynamic_roi_debug_reports_full_frame_fallback(
     assert snapshot.change_rois
     assert snapshot.candidate_rois
     assert snapshot.executed_rois == ((0, 0, 1600, 900),)
-    roi_plan_line = next(
-        line
-        for line in capsys.readouterr().out.splitlines()
-        if line.startswith("[ROI_PLAN] ")
-    )
-    roi_plan_log = json.loads(roi_plan_line.removeprefix("[ROI_PLAN] "))
-    assert roi_plan_log["scan_kind"] == "full"
-    assert roi_plan_log["planner_reason"] == "widespread-change"
-    assert roi_plan_log["executed_rois"] == [[0, 0, 1600, 900]]
     controller._ocr_future.result(timeout=2)
     controller.close()
 
@@ -2332,7 +2307,6 @@ def _successful_worker_result(batch: TranslationBatch):
             tuple("model" for _ in results),
         ),
         started_at=100.0,
-        completed_at=100.1,
         llm_seconds=0.1,
     )
 
@@ -2405,7 +2379,6 @@ def test_initial_success_publishes_while_failed_item_continues_quality_retries(
                 tuple("model" for _ in results),
             ),
             started_at=1.0,
-            completed_at=1.1,
             llm_seconds=0.1,
         )
 
@@ -2549,7 +2522,6 @@ def test_quality_correction_updates_only_tracks_still_on_the_current_scene(
                 tuple("model" for _ in results),
             ),
             started_at=1.0,
-            completed_at=1.1,
             llm_seconds=0.1,
         )
 

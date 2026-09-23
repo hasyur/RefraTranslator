@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
-import json
 import os
 import re
 import sys
@@ -66,7 +65,6 @@ from game_screen_translator.ocr.cost import (
 from game_screen_translator.ocr.dynamic_roi import FullScreenRoiDetector
 from game_screen_translator.ocr.grouping import (
     HorizontalMergeAmbiguity,
-    HorizontalMergeDiagnostic,
     HorizontalPartition,
     TranslationGroupStabilizer,
     apply_horizontal_arbitration,
@@ -236,7 +234,6 @@ class _LayoutResult:
     candidate_count: int
     stable_count: int
     pending: bool
-    grouping_diagnostics: tuple[HorizontalMergeDiagnostic, ...] = ()
     arbitration_pending_member_ids: tuple[str, ...] = ()
     arbitration_pending_count: int = 0
 
@@ -280,25 +277,15 @@ class _PendingTranslationRetry:
 class _TranslationWorkerResult:
     cached_outcome: CachedTranslationOutcome
     started_at: float
-    completed_at: float
     llm_seconds: float | None
 
 
 @dataclass(frozen=True, slots=True)
 class _LayoutArbitrationSubmission:
     request: LayoutArbitrationRequest
-    queued_at: float
     pipeline_started_at: float
     first_recognized_at: float
     session_epoch: int
-
-
-@dataclass(frozen=True, slots=True)
-class _LayoutArbitrationWorkerResult:
-    partition: HorizontalPartition | None
-    started_at: float
-    completed_at: float
-    llm_seconds: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -833,7 +820,7 @@ class LiveController:
             Future[_TranslationWorkerResult], _TranslationSubmission
         ] = {}
         self._layout_arbitration_futures: dict[
-            Future[_LayoutArbitrationWorkerResult], _LayoutArbitrationSubmission
+            Future[HorizontalPartition | None], _LayoutArbitrationSubmission
         ] = {}
         self._pending_layout_arbitrations: list[_LayoutArbitrationSubmission] = []
         self._layout_arbitration_cache: dict[
@@ -1432,13 +1419,6 @@ class LiveController:
         if not plan.regions:
             self._recover_empty_roi_job("动态 ROI 调度产生了空 OCR 计划")
             return
-        if self._debug:
-            print(
-                "动态 ROI 响应预算："
-                f"{job.trigger_reason} / 预测 {job.predicted_scan_kind} 后续 "
-                f"{round(job.predicted_remaining_s * 1000)} ms / "
-                f"允许等待 {round(job.response_wait_budget_s * 1000)} ms"
-            )
         planned_rois = tuple(region.roi for region in plan.regions)
         rois: tuple[OcrRoi, ...] | None = (
             None
@@ -1451,7 +1431,6 @@ class LiveController:
                 plan,
                 planned_rois,
                 frame_size=(frame_width, frame_height),
-                empty_retry=empty_retry,
             )
         self._pending_roi_empty_retry = False
         self._active_ocr_frame = job.frame
@@ -1489,7 +1468,6 @@ class LiveController:
         executed_rois: tuple[OcrRoi, ...],
         *,
         frame_size: tuple[int, int],
-        empty_retry: bool,
     ) -> None:
         proposal = job.proposal
         change_rois = proposal.change_rois or proposal.rois
@@ -1518,47 +1496,6 @@ class LiveController:
             plan.reason,
         )
         self._overlay.set_roi_debug_snapshot(snapshot)
-        selected_candidate_coverage = (
-            proposal.candidate_coverage_fraction
-            if proposal.fallback_full_frame
-            else plan.candidate_coverage_fraction
-        )
-        payload = {
-            "job_id": job.job_id,
-            "generation": job.generation,
-            "scan_kind": "full" if plan.fallback_full_frame else "local",
-            "trigger_reason": job.trigger_reason,
-            "detector_reason": proposal.reason,
-            "planner_reason": plan.reason,
-            "rect_format": "left,top,width,height",
-            "frame_size": frame_size,
-            "change_rois": change_rois,
-            "candidate_rois": candidate_rois,
-            "detector_candidate_rois": detector_candidates,
-            "contextual_candidate_rois": plan.candidate_rois,
-            "executed_rois": executed_rois,
-            "changed_fraction": round(proposal.changed_fraction, 6),
-            "candidate_coverage_fraction": round(
-                selected_candidate_coverage,
-                6,
-            ),
-            "detector_candidate_coverage_fraction": round(
-                proposal.candidate_coverage_fraction,
-                6,
-            ),
-            "contextual_candidate_coverage_fraction": round(
-                plan.candidate_coverage_fraction,
-                6,
-            ),
-            "candidate_region_count": len(candidate_rois),
-            "affected_track_count": plan.affected_track_count,
-            "empty_retry": empty_retry,
-        }
-        print(
-            "[ROI_PLAN] "
-            + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-            flush=True,
-        )
 
     def _recover_empty_roi_job(self, reason: str) -> None:
         """Release a pre-submit ROI dead end by rebuilding from a full scan."""
@@ -1638,9 +1575,6 @@ class LiveController:
         *,
         accept_arbitrated: bool = False,
     ) -> _LayoutResult:
-        grouping_diagnostics: list[HorizontalMergeDiagnostic] | None = (
-            [] if self._debug else None
-        )
         arbitration_enabled = (
             self._config.ocr.text_merge_enabled
             and self._config.ocr.text_merge_llm_arbitration_enabled
@@ -1652,7 +1586,6 @@ class LiveController:
             lines,
             source_language=self._config.ocr.language,
             merge_enabled=self._config.ocr.text_merge_enabled,
-            diagnostics=grouping_diagnostics,
             ambiguities=grouping_ambiguities,
         )
         unresolved_requests: list[LayoutArbitrationRequest] = []
@@ -1722,7 +1655,6 @@ class LiveController:
             len(candidate_groups),
             len(stable_groups),
             self._layout_stabilizer.has_pending,
-            tuple(grouping_diagnostics or ()),
             tuple(sorted(blocked_member_ids)),
             len(unresolved_requests),
         )
@@ -1753,8 +1685,6 @@ class LiveController:
                 future.result()
             except Exception:
                 pass
-            if self._debug:
-                print("过期会话完成的 OCR 已丢弃")
             return
         now = time.monotonic()
         self._next_ocr_allowed = (
@@ -1771,8 +1701,6 @@ class LiveController:
             set_cost_status = getattr(self._control, "set_cost_status", None)
             if callable(set_cost_status):
                 set_cost_status(self._ocr_cost_stats.render())
-            if self._debug:
-                print(self._ocr_cost_stats.render())
         try:
             task_result = future.result()
         except Exception as exc:
@@ -1895,65 +1823,6 @@ class LiveController:
             )
         ocr_seconds = max(0.0, task_result.completed_at - task_result.started_at)
         self._ocr_scan_count += 1
-        if self._debug:
-            print(f"耗时：OCR {ocr_seconds:.3f}s")
-            print(
-                f"OCR 过滤：本轮识别 {raw_count} 框，当前 {len(active_lines)} 行，"
-                f"版面候选 {layout_result.candidate_count} 组/"
-                f"稳定 {layout_result.stable_count} 组，"
-                f"保留 {len(observations)} 条，过滤 {len(rejected)} 条"
-            )
-            if layout_result.pending:
-                print("版面 V2：新分组关系等待下一轮 OCR 确认")
-            if layout_result.arbitration_pending_count:
-                print(
-                    "版面仲裁："
-                    f"{layout_result.arbitration_pending_count} 个歧义块排队，"
-                    "相关翻译暂缓"
-                )
-            for diagnostic in layout_result.grouping_diagnostics:
-                score = "-" if diagnostic.score is None else f"{diagnostic.score:.3f}"
-                evidence = (
-                    f" / 证据 {','.join(diagnostic.evidence)}"
-                    if diagnostic.evidence
-                    else ""
-                )
-                action = "候选合并" if diagnostic.merged else "候选分开"
-                print(
-                    f"版面判断：{action} {diagnostic.upper_text!r} -> "
-                    f"{diagnostic.lower_text!r} / 分数 {score} / "
-                    f"{diagnostic.reason}{evidence}"
-                )
-            if rejected:
-                print(
-                    "已过滤："
-                    + " | ".join(
-                        f"{item.observation.text}（{item.reason}）"
-                        for item in rejected
-                    )
-                )
-            if observations:
-                print("OCR 保留：" + " | ".join(item.text for item in observations))
-            if contextual_update is not None:
-                assert roi_job is not None
-                assert roi_target_count is not None
-                print(
-                    f"动态 ROI：{roi_plan.reason} / 扫描覆盖 "
-                    f"{roi_plan.coverage_fraction:.1%} / "
-                    f"变化 {roi_job.proposal.changed_fraction:.1%} / "
-                    f"候选覆盖 {roi_plan.candidate_coverage_fraction:.1%} / "
-                    f"候选区域 {roi_plan.candidate_region_count} / "
-                    f"影响 {roi_plan.affected_track_count} 条 / "
-                    f"更新 {len(contextual_update.observations)} 条 / "
-                    f"target {roi_target_count} 条"
-                )
-            if empty_roi_retry_requested:
-                print("动态 ROI OCR 空结果：保留当前文字并安排一次加宽局部补扫")
-            elif roi_empty_retry:
-                print(
-                    "动态 ROI OCR 补扫完成："
-                    + (f"恢复 {raw_count} 框" if raw_count else "仍为 0 框")
-                )
         # Atomic OCR lines outside a local ROI remain in the line tracker, so
         # this is a complete translation-layout snapshot after every scan.
         self._observe_translation_layout(
@@ -2024,12 +1893,6 @@ class LiveController:
                     # The pixels already returned to the accepted baseline;
                     # there is no changed local region left to retry.
                     self._pending_roi_empty_retry = False
-                if self._debug:
-                    print(
-                        "动态 ROI 自适应：连续无目标 "
-                        f"{scheduler.empty_result_streak} 次 / 下轮最短间隔 "
-                        f"{round(scheduler.effective_min_ocr_interval_s * 1000)} ms"
-                    )
             elif not scheduler.primed:
                 if active_frame is None:
                     raise RuntimeError("首次动态 ROI OCR 缺少基准帧")
@@ -2064,8 +1927,6 @@ class LiveController:
                 processing_seconds=max(0.0, processed_at - now),
             )
             self._refresh_latency_display()
-            if self._debug:
-                print(self._latency_stats.render_latest_ocr())
         else:
             self._latency_stats.record_ocr(ocr_seconds)
             self._refresh_latency_display()
@@ -2103,11 +1964,6 @@ class LiveController:
                 visible_by_key[(source.track_id, source.revision)]
             )
         )
-        if update.stable_sources and self._debug:
-            print("稳定字幕：" + " | ".join(item.text for item in update.stable_sources))
-            waiting_count = len(update.stable_sources) - len(translatable_sources)
-            if waiting_count:
-                print(f"版面仲裁：暂缓翻译 {waiting_count} 条规则分组")
         if translatable_sources and not self._finalizing:
             self._submit_translations(translatable_sources)
         if not self._finalizing:
@@ -2125,7 +1981,6 @@ class LiveController:
         self._pending_layout_arbitrations.append(
             _LayoutArbitrationSubmission(
                 request,
-                now,
                 now,
                 now,
                 self._session_epoch,
@@ -2176,7 +2031,7 @@ class LiveController:
                 and request.is_current(active_lines)
             )
             try:
-                worker_result = future.result()
+                partition = future.result()
             except Exception as exc:
                 if not current:
                     self._layout_arbitration_stale_count += 1
@@ -2188,32 +2043,11 @@ class LiveController:
                 if not current:
                     self._layout_arbitration_stale_count += 1
                     continue
-                partition = worker_result.partition
                 if partition is None:
                     partition = request.ambiguity.rule_partition
                     self._layout_arbitration_fallback_count += 1
                 elif partition != request.ambiguity.rule_partition:
                     self._layout_arbitration_change_count += 1
-                if self._debug:
-                    llm_label = (
-                        f"{worker_result.llm_seconds:.3f}s"
-                        if worker_result.llm_seconds is not None
-                        else "-"
-                    )
-                    queue_seconds = max(
-                        0.0,
-                        worker_result.started_at - submission.queued_at,
-                    )
-                    total_seconds = max(
-                        0.0,
-                        worker_result.completed_at - submission.queued_at,
-                    )
-                    print(
-                        f"版面仲裁：{request.ambiguity.kinds} / "
-                        f"规则 {request.ambiguity.rule_partition} -> {partition} / "
-                        f"排队 {queue_seconds:.3f}s / LLM {llm_label} / "
-                        f"总计 {total_seconds:.3f}s"
-                    )
             self._remember_layout_arbitration(request.key, partition)
             completed_current.append(submission)
 
@@ -2245,13 +2079,11 @@ class LiveController:
         if self._latest_frame is not None:
             self._publish_scene(self._latest_frame, self._tracker.visible_tracks)
 
-    def _arbitrate_layout_blocking_timed(
+    def _arbitrate_layout_blocking(
         self,
         request: LayoutArbitrationRequest,
-    ) -> _LayoutArbitrationWorkerResult:
-        started_at = time.monotonic()
-
-        async def arbitrate() -> tuple[HorizontalPartition | None, float | None]:
+    ) -> HorizontalPartition | None:
+        async def arbitrate() -> HorizontalPartition | None:
             arbitration_config = replace(
                 self._config.translation,
                 temperature=0.0,
@@ -2262,17 +2094,9 @@ class LiveController:
                 content = await transport.complete(
                     build_layout_arbitration_prompt(request)
                 )
-                partition = parse_layout_arbitration_response(content, request)
-                durations = transport.completion_durations
-                return partition, (sum(durations) if durations else None)
+                return parse_layout_arbitration_response(content, request)
 
-        partition, llm_seconds = asyncio.run(arbitrate())
-        return _LayoutArbitrationWorkerResult(
-            partition,
-            started_at,
-            time.monotonic(),
-            llm_seconds,
-        )
+        return asyncio.run(arbitrate())
 
     def _submit_translations(self, sources: Sequence[SourceText]) -> None:
         if not sources:
@@ -2504,7 +2328,7 @@ class LiveController:
             ):
                 continue
             future = self._translation_executor.submit(
-                self._arbitrate_layout_blocking_timed,
+                self._arbitrate_layout_blocking,
                 submission.request,
             )
             self._layout_arbitration_futures[future] = submission
@@ -2609,7 +2433,6 @@ class LiveController:
         return _TranslationWorkerResult(
             cached_outcome,
             started_at,
-            time.monotonic(),
             llm_seconds,
         )
 
@@ -2650,8 +2473,6 @@ class LiveController:
                 print(f"{error_label}：{exc}", file=sys.stderr)
                 continue
             if stale_session:
-                if self._debug:
-                    print("过期会话完成的翻译已丢弃")
                 continue
 
             cached_outcome = worker_result.cached_outcome
@@ -2683,18 +2504,6 @@ class LiveController:
                 batch_size=len(submission.batch.items),
             )
             self._refresh_latency_display()
-            if self._debug:
-                llm_label = (
-                    f"{worker_result.llm_seconds:.3f}s"
-                    if worker_result.llm_seconds is not None
-                    else "缓存命中"
-                )
-                print(
-                    f"翻译阶段 {submission.quality_retry_count} · "
-                    f"耗时：稳定 {stability_seconds:.3f}s · "
-                    f"翻译排队 {queue_seconds:.3f}s · LLM {llm_label} · "
-                    f"总计 {total_seconds:.3f}s · 批次 {len(submission.batch.items)} 条"
-                )
 
             order_key = (submission.order_group, submission.order_path)
             accepted_with_origins, _ = self._accept_current_results(
@@ -2802,21 +2611,6 @@ class LiveController:
                     self._inflight_reuse_count += 1
                 else:
                     self._model_result_count += 1
-            if self._debug and accepted_with_origins:
-                origin_labels = {
-                    "manual": "人工修订",
-                    "automatic": "缓存",
-                    "inflight": "在途复用",
-                    "model": "模型",
-                }
-                print(
-                    "翻译："
-                    + " | ".join(
-                        f"[{origin_labels[origin]}] "
-                        f"{result.source.text} -> {result.translated_text}"
-                        for result, origin in accepted_with_origins
-                    )
-                )
             self._translated_count += len(accepted)
             set_coverage_count = getattr(self._control, "set_coverage_count", None)
             if callable(set_coverage_count):
