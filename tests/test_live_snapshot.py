@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
 
+import game_screen_translator.live.snapshot as snapshot_module
 from game_screen_translator.live.snapshot import (
     CacheHit,
     LastRunSnapshot,
@@ -107,6 +109,52 @@ def test_new_snapshot_atomically_replaces_previous_content(tmp_path) -> None:
     restored = load_snapshot(tmp_path)
     assert restored is not None
     assert [entry.source_text for entry in restored.entries] == ["新原文"]
+    assert not list(tmp_path.glob(".last_run_snapshot.json.*.tmp"))
+
+
+def test_snapshot_writes_same_directory_temp_before_atomic_replace(
+    tmp_path, monkeypatch
+) -> None:
+    real_replace = snapshot_module.os.replace
+    observed: dict[str, Path] = {}
+
+    def record_replace(temporary_name, target_name) -> None:
+        temporary_path = Path(temporary_name)
+        target_path = Path(target_name)
+        observed["temporary"] = temporary_path
+        observed["target"] = target_path
+        assert temporary_path.parent == tmp_path
+        assert temporary_path.is_file()
+        real_replace(temporary_path, target_path)
+
+    monkeypatch.setattr(snapshot_module.os, "replace", record_replace)
+
+    save_snapshot(tmp_path, _snapshot())
+
+    assert observed["target"] == snapshot_path(tmp_path)
+    assert not observed["temporary"].exists()
+
+
+def test_snapshot_cleans_temp_after_atomic_replace_failure(tmp_path, monkeypatch) -> None:
+    save_snapshot(tmp_path, _snapshot("旧原文"))
+    path = snapshot_path(tmp_path)
+    previous_content = path.read_text(encoding="utf-8")
+    temporary_path: Path | None = None
+
+    def fail_replace(temporary_name, _target_name) -> None:
+        nonlocal temporary_path
+        temporary_path = Path(temporary_name)
+        assert temporary_path.is_file()
+        raise OSError("模拟原子替换失败")
+
+    monkeypatch.setattr(snapshot_module.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="模拟原子替换失败"):
+        save_snapshot(tmp_path, _snapshot("新原文"))
+
+    assert temporary_path is not None
+    assert not temporary_path.exists()
+    assert path.read_text(encoding="utf-8") == previous_content
     assert not list(tmp_path.glob(".last_run_snapshot.json.*.tmp"))
 
 

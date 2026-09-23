@@ -210,7 +210,6 @@ def save_snapshot(profile_directory: Path, snapshot: LastRunSnapshot) -> Path:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(content)
             handle.flush()
-            os.fsync(handle.fileno())
         os.replace(temporary_path, path)
     except BaseException:
         temporary_path.unlink(missing_ok=True)
