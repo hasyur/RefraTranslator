@@ -16,7 +16,8 @@ from typing import Iterator, Literal, Sequence
 from game_screen_translator.domain import ContextPair
 
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
+_AUTOMATIC_KEY_SCHEMA_VERSION = 1
 _AUTOMATIC_KEY_POLICY = "stable-source-v1"
 _SPACE_RE = re.compile(r"\s+")
 CacheOrigin = Literal["manual", "automatic"]
@@ -28,19 +29,6 @@ class TranslationCacheError(RuntimeError):
 
 def normalize_source_text(text: str) -> str:
     return _SPACE_RE.sub(" ", unicodedata.normalize("NFKC", text)).strip()
-
-
-def context_fingerprint(context: Sequence[ContextPair]) -> str:
-    payload = [
-        [normalize_source_text(pair.source), normalize_source_text(pair.target)]
-        for pair in context
-    ]
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,15 +56,12 @@ class CacheEnvironment:
         self,
         source_text: str,
         context: Sequence[ContextPair],
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str]:
         normalized = normalize_source_text(source_text)
         if not normalized:
             raise ValueError("缓存原文不能为空")
-        # Context still records how the first translation was produced, but it
-        # is deliberately not part of this per-profile translation identity.
-        context_revision = context_fingerprint(context)
         payload = {
-            "schema": _SCHEMA_VERSION,
+            "schema": _AUTOMATIC_KEY_SCHEMA_VERSION,
             "key_policy": _AUTOMATIC_KEY_POLICY,
             "profile": self.profile_id,
             "source": normalized,
@@ -92,7 +77,7 @@ class CacheEnvironment:
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest(), normalized, context_revision
+        return hashlib.sha256(encoded).hexdigest(), normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,30 +145,25 @@ class TranslationCache:
         try:
             with self._connection() as connection:
                 version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-                if version not in {0, _SCHEMA_VERSION}:
+                if version not in {0, 1, _SCHEMA_VERSION}:
                     raise TranslationCacheError(
                         f"不支持的缓存数据库版本：{version}"
                     )
                 connection.execute("PRAGMA journal_mode = WAL")
-                connection.executescript(
+                connection.execute("BEGIN")
+                if version == 1:
+                    connection.execute("DROP TABLE IF EXISTS automatic_translations")
+                connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS automatic_translations (
                         cache_key TEXT PRIMARY KEY,
-                        source_key TEXT NOT NULL,
-                        source_text TEXT NOT NULL,
                         translated_text TEXT NOT NULL,
-                        source_language TEXT NOT NULL,
-                        target_language TEXT NOT NULL,
-                        model TEXT NOT NULL,
-                        prompt_version TEXT NOT NULL,
-                        glossary_revision TEXT NOT NULL,
-                        context_fingerprint TEXT NOT NULL,
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        last_used_at TEXT,
                         hit_count INTEGER NOT NULL DEFAULT 0
-                    );
-
+                    )
+                    """
+                )
+                connection.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS manual_corrections (
                         source_key TEXT NOT NULL,
                         source_language TEXT NOT NULL,
@@ -194,10 +174,11 @@ class TranslationCache:
                         last_used_at TEXT,
                         hit_count INTEGER NOT NULL DEFAULT 0,
                         PRIMARY KEY (source_key, source_language, target_language)
-                    );
+                    )
                     """
                 )
-                connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+                if version != _SCHEMA_VERSION:
+                    connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         except sqlite3.Error as exc:
             raise TranslationCacheError(f"无法初始化翻译缓存：{exc}") from exc
 
@@ -207,7 +188,7 @@ class TranslationCache:
         environment: CacheEnvironment,
         context: Sequence[ContextPair],
     ) -> CacheHit | None:
-        cache_key, source_key, _ = environment.automatic_key(source_text, context)
+        cache_key, source_key = environment.automatic_key(source_text, context)
         now = _utc_now()
         try:
             with self._connection() as connection:
@@ -252,10 +233,10 @@ class TranslationCache:
                 connection.execute(
                     """
                     UPDATE automatic_translations
-                    SET hit_count = hit_count + 1, last_used_at = ?
+                    SET hit_count = hit_count + 1
                     WHERE cache_key = ?
                     """,
-                    (now, cache_key),
+                    (cache_key,),
                 )
                 return CacheHit(str(automatic["translated_text"]), "automatic")
         except sqlite3.Error as exc:
@@ -267,7 +248,7 @@ class TranslationCache:
         environment: CacheEnvironment,
         context: Sequence[ContextPair],
     ) -> InFlightCacheClaim:
-        cache_key, _, _ = environment.automatic_key(source_text, context)
+        cache_key, _ = environment.automatic_key(source_text, context)
         with self._inflight_lock:
             future = self._inflight.get(cache_key)
             if future is not None:
@@ -283,7 +264,7 @@ class TranslationCache:
         environment: CacheEnvironment,
         context: Sequence[ContextPair],
     ) -> bool:
-        cache_key, _, _ = environment.automatic_key(source_text, context)
+        cache_key, _ = environment.automatic_key(source_text, context)
         try:
             with self._connection() as connection:
                 cursor = connection.execute(
@@ -349,38 +330,23 @@ class TranslationCache:
         translated = translated_text.strip()
         if not translated:
             raise ValueError("缓存译文不能为空")
-        cache_key, source_key, context_revision = environment.automatic_key(
+        cache_key, _ = environment.automatic_key(
             source_text,
             context,
         )
-        now = _utc_now()
         try:
             with self._connection() as connection:
                 connection.execute(
                     """
                     INSERT INTO automatic_translations (
-                        cache_key, source_key, source_text, translated_text,
-                        source_language, target_language, model, prompt_version,
-                        glossary_revision, context_fingerprint, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        cache_key, translated_text
+                    ) VALUES (?, ?)
                     ON CONFLICT(cache_key) DO UPDATE SET
-                        source_text = excluded.source_text,
-                        translated_text = excluded.translated_text,
-                        updated_at = excluded.updated_at
+                        translated_text = excluded.translated_text
                     """,
                     (
                         cache_key,
-                        source_key,
-                        source_text.strip(),
                         translated,
-                        environment.source_language,
-                        environment.target_language,
-                        environment.model,
-                        environment.prompt_version,
-                        environment.glossary_revision,
-                        context_revision,
-                        now,
-                        now,
                     ),
                 )
         except sqlite3.Error as exc:
