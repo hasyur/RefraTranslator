@@ -95,6 +95,11 @@ def test_browser_overlay_server_serves_transparent_page_and_live_state() -> None
             assert response.status == 200
             assert "rgba(0, 0, 0, 0)" in html
             assert 'fetch("/state"' in html
+            assert 'background.className = "translation-background"' in html
+            assert 'textNode.className = "translation"' in html
+            assert html.index("for (const item of scene.items)") < html.index(
+                "for (const item of layouts)"
+            )
 
         server.publish(
             (_track("track", bounds=(20, 30, 320, 80), translation="已录制"),)

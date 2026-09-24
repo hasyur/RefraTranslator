@@ -29,16 +29,23 @@ _BROWSER_OVERLAY_HTML = b"""<!doctype html>
       overflow: hidden;
       pointer-events: none;
     }
+    .translation-background,
     .translation {
       position: absolute;
       box-sizing: border-box;
+      overflow: hidden;
+      border-radius: 4px;
+    }
+    .translation-background {
+      z-index: 0;
+      background: rgba(0, 0, 0, 0.72);
+    }
+    .translation {
+      z-index: 1;
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow: hidden;
       padding: 4px;
-      border-radius: 4px;
-      background: rgba(0, 0, 0, 0.72);
       color: white;
       font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
       font-weight: 600;
@@ -98,19 +105,34 @@ _BROWSER_OVERLAY_HTML = b"""<!doctype html>
       const scaleX = window.innerWidth / scene.canvasWidth;
       const scaleY = window.innerHeight / scene.canvasHeight;
       const scale = Math.min(scaleX, scaleY);
+      const layouts = [];
       for (const item of scene.items) {
-        const node = document.createElement("div");
-        node.className = "translation";
-        node.dataset.key = item.key;
-        node.textContent = item.text;
-        node.style.left = `${item.left * scaleX}px`;
-        node.style.top = `${item.top * scaleY}px`;
-        node.style.width = `${item.width * scaleX}px`;
-        node.style.height = `${item.height * scaleY}px`;
-        node.style.padding = `${Math.max(2, 4 * scale)}px`;
-        node.style.borderRadius = `${Math.max(2, 4 * scale)}px`;
-        stage.appendChild(node);
-        fitText(node, Math.min(48 * scale, item.height * scaleY * 0.64));
+        const background = document.createElement("div");
+        background.className = "translation-background";
+        background.dataset.key = item.key;
+        background.style.left = `${item.left * scaleX}px`;
+        background.style.top = `${item.top * scaleY}px`;
+        background.style.width = `${item.width * scaleX}px`;
+        background.style.height = `${item.height * scaleY}px`;
+        background.style.borderRadius = `${Math.max(2, 4 * scale)}px`;
+        stage.appendChild(background);
+        layouts.push(item);
+      }
+      // Keep every background below every glyph. Adjacent OCR boxes may overlap,
+      // so painting a complete later item would otherwise cover earlier text.
+      for (const item of layouts) {
+        const textNode = document.createElement("div");
+        textNode.className = "translation";
+        textNode.dataset.key = item.key;
+        textNode.textContent = item.text;
+        textNode.style.left = `${item.left * scaleX}px`;
+        textNode.style.top = `${item.top * scaleY}px`;
+        textNode.style.width = `${item.width * scaleX}px`;
+        textNode.style.height = `${item.height * scaleY}px`;
+        textNode.style.padding = `${Math.max(2, 4 * scale)}px`;
+        textNode.style.borderRadius = `${Math.max(2, 4 * scale)}px`;
+        stage.appendChild(textNode);
+        fitText(textNode, Math.min(48 * scale, item.height * scaleY * 0.64));
       }
     }
 
