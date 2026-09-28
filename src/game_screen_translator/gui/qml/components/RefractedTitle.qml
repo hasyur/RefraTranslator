@@ -10,10 +10,10 @@ Item {
     property int transitionSequence: 0
     property bool motionEnabled: false
     readonly property real heavyTitleSize: titleSize * 0.94
-    readonly property real facetWidthRatio: 0.11
-    readonly property real facetAngle: 10
-    readonly property real cyanFacetOpacity: theme.dark ? 0.9 : 0.72
-    readonly property real spectrumFacetOpacity: theme.dark ? 0.68 : 0.56
+    readonly property real facetWidthRatio: 0.075
+    readonly property real facetAngle: 6
+    readonly property real cyanFacetOpacity: theme.dark ? 0.43 : 0.31
+    readonly property real spectrumFacetOpacity: theme.dark ? 0.27 : 0.19
     readonly property bool refractionRunning: refractionKick.running
     property real refractionShift: 6
     property real refractionEnergy: 0
@@ -27,7 +27,7 @@ Item {
 
     function settleRefraction() {
         refractionKick.stop()
-        refractionShift = 6
+        refractionShift = 3
         refractionEnergy = 0
     }
 
@@ -43,6 +43,8 @@ Item {
     onMotionEnabledChanged: {
         if (!motionEnabled)
             settleRefraction()
+        else
+            playRefraction()
     }
     Connections {
         target: root.theme
@@ -96,7 +98,7 @@ Item {
         Item {
             id: cyanFacet
             objectName: "pageTitleCyanSlice"
-            readonly property real chromaticOffset: 2.5
+            readonly property real chromaticOffset: 1.5
             x: heavyEffects.width * 0.445
             y: -heavyEffects.height * 0.08
             width: Math.max(8, heavyEffects.width * root.facetWidthRatio)
@@ -136,7 +138,7 @@ Item {
         Item {
             id: spectrumFacet
             objectName: "pageTitleSpectrumSlice"
-            readonly property real chromaticOffset: 5.5
+            readonly property real chromaticOffset: 3.5
             x: cyanFacet.x
             y: cyanFacet.y
             width: cyanFacet.width
@@ -204,24 +206,24 @@ Item {
     SequentialAnimation {
         id: refractionKick
         onStopped: {
-            root.refractionShift = 6
+            root.refractionShift = 3
             root.refractionEnergy = 0
         }
-        PropertyAction { target: root; property: "refractionShift"; value: 11 }
+        PropertyAction { target: root; property: "refractionShift"; value: 6 }
         PropertyAction { target: root; property: "refractionEnergy"; value: 1 }
         ParallelAnimation {
             NumberAnimation {
                 target: root
                 property: "refractionShift"
-                to: 6
-                duration: 240
+                to: 3
+                duration: 175
                 easing.type: Easing.OutCubic
             }
             NumberAnimation {
                 target: root
                 property: "refractionEnergy"
                 to: 0
-                duration: 280
+                duration: 205
                 easing.type: Easing.OutCubic
             }
         }

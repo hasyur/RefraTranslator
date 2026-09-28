@@ -19,8 +19,8 @@ QtObject {
     readonly property color violet: dark ? "#8f7cff" : "#6655cf"
     readonly property color amber: dark ? "#ffc857" : "#9b6800"
     readonly property color electric: dark ? "#4d8dff" : "#2f67c7"
-    readonly property color glass: dark ? "#b80f1b28" : "#d9e2e9eb"
-    readonly property color glassRaised: dark ? "#d1182333" : "#ebebf0f1"
+    readonly property color glass: dark ? "#99121a22" : "#bfd3dde0"
+    readonly property color glassRaised: dark ? "#c4182430" : "#dce7ecee"
     readonly property color stageShadow: dark ? "#6b000000" : "#3d253d47"
     readonly property color danger: dark ? "#ff7f8f" : "#a62d43"
 
@@ -74,26 +74,27 @@ QtObject {
         return Math.max(52, Math.min(80, viewportWidth * 0.0625))
     }
 
-    readonly property real opticalStageOpacity: dark ? 0.5 : 0.4
+    readonly property real opticalStageOpacity: dark ? 0.64 : 0.56
     readonly property real sweepAccentAlpha: dark ? 0.48 : 0.34
     readonly property real sweepSpectrumAlpha: dark ? 0.42 : 0.3
     readonly property real tertiaryRailOpacity: dark ? 0.58 : 0.5
     readonly property real feedbackLineWidth: 3
 
-    readonly property int fast: reducedMotion ? 0 : 110
-    readonly property int ui: reducedMotion ? 0 : 180
-    readonly property int panelMotion: reducedMotion ? 0 : 280
+    readonly property int fast: reducedMotion ? 0 : 100
+    readonly property int ui: reducedMotion ? 0 : 150
+    readonly property int panelMotion: reducedMotion ? 0 : 190
     // Event animations are explicitly gated and stopped by their coordinators.
     // Their durations stay stable while an animation is being stopped; changing
     // a running Qt 6.9 animation's duration to zero can defer its running-state
     // notification even though its visuals have already been hidden.
-    readonly property int pageMotion: 720
-    readonly property int pageSecondaryMotion: 540
-    readonly property int pageTertiaryMotion: 480
-    readonly property int deviceEntryDelay: 70
+    readonly property int backgroundMotion: 230
+    readonly property int pageMotion: 390
+    readonly property int pageSecondaryMotion: 320
+    readonly property int pageTertiaryMotion: 260
+    readonly property int deviceEntryDelay: 24
     readonly property int startPreludeMotion: 350
     readonly property int startMotion: 900
-    readonly property int actionMotion: 720
+    readonly property int actionMotion: 520
     readonly property int settleMotion: 460
     readonly property int warningMotion: 780
 }

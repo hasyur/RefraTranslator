@@ -4,6 +4,7 @@ import ctypes
 import math
 import os
 import re
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -228,6 +229,47 @@ def _find_quick_items(
             matches.append(item)
         pending.extend(item.childItems())
     return matches
+
+
+def _wait_for_page_layout(
+    window: QQuickWindow,
+    item: QQuickItem,
+    app: QApplication,
+    *,
+    timeout_ms: int = 2500,
+) -> None:
+    deadline = time.monotonic() + timeout_ms / 1000
+    previous_geometry: tuple[float, float] | None = None
+    stable_frames = 0
+    while time.monotonic() < deadline:
+        app.processEvents()
+        settled = (
+            not window.property("pageTransitioning")
+            and window.property("pageContentReady")
+            and item.isVisible()
+        )
+        geometry = (
+            float(item.property("width")),
+            float(item.property("height")),
+        )
+        if settled and min(geometry) > 0:
+            if geometry == previous_geometry:
+                stable_frames += 1
+                if stable_frames >= 2:
+                    return
+            else:
+                stable_frames = 0
+        else:
+            stable_frames = 0
+        previous_geometry = geometry
+        QTest.qWait(1)
+
+    raise AssertionError(
+        "QML page/layout did not settle within "
+        f"{timeout_ms} ms: transitioning={window.property('pageTransitioning')}, "
+        f"content_ready={window.property('pageContentReady')}, "
+        f"visible={item.isVisible()}, geometry={geometry}"
+    )
 
 
 def _key_clicks(window: QQuickWindow, text: str) -> None:
@@ -1627,13 +1669,14 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
     assert window is not None
     window.resize(1600, 900)
     app.processEvents()
-    settings_panel = window.findChild(QObject, "settingsPrimaryPanel")
+    settings_panel = _find_quick_item(window, "settingsPrimaryPanel")
     assert settings_panel is not None
     assert window.width() == 1600
 
     for page in ("CAPTURE", "TRANSLATION", "SETTINGS"):
         controller.setPage(page)
         app.processEvents()
+    _wait_for_page_layout(window, settings_panel, app)
 
     steppers = [
         item
@@ -2160,6 +2203,7 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     assert canvas_item is not None
     assert drawn_canvas is not None
     assert _find_quick_item(window, "overlayCanvasMask") is None
+    _wait_for_page_layout(window, canvas_item, app)
     assert float(drawn_canvas.property("width")) <= float(canvas_item.property("width"))
     assert float(drawn_canvas.property("height")) <= float(canvas_item.property("height"))
     entries = _find_quick_items(window, "overlayLastRunEntry")
@@ -2303,8 +2347,8 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     assert title_heavy.property("font").pixelSize() == 75
     assert title_heavy.property("font").weight() == 700
     assert title_light.property("font").letterSpacing() < 0
-    assert 0.1 <= float(title.property("facetWidthRatio")) <= 0.12
-    assert 8 <= float(title.property("facetAngle")) <= 12
+    assert 0.07 <= float(title.property("facetWidthRatio")) <= 0.08
+    assert 5 <= float(title.property("facetAngle")) <= 7
     assert cyan_slice.property("clip") is True
     assert spectrum_slice.property("clip") is True
     assert spectrum_slice.property("chromaticOffset") > cyan_slice.property(
@@ -2313,7 +2357,7 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     assert cyan_slice.property("rotation") == title.property("facetAngle")
     assert spectrum_slice.property("rotation") == title.property("facetAngle")
     facet_ratio = cyan_slice.property("width") / title_heavy.property("width")
-    assert 0.1 <= facet_ratio <= 0.12
+    assert 0.07 <= facet_ratio <= 0.08
     assert cyan_slice.property("height") > title_heavy.property("height")
     assert spectrum_slice.property("height") == cyan_slice.property("height")
     assert cyan_edge.property("rotation") == title.property("facetAngle")
@@ -2404,32 +2448,63 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     QTest.qWait(1)
     app.processEvents()
     content_translate = window.findChild(QObject, "pageContentTranslate")
+    page_content = window.findChild(QObject, "pageContentMotion")
     header_translate = window.findChild(QObject, "pageHeaderTranslate")
+    page_header = window.findChild(QObject, "pageHeaderSlice")
+    transition_sweep = window.findChild(QObject, "pageTransitionSweep")
     primary_panel = window.findChild(QObject, "capturePrimaryPanel")
     secondary_panel = window.findChild(QObject, "captureSecondaryPanel")
     tertiary_rail = window.findChild(QObject, "pageTertiaryRail")
     assert content_translate is not None
+    assert page_content is not None
     assert header_translate is not None
+    assert page_header is not None
+    assert transition_sweep is not None
     assert primary_panel is not None
     assert secondary_panel is not None
     assert tertiary_rail is not None
     assert window.property("pageTransitioning") is True
     assert stage.property("pageTransitionRunning") is True
     assert window.property("pageTransitionSequence") >= 2
-    assert title.property("refractionRunning") is True
-    assert float(title.property("refractionShift")) > 6
+    assert window.property("pageContentReady") is False
+    assert title.property("refractionRunning") is False
+    assert float(title.property("refractionShift")) == 3
     assert abs(float(content_translate.property("x"))) > 0.5
     assert abs(float(header_translate.property("x"))) > 0.5
+    assert primary_panel.property("entryRunning") is False
+    assert secondary_panel.property("entryRunning") is False
+    assert float(primary_panel.property("opacity")) == 1
+    assert stage.property("deviceVisualOpacity") < 1
+
+    QTest.qWait(70)
+    app.processEvents()
+    assert window.property("pageContentReady") is False
+    assert float(page_content.property("opacity")) == 0
+    assert primary_panel.property("entryRunning") is False
+    assert 0 < float(stage.property("deviceVisualOffsetX")) < 18
+    assert float(stage.property("deviceVisualOpacity")) > 0.04
+    assert float(transition_sweep.property("x")) > -float(
+        transition_sweep.property("width")
+    )
+
+    QTest.qWait(int(theme.property("backgroundMotion")) - 70 + 90)
+    app.processEvents()
+    assert window.property("pageContentReady") is True
+    assert float(page_content.property("opacity")) == 1
     assert primary_panel.property("entryRunning") is True
     assert secondary_panel.property("entryRunning") is True
-
-    QTest.qWait(140)
+    QTest.qWait(90)
     app.processEvents()
     primary_offset = float(primary_panel.property("visualOffsetX"))
     secondary_offset = float(secondary_panel.property("visualOffsetX"))
-    assert 0 < primary_offset < secondary_offset <= 18
-    assert tertiary_rail.property("opacity") == 0
-    assert 0 < float(stage.property("deviceVisualOffsetX")) < 18
+    assert 0 <= primary_offset < secondary_offset <= 18
+    assert 0 < float(primary_panel.property("opacity")) < 1
+    assert 0 < float(window.findChild(QObject, "pageHeaderSlice").property("opacity")) < 1
+    assert title.property("refractionRunning") is True
+    assert 0 < float(tertiary_rail.property("opacity")) < theme.property(
+        "tertiaryRailOpacity"
+    )
+    assert stage.property("deviceVisualOffsetX") == 0
 
     first_sequence = int(window.property("pageTransitionSequence"))
     controller.setPage("OCR")
@@ -2442,17 +2517,26 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     assert ocr_secondary is not None
     assert int(window.property("pageTransitionSequence")) == first_sequence + 1
     assert window.property("pageTransitioning") is True
+    assert window.property("pageContentReady") is False
+    assert float(page_content.property("opacity")) == 0
+    assert title.property("refractionRunning") is False
     assert abs(float(content_translate.property("x"))) > 0.5
-    assert ocr_primary.property("entryRunning") is True
-    assert ocr_secondary.property("entryRunning") is True
+    assert ocr_primary.property("entryRunning") is False
+    assert ocr_secondary.property("entryRunning") is False
+    assert float(stage.property("deviceVisualOffsetX")) > 0
 
-    QTest.qWait(200)
+    QTest.qWait(int(theme.property("backgroundMotion")) + 100)
     app.processEvents()
     assert window.property("pageTransitioning") is True
+    assert window.property("pageContentReady") is True
+    assert ocr_primary.property("entryRunning") is True
+    assert ocr_secondary.property("entryRunning") is True
+    assert 0 < float(ocr_primary.property("opacity")) < 1
+    assert 0 < float(window.findChild(QObject, "pageHeaderSlice").property("opacity")) < 1
     assert 0 < tertiary_rail.property("opacity") < theme.property(
         "tertiaryRailOpacity"
     )
-    QTest.qWait(620)
+    QTest.qWait(int(theme.property("pageMotion")) + 50)
     app.processEvents()
     assert window.property("pageTransitioning") is False
     assert stage.property("pageTransitionRunning") is False
@@ -2463,7 +2547,7 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     assert ocr_secondary.property("visualOffsetX") == 0
     assert stage.property("deviceVisualOffsetX") == 0
     assert title.property("refractionRunning") is False
-    assert abs(float(title.property("refractionShift")) - 6) < 0.01
+    assert abs(float(title.property("refractionShift")) - 3) < 0.01
     host.shutdown()
 
 
@@ -2481,6 +2565,7 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
     controller.setTheme("dark")
+    controller.setReducedMotion(True)
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
     app.processEvents()
@@ -2500,23 +2585,28 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     home_ocr_value = window.findChild(QObject, "homeOcrSignalValue")
     home_translation_value = window.findChild(QObject, "homeTranslationSignalValue")
     save_button = window.findChild(QObject, "saveAllButton")
+    start_button = window.findChild(QObject, "startLiveButton")
     panel_accent = window.findChild(QObject, "panelAccentEdge")
     panel_spectrum = window.findChild(QObject, "panelSpectrumEdge")
-    panel_facet = window.findChild(QObject, "prismPanelFacetLine")
-    button_facet = window.findChild(QObject, "prismButtonSweepFacet")
+    panel_facet = window.findChild(QObject, "prismPanelCutFacet")
+    button_edge = (
+        start_button.findChild(QObject, "prismButtonLightEdge")
+        if start_button is not None
+        else None
+    )
     stage = window.findChild(QObject, "opticalStage")
     stage_frame = window.findChild(QObject, "opticalStageFrame")
     ambient_aura = window.findChild(QObject, "opticalAmbientAura")
-    ambient_cyan_beam = window.findChild(QObject, "opticalAmbientCyanBeam")
-    ambient_spectrum_beam = window.findChild(
-        QObject,
-        "opticalAmbientSpectrumBeam",
-    )
     home_refraction = window.findChild(QObject, "homeRefractionShape")
+    home_housing = window.findChild(QObject, "homeRefractionHousing")
+    capture_glass = window.findChild(QObject, "captureApertureGlass")
+    ocr_backplane = window.findChild(QObject, "ocrMatrixBackplane")
+    translation_prism = window.findChild(QObject, "translationSplitterBody")
+    overlay_near_plane = window.findChild(QObject, "overlayStageNearPlane")
+    cache_tray: QObject | None = None
+    settings_deck = window.findChild(QObject, "settingsCalibrationDeck")
     transition_sweep = window.findChild(QObject, "pageTransitionSweep")
     transition_core = window.findChild(QObject, "pageTransitionSweepCore")
-    stage_core = window.findChild(QObject, "stagePrismSweepCore")
-    stage_sweep = window.findChild(QObject, "stagePrismSweep")
     feedback_layer = window.findChild(QObject, "transientFeedbackLayer")
     capture_scan_line = window.findChild(QObject, "captureStageScanLine")
     start_beam = window.findChild(QObject, "startFeedbackBeam")
@@ -2535,20 +2625,23 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert home_ocr_group.property("color") is None
     assert home_translation_group.property("color") is None
     assert save_button is not None
+    assert start_button is not None
     assert panel_accent is not None
     assert panel_spectrum is not None
     assert panel_facet is not None
-    assert button_facet is not None
+    assert button_edge is not None
     assert stage is not None
     assert stage_frame is not None
     assert ambient_aura is not None
-    assert ambient_cyan_beam is not None
-    assert ambient_spectrum_beam is not None
     assert home_refraction is not None
+    assert home_housing is not None
+    assert capture_glass is not None
+    assert ocr_backplane is not None
+    assert translation_prism is not None
+    assert overlay_near_plane is not None
+    assert settings_deck is not None
     assert transition_sweep is not None
     assert transition_core is not None
-    assert stage_core is not None
-    assert stage_sweep is not None
     assert feedback_layer is not None
     assert capture_scan_line is not None
     assert start_beam is not None
@@ -2574,27 +2667,62 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert panel_accent.property("width") == 2
     assert panel_accent.property("opacity") >= 0.7
     assert panel_spectrum.property("height") == 2
-    assert panel_facet.property("antialiasing") is True
-    assert button_facet.property("antialiasing") is True
+    assert button_edge.property("width") == 2
+    assert button_edge.property("opacity") > 0.5
     assert stage.property("opacity") == theme.property("opticalStageOpacity")
+    assert theme.property("opticalStageOpacity") == 0.64
     assert stage_frame.property("opacity") == 1
     assert float(stage.property("hairlineWidth")) <= 1
     assert ambient_aura.property("antialiasing") is True
-    assert ambient_cyan_beam.property("antialiasing") is True
-    assert ambient_spectrum_beam.property("antialiasing") is True
+    assert window.findChild(QObject, "opticalAmbientCyanBeam") is None
+    assert window.findChild(QObject, "opticalAmbientSpectrumBeam") is None
+    assert window.findChild(QObject, "stagePrismSweep") is None
+    for optical_shape in (
+        panel_facet,
+        home_housing,
+        capture_glass,
+        ocr_backplane,
+        translation_prism,
+        overlay_near_plane,
+        settings_deck,
+    ):
+        assert float(optical_shape.property("width")) > 0
+        assert float(optical_shape.property("height")) > 0
     assert transition_sweep.property("accentAlpha") >= 0.48
     assert transition_sweep.property("spectrumAlpha") >= 0.42
     assert transition_sweep.property("antialiasing") is True
     assert transition_core.property("width") == 2
-    assert stage_core.property("width") == 2
-    assert stage_sweep.property("antialiasing") is True
     assert feedback_layer.property("lineWidth") == 3
     assert capture_scan_line.property("height") == 3
     assert start_beam.property("height") == 4
-    assert theme.property("pageMotion") == 720
-    assert theme.property("actionMotion") == 720
+    assert theme.property("backgroundMotion") == 230
+    assert theme.property("pageMotion") == 390
+    assert theme.property("pageSecondaryMotion") == 320
+    assert theme.property("actionMotion") == 520
     assert theme.property("startPreludeMotion") == 350
     assert theme.property("warningMotion") == 780
+
+    page_motifs = {
+        "HOME": window.findChild(QObject, "homeStageMotif"),
+        "CAPTURE": window.findChild(QObject, "captureStageMotif"),
+        "OCR": window.findChild(QObject, "ocrStageMotif"),
+        "TRANSLATION": window.findChild(QObject, "translationStageMotif"),
+        "OVERLAY": window.findChild(QObject, "overlayStageMotif"),
+        "CACHE": window.findChild(QObject, "cacheStageMotif"),
+        "SETTINGS": window.findChild(QObject, "settingsStageMotif"),
+    }
+    assert all(motif is not None for motif in page_motifs.values())
+    for page, active_motif in page_motifs.items():
+        controller.setPage(page)
+        app.processEvents()
+        assert active_motif is not None
+        assert active_motif.isVisible() is True
+        assert sum(motif.isVisible() for motif in page_motifs.values()) == 1
+        if page == "CACHE":
+            cache_tray = _find_quick_item(window, "cacheStageTray0")
+            assert cache_tray is not None
+            assert cache_tray.property("width") == 822
+            assert cache_tray.property("height") == 52
 
     dark_cyan_facet_alpha = float(title.property("cyanFacetOpacity"))
     dark_spectrum_facet_alpha = float(title.property("spectrumFacetOpacity"))
@@ -2620,6 +2748,112 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
         < float(transition_sweep.property("spectrumAlpha"))
         < dark_sweep_spectrum_alpha
     )
+    assert float(stage.property("opacity")) == 0.56
+    host.shutdown()
+
+
+def test_real_prism_button_feedback_tracks_pointer_and_reduced_motion(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setReducedMotion(False)
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+
+    window = host.window
+    assert window is not None
+    button = _find_quick_item(window, "navigationButton0")
+    theme = window.findChild(QObject, "prismTheme")
+    assert button is not None
+    assert theme is not None
+    QTest.qWait(int(theme.property("pageMotion")) + 60)
+    app.processEvents()
+
+    button_point = button.mapToScene(
+        QPointF(button.width() / 2, button.height() / 2)
+    ).toPoint()
+    outside_point = QPoint(window.width() - 4, window.height() - 4)
+    fast = int(theme.property("fast"))
+    QTest.mouseMove(window, outside_point)
+    QTest.qWait(fast + 20)
+    app.processEvents()
+    assert button.property("hovered") is False
+    assert abs(float(button.property("scale")) - 1.0) < 0.001
+
+    QTest.mouseMove(window, button_point)
+    app.processEvents()
+    assert button.property("hovered") is True
+    QTest.qWait(max(5, fast // 2))
+    hover_midpoint = float(button.property("scale"))
+    assert 1.0 < hover_midpoint < 1.004
+    QTest.qWait(fast + 20)
+    assert abs(float(button.property("scale")) - 1.004) < 0.001
+
+    QTest.mousePress(
+        window,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        button_point,
+    )
+    app.processEvents()
+    assert button.property("down") is True
+    QTest.qWait(max(5, fast // 2))
+    press_midpoint = float(button.property("scale"))
+    assert 0.994 < press_midpoint < 1.004
+    QTest.qWait(fast + 20)
+    assert abs(float(button.property("scale")) - 0.994) < 0.001
+
+    controller.setReducedMotion(True)
+    app.processEvents()
+    assert theme.property("fast") == 0
+    assert abs(float(button.property("scale")) - 0.994) < 0.001
+    QTest.mouseRelease(
+        window,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        button_point,
+    )
+    app.processEvents()
+    assert button.property("down") is False
+    assert abs(float(button.property("scale")) - 1.004) < 0.001
+    QTest.mouseMove(window, outside_point)
+    app.processEvents()
+    assert button.property("hovered") is False
+    assert abs(float(button.property("scale")) - 1.0) < 0.001
+
+    button.setProperty("enabled", False)
+    app.processEvents()
+    edge = button.findChild(QObject, "prismButtonLightEdge")
+    assert edge is not None
+    QTest.mouseMove(window, button_point)
+    QTest.mousePress(
+        window,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        button_point,
+    )
+    app.processEvents()
+    assert button.property("down") is False
+    QTest.mouseRelease(
+        window,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        button_point,
+    )
+    app.processEvents()
+    assert controller.currentPage == "HOME"
+    assert abs(float(button.property("scale")) - 1.0) < 0.001
+    assert abs(float(edge.property("opacity")) - 0.15) < 0.001
     host.shutdown()
 
 
@@ -2847,7 +3081,7 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
     assert stage.property("actionProgress") == 1
     assert window.property("pageTransitioning") is False
     assert title.property("refractionRunning") is False
-    assert float(title.property("refractionShift")) == 6
+    assert float(title.property("refractionShift")) == 3
     host.shutdown()
 
 
@@ -3100,12 +3334,9 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
         "settingsStageMotif",
     ):
         assert motif_name in stage_source
-    assert "x: root.snapToDevicePixel(index * root.width / 10)" in stage_source
-    assert "y: root.snapToDevicePixel(index * root.height / 7)" in stage_source
-    assert stage_source.count("root.hairlineWidth") == 2
-    assert stage_source.count("preferredRendererType: Shape.CurveRenderer") == 5
+    assert stage_source.count("preferredRendererType: Shape.CurveRenderer") >= 5
     assert "style: Text.Raised" not in title_source
-    assert "facetWidthRatio: 0.11" in title_source
+    assert "facetWidthRatio: 0.075" in title_source
     assert title_source.count("renderType: Text.CurveRendering") == 4
     assert title_source.count(
         "renderTypeQuality: Text.VeryHighRenderTypeQuality"

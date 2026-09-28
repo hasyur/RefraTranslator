@@ -25,6 +25,8 @@ ApplicationWindow {
     readonly property var pageOrder: ["HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS"]
     readonly property bool animationsRunning: visible
                                               && !boundWorkbench.reducedMotion
+    property bool pageContentReady: true
+    readonly property bool pageMotionEnabled: animationsRunning && pageContentReady
     readonly property string visualPage: boundWorkbench.currentPage
     readonly property bool reduceMotion: boundWorkbench.reducedMotion
     property string lastAnimatedPage: ""
@@ -88,6 +90,7 @@ ApplicationWindow {
     }
 
     function settlePageTransition() {
+        pageContentReady = true
         pageContentTranslate.x = 0
         pageContentMotion.opacity = 1
         pageHeaderTranslate.x = 0
@@ -104,9 +107,15 @@ ApplicationWindow {
         pageTransitionSequence += 1
         if (reduceMotion || !visible) {
             pageTransitionAnimation.stop()
+            pageContentReady = true
             settlePageTransition()
             return
         }
+        pageContentReady = false
+        pageContentMotion.opacity = 0
+        pageContentTranslate.x = 8
+        pageHeaderSlice.opacity = 0
+        pageHeaderTranslate.x = 14
         pageTransitionAnimation.restart()
     }
 
@@ -136,6 +145,7 @@ ApplicationWindow {
 
     function settleReducedMotion() {
         pageTransitionAnimation.stop()
+        pageContentReady = true
         settlePageTransition()
         stage.settleMotion()
         if (startPreludePending)
@@ -158,6 +168,7 @@ ApplicationWindow {
                 stage.settleMotion()
             }
             pageTransitionAnimation.stop()
+            pageContentReady = true
             settlePageTransition()
         }
     }
@@ -268,6 +279,7 @@ ApplicationWindow {
                 Repeater {
                     model: root.pageOrder
                     PrismButton {
+                        objectName: "navigationButton" + index
                         required property int index
                         required property var modelData
                         theme: prism
@@ -341,6 +353,7 @@ ApplicationWindow {
                 anchors.margins: 12
                 theme: prism
                 page: root.boundWorkbench.currentPage
+                pageTransitionSequence: root.pageTransitionSequence
                 reducedMotion: root.boundWorkbench.reducedMotion
                 motionEnabled: root.animationsRunning
                 opacity: prism.opticalStageOpacity
@@ -399,7 +412,7 @@ ApplicationWindow {
                                     heavyText: root.pageTitleHeavy(root.boundWorkbench.currentPage)
                                     titleSize: pageHeaderSlice.titleSize
                                     transitionSequence: root.pageTransitionSequence
-                                    motionEnabled: root.animationsRunning
+                                    motionEnabled: root.pageMotionEnabled
                                 }
                                 Rectangle {
                                     objectName: "pageHeaderUnderline"
@@ -475,14 +488,14 @@ ApplicationWindow {
                                 theme: prism
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
-                                pageMotionEnabled: root.animationsRunning
+                                pageMotionEnabled: root.pageMotionEnabled
                             }
                             CapturePage {
                                 objectName: "capturePage"
                                 theme: prism
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
-                                pageMotionEnabled: root.animationsRunning
+                                pageMotionEnabled: root.pageMotionEnabled
                                 onVisualAction: action => stage.pulseAction(action)
                             }
                             OcrPage {
@@ -490,7 +503,7 @@ ApplicationWindow {
                                 theme: prism
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
-                                pageMotionEnabled: root.animationsRunning
+                                pageMotionEnabled: root.pageMotionEnabled
                                 onVisualAction: action => stage.pulseAction(action)
                             }
                             TranslationPage {
@@ -498,7 +511,7 @@ ApplicationWindow {
                                 theme: prism
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
-                                pageMotionEnabled: root.animationsRunning
+                                pageMotionEnabled: root.pageMotionEnabled
                                 onVisualAction: action => stage.pulseAction(action)
                             }
                             OverlayPage {
@@ -506,7 +519,7 @@ ApplicationWindow {
                                 theme: prism
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
-                                pageMotionEnabled: root.animationsRunning
+                                pageMotionEnabled: root.pageMotionEnabled
                                 onVisualAction: action => stage.pulseAction(action)
                             }
                             CachePage {
@@ -514,7 +527,7 @@ ApplicationWindow {
                                 theme: prism
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
-                                pageMotionEnabled: root.animationsRunning
+                                pageMotionEnabled: root.pageMotionEnabled
                                 onVisualAction: action => stage.pulseAction(action)
                             }
                             SettingsPage {
@@ -522,7 +535,7 @@ ApplicationWindow {
                                 theme: prism
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
-                                pageMotionEnabled: root.animationsRunning
+                                pageMotionEnabled: root.pageMotionEnabled
                                 onVisualAction: action => stage.pulseAction(action)
                             }
                         }
@@ -618,43 +631,37 @@ ApplicationWindow {
         }
     }
 
-    ParallelAnimation {
+    SequentialAnimation {
         id: pageTransitionAnimation
-        onStopped: root.settlePageTransition()
-
-        SequentialAnimation {
-            PropertyAction { target: pageContentTranslate; property: "x"; value: 15 }
-            PropertyAction { target: pageContentMotion; property: "opacity"; value: 0.1 }
-            ParallelAnimation {
-                NumberAnimation { target: pageContentTranslate; property: "x"; to: 0; duration: prism.pageMotion; easing.type: Easing.OutCubic }
-                NumberAnimation { target: pageContentMotion; property: "opacity"; to: 1; duration: prism.pageMotion; easing.type: Easing.OutCubic }
-            }
-        }
-        SequentialAnimation {
-            PropertyAction { target: pageHeaderTranslate; property: "x"; value: 22 }
-            PropertyAction { target: pageHeaderSlice; property: "opacity"; value: 0.08 }
-            PauseAnimation { duration: prism.fast }
-            ParallelAnimation {
-                NumberAnimation { target: pageHeaderTranslate; property: "x"; to: 0; duration: prism.pageSecondaryMotion; easing.type: Easing.OutCubic }
-                NumberAnimation { target: pageHeaderSlice; property: "opacity"; to: 1; duration: prism.pageSecondaryMotion; easing.type: Easing.OutCubic }
-            }
-        }
         SequentialAnimation {
             PropertyAction { target: transitionSweep; property: "x"; value: -transitionSweep.width }
             PropertyAction { target: transitionSweep; property: "opacity"; value: 0 }
             ParallelAnimation {
-                NumberAnimation { target: transitionSweep; property: "x"; to: root.width + transitionSweep.width; duration: prism.pageMotion; easing.type: Easing.InOutCubic }
+                NumberAnimation { target: transitionSweep; property: "x"; to: root.width + transitionSweep.width; duration: prism.backgroundMotion; easing.type: Easing.InOutCubic }
                 SequentialAnimation {
-                    NumberAnimation { target: transitionSweep; property: "opacity"; to: 1; duration: prism.ui }
-                    PauseAnimation { duration: prism.pageMotion - prism.ui * 2 }
-                    NumberAnimation { target: transitionSweep; property: "opacity"; to: 0; duration: prism.ui }
+                    NumberAnimation { target: transitionSweep; property: "opacity"; to: 0.62; duration: prism.fast }
+                    PauseAnimation { duration: prism.backgroundMotion - prism.fast * 2 }
+                    NumberAnimation { target: transitionSweep; property: "opacity"; to: 0; duration: prism.fast }
                 }
             }
         }
-        SequentialAnimation {
-            PropertyAction { target: tertiaryRail; property: "opacity"; value: 0 }
-            PauseAnimation { duration: prism.ui }
-            NumberAnimation { target: tertiaryRail; property: "opacity"; to: prism.tertiaryRailOpacity; duration: prism.pageTertiaryMotion; easing.type: Easing.OutCubic }
+        ScriptAction {
+            script: {
+                root.pageContentReady = true
+                pageContentMotion.opacity = 1
+            }
         }
+        ParallelAnimation {
+            ParallelAnimation {
+                NumberAnimation { target: pageHeaderTranslate; property: "x"; to: 0; duration: prism.pageSecondaryMotion; easing.type: Easing.OutQuart }
+                NumberAnimation { target: pageHeaderSlice; property: "opacity"; to: 1; duration: prism.pageSecondaryMotion; easing.type: Easing.OutQuart }
+                NumberAnimation { target: pageContentTranslate; property: "x"; to: 0; duration: prism.pageMotion; easing.type: Easing.OutQuart }
+            }
+            SequentialAnimation {
+                PropertyAction { target: tertiaryRail; property: "opacity"; value: 0 }
+                NumberAnimation { target: tertiaryRail; property: "opacity"; to: prism.tertiaryRailOpacity; duration: prism.pageTertiaryMotion; easing.type: Easing.OutCubic }
+            }
+        }
+        ScriptAction { script: root.settlePageTransition() }
     }
 }

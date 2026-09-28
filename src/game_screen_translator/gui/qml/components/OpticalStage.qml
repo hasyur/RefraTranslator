@@ -75,11 +75,8 @@ Item {
         movingLayer.opacity = 1
         device.opacity = 1
         deviceTranslate.x = 0
-        stageSweep.opacity = 0
         actionProgress = 1
         startProgress = 1
-        aura.opacity = 0.65
-        cyanBeam.opacity = 0.36
         parallaxX = 0
         parallaxY = 0
         Qt.callLater(root.finishSettlingMotion)
@@ -98,14 +95,12 @@ Item {
         startPrelude.running = false
     }
 
-    onPageChanged: {
-        pageTransitionSequence += 1
+    onPageTransitionSequenceChanged: {
         if (!reducedMotion && motionEnabled)
             pageEntry.restart()
         else {
             device.opacity = 1
             deviceTranslate.x = 0
-            stageSweep.opacity = 0
         }
     }
     onReducedMotionChanged: {
@@ -117,23 +112,6 @@ Item {
             settleMotion()
     }
 
-    HoverHandler {
-        id: hover
-        acceptedDevices: PointerDevice.Mouse
-        onPointChanged: {
-            if (root.reducedMotion || root.width <= 0 || root.height <= 0)
-                return
-            root.parallaxX = Math.max(-8, Math.min(8, (point.position.x / root.width - 0.5) * 16))
-            root.parallaxY = Math.max(-8, Math.min(8, (point.position.y / root.height - 0.5) * 16))
-        }
-        onHoveredChanged: {
-            if (!hovered) {
-                root.parallaxX = 0
-                root.parallaxY = 0
-            }
-        }
-    }
-
     Rectangle {
         objectName: "opticalStageFrame"
         anchors.fill: parent
@@ -142,37 +120,11 @@ Item {
         border.width: 1.5
     }
 
-    Repeater {
-        model: 11
-        Rectangle {
-            required property int index
-            x: root.snapToDevicePixel(index * root.width / 10)
-            width: root.hairlineWidth
-            height: root.height
-            color: root.theme.line
-            opacity: 0.17
-        }
-    }
-    Repeater {
-        model: 8
-        Rectangle {
-            required property int index
-            y: root.snapToDevicePixel(index * root.height / 7)
-            width: root.width
-            height: root.hairlineWidth
-            color: root.theme.line
-            opacity: 0.17
-        }
-    }
-
     Item {
         id: movingLayer
         anchors.fill: parent
-        x: root.reducedMotion ? 0 : root.parallaxX
-        y: root.reducedMotion ? 0 : root.parallaxY
-
-        Behavior on x { NumberAnimation { duration: root.theme.panelMotion; easing.type: Easing.OutCubic } }
-        Behavior on y { NumberAnimation { duration: root.theme.panelMotion; easing.type: Easing.OutCubic } }
+        x: 0
+        y: 0
 
         Rectangle {
             id: aura
@@ -183,46 +135,15 @@ Item {
             y: -parent.height * 0.04
             rotation: -10
             antialiasing: true
-            color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, root.theme.dark ? 0.075 : 0.05)
-            opacity: 0.65
-
-            SequentialAnimation {
-                running: root.motionEnabled
-                loops: Animation.Infinite
-                NumberAnimation { target: aura; property: "opacity"; to: 0.34; duration: 8000; easing.type: Easing.InOutSine }
-                NumberAnimation { target: aura; property: "opacity"; to: 0.68; duration: 8000; easing.type: Easing.InOutSine }
+            color: "transparent"
+            opacity: 0.72
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0; color: "transparent" }
+                GradientStop { position: 0.48; color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, root.theme.dark ? 0.11 : 0.075) }
+                GradientStop { position: 0.72; color: Qt.rgba(root.theme.violet.r, root.theme.violet.g, root.theme.violet.b, root.theme.dark ? 0.075 : 0.05) }
+                GradientStop { position: 1; color: "transparent" }
             }
-        }
-
-        Rectangle {
-            id: cyanBeam
-            objectName: "opticalAmbientCyanBeam"
-            width: parent.width * 0.9
-            height: 2
-            x: parent.width * 0.06
-            y: parent.height * 0.46
-            rotation: 4
-            antialiasing: true
-            color: root.theme.accent
-            opacity: 0.36
-
-            SequentialAnimation {
-                running: root.motionEnabled
-                loops: Animation.Infinite
-                NumberAnimation { target: cyanBeam; property: "opacity"; to: 0.18; duration: 9000; easing.type: Easing.InOutSine }
-                NumberAnimation { target: cyanBeam; property: "opacity"; to: 0.46; duration: 9000; easing.type: Easing.InOutSine }
-            }
-        }
-        Rectangle {
-            objectName: "opticalAmbientSpectrumBeam"
-            width: parent.width * 0.76
-            height: 2
-            x: parent.width * 0.19
-            y: parent.height * 0.55
-            rotation: -5
-            antialiasing: true
-            color: root.theme.spectrum
-            opacity: 0.3
         }
 
         Item {
@@ -235,8 +156,51 @@ Item {
 
             // HOME / refraction core
             Item {
+                objectName: "homeStageMotif"
                 anchors.fill: parent
                 visible: root.page === "HOME"
+
+                Shape {
+                    objectName: "homeRefractionHousing"
+                    anchors.fill: parent
+                    preferredRendererType: Shape.CurveRenderer
+                    ShapePath {
+                        strokeColor: root.theme.lineStrong
+                        strokeWidth: 1
+                        fillColor: Qt.rgba(root.theme.accent.r,
+                                           root.theme.accent.g,
+                                           root.theme.accent.b,
+                                           root.theme.dark ? 0.24 : 0.18)
+                        startX: 255; startY: 300
+                        PathLine { x: 414; y: 104 }
+                        PathLine { x: 566; y: 104 }
+                        PathLine { x: 745; y: 300 }
+                        PathLine { x: 562; y: 500 }
+                        PathLine { x: 412; y: 500 }
+                        PathLine { x: 255; y: 300 }
+                    }
+                    ShapePath {
+                        strokeColor: "transparent"
+                        fillColor: Qt.rgba(root.theme.spectrum.r,
+                                           root.theme.spectrum.g,
+                                           root.theme.spectrum.b,
+                                           root.theme.dark ? 0.26 : 0.19)
+                        startX: 414; startY: 104
+                        PathLine { x: 490; y: 104 }
+                        PathLine { x: 412; y: 500 }
+                        PathLine { x: 338; y: 500 }
+                        PathLine { x: 414; y: 104 }
+                    }
+                }
+                Rectangle {
+                    objectName: "homeRefractionTopGlint"
+                    x: 422
+                    y: 108
+                    width: 126
+                    height: 2
+                    color: root.theme.text
+                    opacity: 0.68
+                }
 
                 Rectangle { x: 72; y: 294; width: 360; height: 3; color: root.theme.accent; opacity: 0.7 }
                 Rectangle { x: 490; y: 266; width: 438; height: 3; color: root.theme.accent; opacity: 0.6 }
@@ -277,6 +241,41 @@ Item {
                 readonly property real emphasis: actionLinked
                                                  ? root.actionEmphasis
                                                  : 0
+
+                Rectangle {
+                    objectName: "captureApertureShadow"
+                    x: 196
+                    y: 132
+                    width: 608
+                    height: 364
+                    radius: 4
+                        color: root.theme.stageShadow
+                        opacity: 0.9
+                }
+                Rectangle {
+                    objectName: "captureApertureGlass"
+                    x: 205
+                    y: 120
+                    width: 590
+                    height: 350
+                    radius: 3
+                    border.color: root.theme.lineStrong
+                    border.width: 1
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, root.theme.dark ? 0.28 : 0.21) }
+                        GradientStop { position: 0.56; color: Qt.rgba(root.theme.panel.r, root.theme.panel.g, root.theme.panel.b, 0.22) }
+                        GradientStop { position: 1; color: Qt.rgba(root.theme.spectrum.r, root.theme.spectrum.g, root.theme.spectrum.b, root.theme.dark ? 0.22 : 0.15) }
+                    }
+                }
+                Rectangle {
+                    objectName: "captureApertureTopFacet"
+                    x: 205
+                    y: 120
+                    width: 590
+                    height: 2
+                    color: root.theme.text
+                    opacity: 0.72
+                }
 
                 Rectangle {
                     objectName: "captureStageFrame"
@@ -370,6 +369,63 @@ Item {
                     return Math.sin(Math.PI * localProgress)
                 }
 
+                Shape {
+                    objectName: "ocrMatrixBackplane"
+                    anchors.fill: parent
+                    preferredRendererType: Shape.CurveRenderer
+                    ShapePath {
+                        strokeColor: root.theme.lineStrong
+                        strokeWidth: 1
+                        fillColor: Qt.rgba(root.theme.violet.r,
+                                           root.theme.violet.g,
+                                           root.theme.violet.b,
+                                           root.theme.dark ? 0.13 : 0.085)
+                        startX: 146; startY: 122
+                        PathLine { x: 850; y: 172 }
+                        PathLine { x: 806; y: 470 }
+                        PathLine { x: 196; y: 516 }
+                        PathLine { x: 146; y: 122 }
+                    }
+                }
+
+                Repeater {
+                    model: [
+                        {"x": 150, "y": 145, "w": 310, "h": 82},
+                        {"x": 525, "y": 270, "w": 270, "h": 68},
+                        {"x": 260, "y": 408, "w": 230, "h": 58}
+                    ]
+                    Rectangle {
+                        required property var modelData
+                        x: modelData.x + 9
+                        y: modelData.y + 12
+                        width: modelData.w
+                        height: modelData.h
+                        color: root.theme.stageShadow
+                        opacity: 0.82
+                    }
+                }
+                Repeater {
+                    model: [
+                        {"x": 150, "y": 145, "w": 310, "h": 82},
+                        {"x": 525, "y": 270, "w": 270, "h": 68},
+                        {"x": 260, "y": 408, "w": 230, "h": 58}
+                    ]
+                    Rectangle {
+                        required property var modelData
+                        x: modelData.x
+                        y: modelData.y
+                        width: modelData.w
+                        height: modelData.h
+                        color: "transparent"
+                        border.color: root.theme.lineStrong
+                        border.width: 1
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, root.theme.dark ? 0.28 : 0.19) }
+                            GradientStop { position: 1; color: Qt.rgba(root.theme.spectrum.r, root.theme.spectrum.g, root.theme.spectrum.b, root.theme.dark ? 0.15 : 0.1) }
+                        }
+                    }
+                }
+
                 Repeater {
                     model: [
                         {"x": 150, "y": 145, "w": 310, "h": 82},
@@ -434,6 +490,60 @@ Item {
                         0,
                         Math.min(1, (root.actionProgress - delay) / (1 - delay))
                     )
+                }
+
+                Shape {
+                    objectName: "translationSplitterShadow"
+                    anchors.fill: parent
+                    preferredRendererType: Shape.CurveRenderer
+                    ShapePath {
+                        strokeColor: "transparent"
+                        fillColor: root.theme.stageShadow
+                        startX: 417; startY: 112
+                        PathLine { x: 536; y: 112 }
+                        PathLine { x: 490; y: 526 }
+                        PathLine { x: 370; y: 526 }
+                        PathLine { x: 417; y: 112 }
+                    }
+                }
+                Shape {
+                    objectName: "translationSplitterBody"
+                    anchors.fill: parent
+                    preferredRendererType: Shape.CurveRenderer
+                    ShapePath {
+                        strokeColor: root.theme.lineStrong
+                        strokeWidth: 1
+                        fillColor: Qt.rgba(root.theme.accent.r,
+                                           root.theme.accent.g,
+                                           root.theme.accent.b,
+                                           root.theme.dark ? 0.29 : 0.2)
+                        startX: 405; startY: 96
+                        PathLine { x: 512; y: 96 }
+                        PathLine { x: 466; y: 510 }
+                        PathLine { x: 358; y: 510 }
+                        PathLine { x: 405; y: 96 }
+                    }
+                    ShapePath {
+                        strokeColor: "transparent"
+                        fillColor: Qt.rgba(root.theme.spectrum.r,
+                                           root.theme.spectrum.g,
+                                           root.theme.spectrum.b,
+                                           root.theme.dark ? 0.22 : 0.15)
+                        startX: 512; startY: 96
+                        PathLine { x: 466; y: 510 }
+                        PathLine { x: 412; y: 510 }
+                        PathLine { x: 458; y: 96 }
+                        PathLine { x: 512; y: 96 }
+                    }
+                }
+                Rectangle {
+                    objectName: "translationSplitterTopGlint"
+                    x: 408
+                    y: 100
+                    width: 96
+                    height: 2
+                    color: root.theme.text
+                    opacity: 0.46
                 }
 
                 Rectangle {
@@ -520,6 +630,24 @@ Item {
                 readonly property real spread: emphasis * 34
 
                 Shape {
+                    objectName: "overlayStageShadow"
+                    preferredRendererType: Shape.CurveRenderer
+                    width: parent.width
+                    height: parent.height
+                    x: 14
+                    y: 16
+                    ShapePath {
+                        strokeColor: "transparent"
+                        fillColor: root.theme.stageShadow
+                        startX: 172; startY: 128
+                        PathLine { x: 760; y: 92 }
+                        PathLine { x: 875; y: 420 }
+                        PathLine { x: 282; y: 472 }
+                        PathLine { x: 172; y: 128 }
+                    }
+                }
+
+                Shape {
                     objectName: "overlayStageFarPlane"
                     preferredRendererType: Shape.CurveRenderer
                     width: parent.width
@@ -529,11 +657,11 @@ Item {
                     opacity: 0.76 + overlayMotif.emphasis * 0.24
                     ShapePath {
                         strokeColor: root.theme.lineStrong
-                        strokeWidth: 3 + overlayMotif.emphasis * 1.5
+                        strokeWidth: 1.5 + overlayMotif.emphasis
                         fillColor: Qt.rgba(root.theme.lineStrong.r,
                                            root.theme.lineStrong.g,
                                            root.theme.lineStrong.b,
-                                           0.08 + overlayMotif.emphasis * 0.06)
+                                           0.2 + overlayMotif.emphasis * 0.06)
                         startX: 172; startY: 128
                         PathLine { x: 760; y: 92 }
                         PathLine { x: 875; y: 420 }
@@ -549,11 +677,11 @@ Item {
                     opacity: 0.82 + overlayMotif.emphasis * 0.18
                     ShapePath {
                         strokeColor: root.theme.spectrum
-                        strokeWidth: 3 + overlayMotif.emphasis * 1.5
+                        strokeWidth: 1.5 + overlayMotif.emphasis
                         fillColor: Qt.rgba(root.theme.spectrum.r,
                                            root.theme.spectrum.g,
                                            root.theme.spectrum.b,
-                                           0.07 + overlayMotif.emphasis * 0.06)
+                                           0.2 + overlayMotif.emphasis * 0.06)
                         startX: 216; startY: 170
                         PathLine { x: 804; y: 134 }
                         PathLine { x: 919; y: 462 }
@@ -571,11 +699,11 @@ Item {
                     opacity: 0.76 + overlayMotif.emphasis * 0.24
                     ShapePath {
                         strokeColor: root.theme.accent
-                        strokeWidth: 3 + overlayMotif.emphasis * 1.5
+                        strokeWidth: 1.5 + overlayMotif.emphasis
                         fillColor: Qt.rgba(root.theme.accent.r,
                                            root.theme.accent.g,
                                            root.theme.accent.b,
-                                           0.08 + overlayMotif.emphasis * 0.06)
+                                           0.28 + overlayMotif.emphasis * 0.06)
                         startX: 260; startY: 212
                         PathLine { x: 848; y: 176 }
                         PathLine { x: 963; y: 504 }
@@ -607,23 +735,64 @@ Item {
                 Repeater {
                     model: 5
                     Rectangle {
+                        objectName: "cacheStageTray" + index
+                        required property int index
+                        x: 88
+                        y: 130 + index * 74
+                        width: 822
+                        height: 52
+                        radius: 2
+                        color: root.theme.stageShadow
+                        opacity: 0.9
+                    }
+                }
+                Repeater {
+                    model: 5
+                    Rectangle {
+                        required property int index
+                        x: 98
+                        y: 126 + index * 74
+                        width: 802
+                        height: 48
+                        radius: 1
+                        border.color: root.theme.lineStrong
+                        border.width: 1
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, root.theme.dark ? 0.19 : 0.13) }
+                            GradientStop { position: 0.52; color: Qt.rgba(root.theme.panel.r, root.theme.panel.g, root.theme.panel.b, 0.4) }
+                            GradientStop { position: 1; color: Qt.rgba(root.theme.violet.r, root.theme.violet.g, root.theme.violet.b, root.theme.dark ? 0.15 : 0.1) }
+                        }
+                    }
+                }
+
+                Repeater {
+                    model: 5
+                    Rectangle {
                         objectName: "cacheStageRail" + index
                         required property int index
                         readonly property real waveAmount: cacheMotif.waveAmount(index)
                         x: 98
-                        y: 142 + index * 74
+                        y: 146 + index * 74
                         width: 802
-                        height: 3 + waveAmount * 2
+                        height: 7 + waveAmount * 3
                         color: index === 2 ? root.theme.spectrum : index === 3 ? root.theme.violet : root.theme.accent
                         opacity: 0.34 + index * 0.035 + waveAmount * 0.48
                         Rectangle {
                             x: parent.width * (0.38 + parent.waveAmount * 0.18)
-                            y: -4
-                            width: 10
-                            height: 10
-                            radius: 5
-                            scale: 1 + parent.waveAmount * 0.55
+                            y: -2
+                            width: 8
+                            height: 8
+                            radius: 4
+                            scale: 1 + parent.waveAmount * 0.42
                             color: parent.color
+                        }
+                        Rectangle {
+                            x: 0
+                            y: 0
+                            width: parent.width
+                            height: 1
+                            color: root.theme.text
+                            opacity: 0.42
                         }
                     }
                 }
@@ -653,6 +822,42 @@ Item {
                     return Math.sin(Math.PI * localProgress)
                 }
 
+                Shape {
+                    objectName: "settingsCalibrationDeck"
+                    anchors.fill: parent
+                    preferredRendererType: Shape.CurveRenderer
+                    ShapePath {
+                        strokeColor: root.theme.lineStrong
+                        strokeWidth: 1
+                        fillColor: Qt.rgba(root.theme.violet.r,
+                                           root.theme.violet.g,
+                                           root.theme.violet.b,
+                                           root.theme.dark ? 0.13 : 0.085)
+                        startX: 304; startY: 84
+                        PathLine { x: 686; y: 116 }
+                        PathLine { x: 714; y: 456 }
+                        PathLine { x: 284; y: 492 }
+                        PathLine { x: 304; y: 84 }
+                    }
+                }
+                Repeater {
+                    model: 6
+                    Rectangle {
+                        required property int index
+                        x: index < 3 ? 78 : 693
+                        y: 140 + (index % 3) * 110
+                        width: 235
+                        height: 42
+                        radius: 1
+                        border.color: root.theme.lineStrong
+                        border.width: 1
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, root.theme.dark ? 0.17 : 0.11) }
+                            GradientStop { position: 1; color: Qt.rgba(root.theme.panel.r, root.theme.panel.g, root.theme.panel.b, 0.24) }
+                        }
+                    }
+                }
+
                 Item {
                     objectName: "settingsStageCalibrationTarget"
                     x: 380
@@ -666,17 +871,56 @@ Item {
 
                     Rectangle {
                         anchors.centerIn: parent
+                        width: 224
+                        height: 224
+                        radius: 112
+                        border.color: root.theme.lineStrong
+                        border.width: 1
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, root.theme.dark ? 0.22 : 0.15) }
+                            GradientStop { position: 0.62; color: Qt.rgba(root.theme.panel.r, root.theme.panel.g, root.theme.panel.b, 0.22) }
+                            GradientStop { position: 1; color: Qt.rgba(root.theme.violet.r, root.theme.violet.g, root.theme.violet.b, root.theme.dark ? 0.18 : 0.12) }
+                        }
+                    }
+                    Repeater {
+                        model: 24
+                        Item {
+                            required property int index
+                            anchors.fill: parent
+                            rotation: index * 15
+                            Rectangle {
+                                x: parent.width / 2 - width / 2
+                                y: 9
+                                width: 1.5
+                                height: index % 3 === 0 ? 12 : 7
+                                color: root.theme.textSoft
+                                opacity: 0.62
+                            }
+                        }
+                    }
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 188
+                        height: 188
+                        radius: 94
+                        color: "transparent"
+                        border.color: root.theme.accent
+                        border.width: 1
+                        opacity: 0.74
+                    }
+                    Rectangle {
+                        anchors.centerIn: parent
                         width: 152
                         height: 152
                         radius: 76
                         color: "transparent"
                         border.color: root.theme.accent
-                        border.width: 3 + settingsMotif.emphasis * 2
+                        border.width: 2 + settingsMotif.emphasis * 1.5
                         opacity: 0.62 + settingsMotif.emphasis * 0.34
                     }
                     Rectangle {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: 3 + settingsMotif.emphasis * 1.5
+                        width: 2 + settingsMotif.emphasis
                         height: parent.height
                         color: root.theme.accent
                         opacity: 0.48 + settingsMotif.emphasis * 0.38
@@ -684,7 +928,7 @@ Item {
                     Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.width
-                        height: 3 + settingsMotif.emphasis * 1.5
+                        height: 2 + settingsMotif.emphasis
                         color: root.theme.accent
                         opacity: 0.48 + settingsMotif.emphasis * 0.38
                     }
@@ -708,34 +952,6 @@ Item {
     }
 
     Rectangle {
-        id: stageSweep
-        objectName: "stagePrismSweep"
-        readonly property real accentAlpha: root.theme.sweepAccentAlpha
-        readonly property real spectrumAlpha: root.theme.sweepSpectrumAlpha
-        width: Math.max(150, root.width * 0.22)
-        height: root.height * 1.35
-        y: -root.height * 0.18
-        rotation: -11
-        antialiasing: true
-        opacity: 0
-        gradient: Gradient {
-            orientation: Gradient.Horizontal
-            GradientStop { position: 0; color: "transparent" }
-            GradientStop { position: 0.46; color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, stageSweep.accentAlpha) }
-            GradientStop { position: 0.6; color: Qt.rgba(root.theme.spectrum.r, root.theme.spectrum.g, root.theme.spectrum.b, stageSweep.spectrumAlpha) }
-            GradientStop { position: 1; color: "transparent" }
-        }
-        Rectangle {
-            objectName: "stagePrismSweepCore"
-            anchors.centerIn: parent
-            width: 2
-            height: parent.height
-            color: root.theme.text
-            opacity: 0.58
-        }
-    }
-
-    Rectangle {
         id: warningWash
         anchors.fill: parent
         color: root.theme.amber
@@ -753,27 +969,15 @@ Item {
         id: pageEntry
         SequentialAnimation {
             PropertyAction { target: movingLayer; property: "opacity"; value: 0.18 }
-            NumberAnimation { target: movingLayer; property: "opacity"; to: 1; duration: root.theme.pageMotion; easing.type: Easing.OutCubic }
+            NumberAnimation { target: movingLayer; property: "opacity"; to: 1; duration: root.theme.backgroundMotion; easing.type: Easing.OutCubic }
         }
         SequentialAnimation {
             PropertyAction { target: device; property: "opacity"; value: 0.04 }
             PropertyAction { target: deviceTranslate; property: "x"; value: 18 }
             PauseAnimation { duration: root.theme.deviceEntryDelay }
             ParallelAnimation {
-                NumberAnimation { target: device; property: "opacity"; to: 1; duration: root.theme.pageMotion; easing.type: Easing.OutCubic }
-                NumberAnimation { target: deviceTranslate; property: "x"; to: 0; duration: root.theme.pageMotion; easing.type: Easing.OutCubic }
-            }
-        }
-        SequentialAnimation {
-            PropertyAction { target: stageSweep; property: "x"; value: -stageSweep.width }
-            PropertyAction { target: stageSweep; property: "opacity"; value: 0 }
-            ParallelAnimation {
-                NumberAnimation { target: stageSweep; property: "x"; to: root.width + stageSweep.width; duration: root.theme.pageMotion; easing.type: Easing.InOutCubic }
-                SequentialAnimation {
-                    NumberAnimation { target: stageSweep; property: "opacity"; to: 1; duration: root.theme.ui }
-                    PauseAnimation { duration: root.theme.pageMotion - root.theme.ui * 2 }
-                    NumberAnimation { target: stageSweep; property: "opacity"; to: 0; duration: root.theme.ui }
-                }
+                NumberAnimation { target: device; property: "opacity"; to: 1; duration: root.theme.backgroundMotion - root.theme.deviceEntryDelay; easing.type: Easing.OutCubic }
+                NumberAnimation { target: deviceTranslate; property: "x"; to: 0; duration: root.theme.backgroundMotion - root.theme.deviceEntryDelay; easing.type: Easing.OutCubic }
             }
         }
     }

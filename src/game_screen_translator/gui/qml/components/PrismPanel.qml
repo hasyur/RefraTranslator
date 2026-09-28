@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 
 Item {
     id: root
@@ -34,12 +35,14 @@ Item {
     }
 
     onTransitionSerialChanged: Qt.callLater(root.playEntry)
-    onReducedMotionChanged: {
-        if (reducedMotion)
+    onMotionEnabledChanged: {
+        if (motionEnabled)
+            root.playEntry()
+        else
             settleEntry()
     }
-    onMotionEnabledChanged: {
-        if (!motionEnabled)
+    onReducedMotionChanged: {
+        if (reducedMotion)
             settleEntry()
     }
 
@@ -73,15 +76,41 @@ Item {
 
 
         Rectangle {
-            objectName: "prismPanelFacetLine"
-            width: Math.min(parent.width * 0.24, 110)
-            height: 2
-            x: -12
-            y: 18
-            rotation: -12
-            antialiasing: true
+            objectName: "prismPanelTopLight"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: 1
+            color: root.theme.text
+            opacity: root.theme.dark ? 0.12 : 0.2
+        }
+
+        Shape {
+            objectName: "prismPanelCutFacet"
+            anchors.fill: parent
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: "transparent"
+                fillColor: Qt.rgba(root.theme.accent.r,
+                                   root.theme.accent.g,
+                                   root.theme.accent.b,
+                                   root.raised ? 0.075 : 0.045)
+                startX: root.width * 0.76; startY: 0
+                PathLine { x: root.width; y: 0 }
+                PathLine { x: root.width; y: root.height * 0.2 }
+                PathLine { x: root.width * 0.91; y: root.height * 0.13 }
+                PathLine { x: root.width * 0.76; y: 0 }
+            }
+        }
+
+        Rectangle {
+            objectName: "prismPanelInsetRule"
+            x: 14
+            y: 16
+            width: Math.min(parent.width * 0.22, 96)
+            height: 1
             color: root.theme.accent
-            opacity: root.raised ? 0.5 : 0.32
+            opacity: root.raised ? 0.32 : 0.2
         }
     }
 
@@ -103,21 +132,21 @@ Item {
             value: root.motionRole === "secondary" ? 18 : 15
         }
         PropertyAction { target: root; property: "opacity"; value: root.motionRole === "secondary" ? 0 : 0.1 }
-        PauseAnimation { duration: root.motionRole === "secondary" ? 110 : 0 }
+        PauseAnimation { duration: root.motionRole === "secondary" ? 58 : 0 }
         ParallelAnimation {
             NumberAnimation {
                 target: panelTranslate
                 property: "x"
                 to: 0
                 duration: root.motionRole === "secondary" ? root.theme.pageSecondaryMotion : root.theme.pageMotion
-                easing.type: Easing.OutCubic
+                easing.type: Easing.OutQuart
             }
             NumberAnimation {
                 target: root
                 property: "opacity"
                 to: 1
                 duration: root.motionRole === "secondary" ? root.theme.pageSecondaryMotion : root.theme.pageMotion
-                easing.type: Easing.OutCubic
+                easing.type: Easing.OutQuart
             }
         }
     }
