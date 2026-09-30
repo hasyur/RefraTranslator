@@ -40,8 +40,8 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.translation.backend == "external"
     assert config.translation.builtin_model == "Hy-MT2-1.8B-Q8_0.gguf"
     assert config.translation.builtin_cuda_device == "follow_ocr"
-    assert config.translation.builtin_parallel == 1
-    assert config.translation.builtin_total_context == 2048
+    assert config.translation.builtin_parallel == 4
+    assert config.translation.builtin_total_context == 8192
     assert config.translation.builtin_max_output_tokens == 512
     assert config.translation.builtin_kv_cache_type == "f16"
     assert config.translation.builtin_temperature == 0.2
@@ -70,9 +70,9 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.live.ocr_cooldown_ms == 0
     assert config.live.settle_rescan_ms == 500
     assert config.live.idle_rescan_ms == 2000
-    assert config.live.dynamic_roi_enabled is False
+    assert config.live.dynamic_roi_enabled is True
     assert config.live.debug_border is False
-    assert config.live.dynamic_roi_response_target_ms == 500
+    assert config.live.dynamic_roi_response_target_ms == 350
     assert not hasattr(config.live, "dynamic_roi_settle_ms")
     assert not hasattr(config.live, "dynamic_roi_ocr_interval_ms")
     assert not hasattr(config.live, "dynamic_roi_max_coalesce_ms")
@@ -95,10 +95,51 @@ dynamic_roi_max_coalesce_ms = 10000
 
     config = load_config(path)
 
-    assert config.live.dynamic_roi_response_target_ms == 500
+    assert config.live.dynamic_roi_response_target_ms == 350
     assert not hasattr(config.live, "dynamic_roi_settle_ms")
     assert not hasattr(config.live, "dynamic_roi_ocr_interval_ms")
     assert not hasattr(config.live, "dynamic_roi_max_coalesce_ms")
+
+
+def test_fresh_config_and_installer_template_share_runtime_defaults(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[translation]\nbase_url="http://server.test/v1"\nmodel="model"\n',
+        encoding="utf-8",
+    )
+    template = Path(__file__).resolve().parents[1] / "config.example.toml"
+
+    for config in (load_config(path), load_config(template)):
+        assert config.translation.max_concurrency == 4
+        assert config.translation.builtin_parallel == 4
+        assert config.live.dynamic_roi_enabled is True
+        assert config.live.clear_after_ms == 150
+        assert config.live.dynamic_roi_response_target_ms == 350
+
+
+def test_saved_runtime_choices_override_new_defaults(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        """
+[translation]
+base_url = "http://server.test/v1"
+model = "model"
+max_concurrency = 2
+builtin_parallel = 1
+[live]
+dynamic_roi_enabled = false
+clear_after_ms = 900
+dynamic_roi_response_target_ms = 500
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+    assert config.translation.max_concurrency == 2
+    assert config.translation.builtin_parallel == 1
+    assert config.live.dynamic_roi_enabled is False
+    assert config.live.clear_after_ms == 900
+    assert config.live.dynamic_roi_response_target_ms == 500
 
 
 def test_default_api_key_name_falls_back_to_legacy_name(monkeypatch) -> None:

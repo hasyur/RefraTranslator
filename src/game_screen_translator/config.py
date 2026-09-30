@@ -69,7 +69,7 @@ class TranslationConfig:
     model: str
     target_language: str = "简体中文"
     timeout_seconds: float = 5.0
-    max_concurrency: int = 2
+    max_concurrency: int = 4
     temperature: float = 0.7
     top_p: float = 0.6
     max_output_tokens: int = 2048
@@ -78,7 +78,7 @@ class TranslationConfig:
     backend: str = "external"
     builtin_model: str = "Hy-MT2-1.8B-Q8_0.gguf"
     builtin_cuda_device: str = BUILTIN_CUDA_DEVICE_FOLLOW_OCR
-    builtin_parallel: int = 1
+    builtin_parallel: int = 4
     builtin_kv_cache_type: str = "f16"
     builtin_temperature: float = 0.2
 
@@ -270,16 +270,16 @@ class LiveConfig:
     change_threshold: float = 3.0
     stable_observations: int = 1
     stable_ms: int = 0
-    clear_after_ms: int = 900
+    clear_after_ms: int = 150
     context_pairs: int = 8
     max_batch_size: int = 8
     capture_backend: str = "dxgi"
     ocr_cooldown_ms: int = 0
     settle_rescan_ms: int = 500
     idle_rescan_ms: int = 2000
-    dynamic_roi_enabled: bool = False
+    dynamic_roi_enabled: bool = True
     debug_border: bool = False
-    dynamic_roi_response_target_ms: int = 500
+    dynamic_roi_response_target_ms: int = 350
 
     def __post_init__(self) -> None:
         if self.left < 0 or self.top < 0:

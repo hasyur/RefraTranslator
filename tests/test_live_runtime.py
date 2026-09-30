@@ -1174,7 +1174,11 @@ def test_ocr_backlog_waits_for_cooldown_after_completion(monkeypatch) -> None:
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
-        live=LiveConfig(stable_observations=99, ocr_cooldown_ms=350),
+        live=LiveConfig(
+            dynamic_roi_enabled=False,
+            stable_observations=99,
+            ocr_cooldown_ms=350,
+        ),
     )
     capture = FakeCapture()
     ocr = FakeOcr()
@@ -1218,7 +1222,11 @@ def test_live_controller_confirms_once_after_scene_settles(monkeypatch) -> None:
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
-        live=LiveConfig(settle_rescan_ms=500, idle_rescan_ms=0),
+        live=LiveConfig(
+            dynamic_roi_enabled=False,
+            settle_rescan_ms=500,
+            idle_rescan_ms=0,
+        ),
     )
     controller = LiveController(
         config,
@@ -1266,7 +1274,11 @@ def test_live_controller_rechecks_an_unchanged_frame_at_idle_interval(
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
-        live=LiveConfig(settle_rescan_ms=0, idle_rescan_ms=2000),
+        live=LiveConfig(
+            dynamic_roi_enabled=False,
+            settle_rescan_ms=0,
+            idle_rescan_ms=2000,
+        ),
     )
     controller = LiveController(
         config,
@@ -1308,7 +1320,11 @@ def test_failed_ocr_retries_on_idle_interval_without_new_frame_change(
             base_url="http://server.test/v1",
             model="hy-mt1.5-7b",
         ),
-        live=LiveConfig(settle_rescan_ms=0, idle_rescan_ms=2000),
+        live=LiveConfig(
+            dynamic_roi_enabled=False,
+            settle_rescan_ms=0,
+            idle_rescan_ms=2000,
+        ),
     )
     controller = LiveController(
         config,
@@ -1947,6 +1963,7 @@ def test_legacy_runtime_confirms_changed_visible_text_without_idle_timers(
             model="hy-mt1.5-7b",
         ),
         live=LiveConfig(
+            dynamic_roi_enabled=False,
             stable_observations=1,
             stable_ms=0,
             settle_rescan_ms=0,

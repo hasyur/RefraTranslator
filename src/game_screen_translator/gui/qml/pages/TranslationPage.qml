@@ -465,26 +465,35 @@ Item {
                                     description: "设置外部翻译服务使用的模型名称。"
                                     settingKey: "translation-external-model"
                                 }
-                                PrismTextField {
+                                PrismComboBox {
+                                    id: externalModelSelector
+                                    objectName: "externalModelSelector"
                                     theme: root.theme
                                     accessibleName: "模型 ID"
                                     settingDescription: "设置外部翻译服务使用的模型名称。"
                                     settingKey: "translation-external-model"
-                                    text: root.workbench.model
-                                    placeholderText: "模型 ID"
-                                    Layout.fillWidth: true
-                                    onTextEdited: root.workbench.setModel(text)
-                                }
-                                PrismComboBox {
-                                    visible: root.workbench.modelNames.length > 0
-                                    theme: root.theme
-                                    accessibleName: "已读取的模型"
-                                    settingDescription: "设置外部翻译服务使用的模型名称。"
-                                    settingKey: "translation-external-model"
                                     model: root.workbench.modelNames
-                                    currentIndex: Math.max(0, root.workbench.modelNames.indexOf(root.workbench.model))
+                                    currentIndex: root.workbench.modelNames.indexOf(root.workbench.model)
+                                    editable: true
+                                    editText: root.workbench.model
                                     Layout.fillWidth: true
                                     onActivated: index => root.workbench.setModel(root.workbench.modelNames[index])
+                                    contentItem: TextField {
+                                        objectName: "externalModelEditor"
+                                        text: externalModelSelector.editText
+                                        placeholderText: "模型 ID"
+                                        Accessible.name: "模型 ID"
+                                        color: root.theme.text
+                                        placeholderTextColor: root.theme.textDim
+                                        selectionColor: root.theme.accent
+                                        selectedTextColor: root.theme.ink
+                                        font: externalModelSelector.font
+                                        verticalAlignment: TextInput.AlignVCenter
+                                        selectByMouse: true
+                                        padding: 0
+                                        background: null
+                                        onTextEdited: root.workbench.setModel(text)
+                                    }
                                 }
                                 PrismButton {
                                     theme: root.theme

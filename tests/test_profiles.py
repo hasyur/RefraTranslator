@@ -52,6 +52,12 @@ def test_create_and_load_isolated_game_profile(tmp_path: Path) -> None:
     assert "dynamic_roi_settle_ms" not in settings_text
     assert "dynamic_roi_ocr_interval_ms" not in settings_text
     assert "dynamic_roi_max_coalesce_ms" not in settings_text
+    initial_runtime = apply_profile_runtime_settings(_config(), created)
+    assert initial_runtime.translation.max_concurrency == 4
+    assert initial_runtime.translation.builtin_parallel == 4
+    assert initial_runtime.live.dynamic_roi_enabled is True
+    assert initial_runtime.live.clear_after_ms == 150
+    assert initial_runtime.live.dynamic_roi_response_target_ms == 350
 
     created.glossary_path.write_text(
         '[[terms]]\nsource = "フィクサー"\ntarget = "中间人"\n',
@@ -178,8 +184,10 @@ def test_profile_runtime_settings_are_isolated_from_other_profiles(
         live=replace(
             game_config.live,
             change_poll_fps=10,
-            dynamic_roi_enabled=True,
+            dynamic_roi_enabled=False,
             debug_border=True,
+            clear_after_ms=900,
+            dynamic_roi_response_target_ms=700,
             idle_rescan_ms=4000,
         ),
     )
@@ -198,13 +206,18 @@ def test_profile_runtime_settings_are_isolated_from_other_profiles(
     assert effective_game.preview.overlay_opacity == 0.0
     assert effective_game.recording.browser_overlay_enabled is True
     assert effective_game.live.change_poll_fps == 10
-    assert effective_game.live.dynamic_roi_enabled is True
+    assert effective_game.live.dynamic_roi_enabled is False
+    assert effective_game.live.clear_after_ms == 900
+    assert effective_game.live.dynamic_roi_response_target_ms == 700
     assert effective_game.live.debug_border is True
     assert effective_game.live.idle_rescan_ms == 4000
     assert effective_web.translation.model == machine.translation.model
     assert effective_web.ocr.device == machine.ocr.device
     assert effective_web.preview.overlay_opacity == machine.preview.overlay_opacity
     assert effective_web.live.debug_border is False
+    assert effective_web.live.dynamic_roi_enabled is True
+    assert effective_web.live.clear_after_ms == 150
+    assert effective_web.live.dynamic_roi_response_target_ms == 350
 
 
 def test_legacy_profile_settings_migrate_once_to_an_independent_snapshot(

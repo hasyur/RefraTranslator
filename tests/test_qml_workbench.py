@@ -1029,6 +1029,99 @@ def test_real_profile_dropdown_switches_and_restores_runtime_state(
     host.shutdown()
 
 
+def test_profile_and_external_model_names_use_one_control(tmp_path: Path) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(config_path, load_config(config_path), "game", display_name="测试游戏")
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        host.show()
+        app.processEvents()
+        window = host.window
+        assert window is not None
+        window.resize(1280, 1000)
+        profile_hint = window.findChild(QObject, "settingHint-home-profile-label")
+        assert profile_hint is not None
+        profile_label = profile_hint.property("target")
+        assert profile_label.property("meta") == ""
+        profile_selector = window.findChild(QObject, "homeProfileSelector")
+        assert profile_selector is not None
+        assert profile_selector.property("currentText") == "测试游戏"
+        assert controller.maxConcurrency == 4
+        assert controller.builtinParallel == 4
+        assert controller.dynamicRoiEnabled is True
+        assert controller.clearAfterMs == 150
+        assert controller.roiResponseTargetMs == 350
+
+        controller.setPage("TRANSLATION")
+        page = window.findChild(QObject, "translationPage")
+        assert isinstance(page, QQuickItem)
+        _wait_for_page_layout(window, page, app)
+        model_hints = window.findChildren(QObject, "settingHint-translation-external-model-control")
+        assert len(model_hints) == 1
+        selector = window.findChild(QObject, "externalModelSelector")
+        editor = _find_quick_item(window, "externalModelEditor")
+        assert isinstance(selector, QQuickItem)
+        assert isinstance(editor, QQuickItem)
+        assert selector.property("editable") is True
+        assert editor.property("text") == controller.model
+
+        editor.forceActiveFocus()
+        QTest.keyClick(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        _key_clicks(window, "custom-model")
+        app.processEvents()
+        assert controller.model == "custom-model"
+        assert editor.property("text") == "custom-model"
+
+        reply = SimpleNamespace(
+            error=lambda: controller_module.QNetworkReply.NetworkError.NoError,
+            readAll=lambda: b'{"data":[{"id":"server-a"},{"id":"server-b"}]}',
+            deleteLater=lambda: None,
+        )
+        controller._model_reply = reply
+        controller._models_loaded(reply, "http://127.0.0.1:1234/v1/models")
+        app.processEvents()
+        assert editor.property("text") == "custom-model"
+        assert selector.property("count") == 3
+
+        selector.forceActiveFocus()
+        QTest.mouseClick(
+            window,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            selector.mapToScene(QPointF(selector.width() - 10, selector.height() / 2)).toPoint(),
+        )
+        app.processEvents()
+        QTest.keyClick(window, Qt.Key.Key_Down)
+        QTest.keyClick(window, Qt.Key.Key_Return)
+        app.processEvents()
+        assert controller.model == "server-a"
+        assert editor.property("text") == "server-a"
+        editor.forceActiveFocus()
+        QTest.keyClick(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyClick(window, Qt.Key.Key_Backspace)
+        app.processEvents()
+        assert controller.model == ""
+        assert editor.property("text") == ""
+        _key_clicks(window, "custom-after-fetch")
+        app.processEvents()
+        assert controller.model == "custom-after-fetch"
+        controller.setModel("server-a")
+        app.processEvents()
+        assert editor.property("text") == "server-a"
+        assert controller.saveRuntimeSettings() is True
+        restored = apply_profile_runtime_settings(
+            load_config(config_path),
+            load_game_profile(config_path, load_config(config_path), "game"),
+        )
+        assert restored.translation.model == "server-a"
+    finally:
+        host.shutdown()
+
+
 def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions(
     tmp_path: Path,
 ) -> None:
@@ -1112,7 +1205,6 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
     }
     expected_counts = {key_and_part: 1 for key_and_part in hint_items}
     expected_counts[("translation-backend", "control")] = 2
-    expected_counts[("translation-external-model", "control")] = 2
     assert {
         key_and_part: len(items) for key_and_part, items in hint_items.items()
     } == expected_counts
