@@ -1,14 +1,24 @@
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import QFontDatabase, QFontMetrics
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.live import runtime as live_runtime
 from game_screen_translator.live.runtime import LiveControlWindow
+
+
+def _load_hud_metric_font() -> int | None:
+    font_path = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "msyh.ttc"
+    if not font_path.is_file():
+        return None
+    font_id = QFontDatabase.addApplicationFont(str(font_path))
+    return font_id if font_id >= 0 else None
 
 
 def test_live_control_is_a_prism_top_hud_and_is_mouse_transparent(monkeypatch) -> None:
@@ -88,7 +98,11 @@ def test_live_control_uses_black_surface_and_supplied_four_color_palette() -> No
         assert "#f472b6" in style
         assert "border: none" in style
         assert "border-radius" not in style
-        assert "font-size: 16px" in style
+        assert "font-size:" not in style
+        assert all(
+            label.font().pixelSize() == 16
+            for label in window.findChildren(QLabel)
+        )
         assert "QFrame#hudLatencyMetricLast { border-right: none; }" in style
 
     dark.close()
@@ -127,10 +141,11 @@ class _SignalStub:
 @pytest.mark.parametrize(
     ("screen_width", "expected_width", "expected_height", "expected_font"),
     (
-        (800, 800, 15, 12),
-        (1366, 896, 17, 13),
+        (800, 450, 8, 7),
+        (1366, 768, 14, 11),
         (1920, 1080, 20, 16),
-        (2560, 1242, 23, 18),
+        (2560, 1440, 27, 21),
+        (3840, 2160, 40, 32),
     ),
 )
 def test_live_control_scales_fixed_hud_columns_to_screen_width(
@@ -155,6 +170,65 @@ def test_live_control_scales_fixed_hud_columns_to_screen_width(
     )
     assert window._hud_font_pixels == expected_font
     assert window._hud_column_widths[-1] >= 1
+
+    window.close()
+    app.processEvents()
+
+
+def test_live_control_first_narrow_show_uses_actual_scaled_label_fonts(request) -> None:
+    app = QApplication.instance() or QApplication([])
+    font_id = _load_hud_metric_font()
+    if font_id is not None:
+        request.addfinalizer(lambda: QFontDatabase.removeApplicationFont(font_id))
+    has_metric_font = font_id is not None
+    window = LiveControlWindow(
+        lambda: None,
+        profile_name="这是一个非常长的 Profile 名称",
+    )
+    window.set_status("实时翻译运行中")
+    window.set_coverage_count(1234)
+    window.set_latency(
+        "最近  OCR 118ms · LLM 2.50s · 总延迟 640ms    "
+        "峰值  OCR 230ms · LLM 3.10s · 总延迟 1.20s"
+    )
+    live_runtime._position_live_control(
+        window,
+        _ScreenGeometryStub(QRect(0, 0, 800, 600)),
+    )
+    window.show()
+    app.processEvents()
+
+    actual_fonts = {
+        label.font().pixelSize()
+        for label in window.findChildren(QLabel)
+    }
+    assert actual_fonts == {round(16 * 800 / 1920)}
+    if has_metric_font:
+        for label in (
+            window._status_indicator,
+            window._status,
+            window._coverage,
+            window._recent_heading,
+            window._peak_heading,
+        ):
+            assert QFontMetrics(label.font()).horizontalAdvance(label.text()) <= (
+                label.contentsRect().width()
+            )
+        for field, title in window._latency_titles.items():
+            title_metrics = QFontMetrics(title.font())
+            value = window._latency_fields[field]
+            value_metrics = QFontMetrics(value.font())
+            assert title_metrics.horizontalAdvance(title.text()) <= title.width(), field
+            assert value_metrics.horizontalAdvance(value.text()) <= value.width(), field
+        assert QFontMetrics(window._profile.font()).horizontalAdvance(
+            window._profile.text()
+        ) <= window._profile.contentsRect().width()
+    else:
+        for field, title in window._latency_titles.items():
+            assert not title.geometry().intersects(
+                window._latency_fields[field].geometry()
+            )
+    assert window._profile.toolTip() == "这是一个非常长的 Profile 名称"
 
     window.close()
     app.processEvents()
@@ -281,20 +355,20 @@ def test_live_control_repositions_on_selected_screen_geometry_and_dpi_signals() 
     screen.geometryChanged.emit(screen._geometry)
     app.processEvents()
     assert (window.x(), window.y(), window.width(), window.height()) == (
-        -1920,
+        -1920 + (800 - 450) // 2,
         -100,
-        800,
-        15,
+        450,
+        8,
     )
 
     screen._geometry = QRect(-1366, -80, 1366, 600)
     screen.logicalDotsPerInchChanged.emit(144.0)
     app.processEvents()
     assert (window.x(), window.y(), window.width(), window.height()) == (
-        -1366 + (1366 - 896) // 2,
+        -1366 + (1366 - 768) // 2,
         -80,
-        896,
-        17,
+        768,
+        14,
     )
     window.close()
     app.processEvents()

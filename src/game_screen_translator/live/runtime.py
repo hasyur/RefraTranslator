@@ -134,8 +134,6 @@ _HUD_REFERENCE_SCREEN_WIDTH = 1920
 _HUD_BASE_WIDTH = 1080
 _HUD_BASE_HEIGHT = 20
 _HUD_BASE_FONT_PIXELS = 16
-_HUD_MIN_SCALE = 0.83
-_HUD_MAX_SCALE = 1.15
 _HUD_COLUMN_WIDTHS = (
     108,  # status
     220,  # profile
@@ -553,36 +551,6 @@ class LiveControlWindow(QWidget):
         for column, column_width in zip(self._hud_columns, column_widths):
             column.setFixedSize(column_width, height)
 
-        for field, cell in self._latency_cells.items():
-            title_width = max(
-                1,
-                int(round(self._latency_title_widths[field] * scale)),
-            )
-            title = self._latency_titles[field]
-            value = self._latency_fields[field]
-            metric_layout = cell.layout()
-            metric_spacing = max(0, int(round(4 * scale)))
-            metric_padding = max(0, int(round(4 * scale)))
-            if metric_layout is not None:
-                metric_layout.setContentsMargins(
-                    metric_padding,
-                    0,
-                    metric_padding,
-                    0,
-                )
-                metric_layout.setSpacing(metric_spacing)
-            title.setFixedSize(title_width, height)
-            value.setFixedSize(
-                max(
-                    1,
-                    cell.width()
-                    - title_width
-                    - metric_spacing
-                    - 2 * metric_padding,
-                ),
-                height,
-            )
-
         indicator_width = max(1, int(round(18 * scale)))
         status_spacing = max(0, int(round(4 * scale)))
         status_padding = max(0, int(round(4 * scale)))
@@ -621,7 +589,6 @@ class LiveControlWindow(QWidget):
             "QLabel#hudCoverage, QLabel#hudLatencyGroup, QLabel#hudLatencyTitle, "
             "QLabel#hudLatencyValue {"
             f"font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
-            f"font-size: {font_pixels}px; "
             "font-weight: 500; }"
             "QLabel#hudStatus, QLabel#hudStatusIndicator { color: #22d3ee; }"
             "QLabel#hudProfile { color: #4c8dff; }"
@@ -652,6 +619,51 @@ class LiveControlWindow(QWidget):
             font = QFont(label.font())
             font.setPixelSize(font_pixels)
             label.setFont(font)
+        for field, cell in self._latency_cells.items():
+            title = self._latency_titles[field]
+            value = self._latency_fields[field]
+            metric_spacing = max(0, int(round(4 * scale)))
+            metric_padding = max(0, int(round(4 * scale)))
+            content_width = max(1, cell.contentsRect().width())
+            value_width = QFontMetrics(value.font()).horizontalAdvance("999ms")
+            title_width = max(
+                int(round(self._latency_title_widths[field] * scale)),
+                QFontMetrics(title.font()).horizontalAdvance(title.text()),
+            )
+            title_width = min(
+                title_width,
+                max(1, content_width - min(value_width, content_width - 1)),
+            )
+            remaining_width = max(0, content_width - title_width - value_width)
+            metric_padding = min(metric_padding, remaining_width // 2)
+            metric_spacing = min(
+                metric_spacing,
+                remaining_width - 2 * metric_padding,
+            )
+            metric_layout = cell.layout()
+            if metric_layout is not None:
+                metric_layout.setContentsMargins(
+                    metric_padding,
+                    0,
+                    metric_padding,
+                    0,
+                )
+                metric_layout.setSpacing(metric_spacing)
+            title_width = min(
+                title_width,
+                max(1, content_width - metric_spacing - 2 * metric_padding - 1),
+            )
+            title.setFixedSize(max(1, title_width), height)
+            value.setFixedSize(
+                max(
+                    1,
+                    content_width
+                    - title_width
+                    - metric_spacing
+                    - 2 * metric_padding,
+                ),
+                height,
+            )
         self._refresh_profile_text()
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt callback name
@@ -3121,14 +3133,8 @@ def _overlay_geometry(app: QApplication, capture: DxcamCapture, config: AppConfi
 def _resize_live_control(control: LiveControlWindow, screen) -> None:
     screen_geometry = screen.geometry()
     screen_width = max(1, int(screen_geometry.width()))
-    scale = min(
-        _HUD_MAX_SCALE,
-        max(_HUD_MIN_SCALE, screen_width / _HUD_REFERENCE_SCREEN_WIDTH),
-    )
+    scale = screen_width / _HUD_REFERENCE_SCREEN_WIDTH
     hud_width = int(round(_HUD_BASE_WIDTH * scale))
-    if hud_width > screen_width:
-        hud_width = screen_width
-        scale = hud_width / _HUD_BASE_WIDTH
     control._apply_hud_scale(scale, hud_width)
     control.move(
         screen_geometry.x() + max(0, (screen_width - control.width()) // 2),
