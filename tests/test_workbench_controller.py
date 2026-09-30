@@ -44,6 +44,7 @@ from game_screen_translator.profiles import (
     save_profile_glossary,
     save_profile_runtime_settings,
 )
+from game_screen_translator.translation.cache import CacheEnvironment, TranslationCache
 
 
 def _write_config(path: Path) -> None:
@@ -229,6 +230,118 @@ def test_controller_reloads_snapshot_when_live_process_finishes(
 
     assert controller.lastRunAvailable is True
     assert controller.lastRunOcrResults[0]["sourceText"] == "结束后原文"
+    controller.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "force_stop", "expected_run_state", "expected_status"),
+    (
+        (0, False, "已停止", "实时翻译已关闭"),
+        (7, False, "异常退出", "实时翻译进程异常退出"),
+        (1, True, "已强制停止", "已强制停止，保留上次快照。"),
+    ),
+)
+def test_live_exit_refreshes_profile_cache_stats_without_replacing_exit_notice(
+    tmp_path: Path,
+    exit_code: int,
+    force_stop: bool,
+    expected_run_state: str,
+    expected_status: str,
+) -> None:
+    controller, _config_path = _controller_with_profile(tmp_path)
+    profile = controller._profile
+    assert profile is not None
+    save_snapshot(
+        profile.directory,
+        new_snapshot(
+            (SnapshotEntry("old", 1, "上次原文", "上次译文", 0.9, (0, 0, 20, 20)),),
+            (),
+            ocr_peak_seconds=0.1,
+            llm_peak_seconds=None,
+        ),
+    )
+    controller._reload_last_run_snapshot()
+    previous_snapshot = controller._last_run_snapshot
+    assert (
+        controller.automaticEntries,
+        controller.automaticHits,
+        controller.manualCorrections,
+        controller.manualHits,
+    ) == (0, 0, 0, 0)
+
+    # A second SQLite cache object stands in for the live translation process.
+    live_cache = TranslationCache(profile.cache.database_path)
+    environment = CacheEnvironment(
+        profile_id=profile.profile_id,
+        source_language=controller._config.ocr.language,
+        target_language=controller._config.translation.target_language,
+        model=controller._config.translation.model,
+        prompt_version="test-prompt-v1",
+        glossary_revision=profile.glossary_revision,
+    )
+    live_cache.store_automatic("自动缓存原文", "自动缓存译文", environment, ())
+    live_cache.lookup("自动缓存原文", environment, ())
+    live_cache.set_manual_correction(
+        "人工修订原文",
+        "人工修订译文",
+        source_language=environment.source_language,
+        target_language=environment.target_language,
+    )
+    live_cache.lookup("人工修订原文", environment, ())
+
+    notices: list[str] = []
+    errors: list[tuple[str, str]] = []
+    state_stats: list[tuple[int, int, int, int]] = []
+    terminal_stats: list[tuple[int, int, int, int]] = []
+
+    def current_stats() -> tuple[int, int, int, int]:
+        return (
+            controller.automaticEntries,
+            controller.automaticHits,
+            controller.manualCorrections,
+            controller.manualHits,
+        )
+
+    controller.noticeRaised.connect(notices.append)
+    controller.errorRaised.connect(lambda title, message: errors.append((title, message)))
+    controller.stateChanged.connect(lambda: state_stats.append(current_stats()))
+    controller.liveFinished.connect(lambda: terminal_stats.append(current_stats()))
+    controller.liveFailed.connect(lambda: terminal_stats.append(current_stats()))
+    controller._live_process = SimpleNamespace(poll=lambda: exit_code)
+    controller._live_force_stop_requested = force_stop
+    if exit_code != 0 and not force_stop:
+        controller._live_log_path.parent.mkdir(parents=True, exist_ok=True)
+        controller._live_log_path.write_text("test live exit", encoding="utf-8")
+    if exit_code == 0:
+        save_snapshot(
+            profile.directory,
+            new_snapshot(
+                (SnapshotEntry("new", 1, "本次原文", "本次译文", 0.9, (0, 0, 20, 20)),),
+                (),
+                ocr_peak_seconds=0.2,
+                llm_peak_seconds=None,
+            ),
+        )
+
+    controller._check_live_process()
+
+    assert (
+        controller.automaticEntries,
+        controller.automaticHits,
+        controller.manualCorrections,
+        controller.manualHits,
+    ) == (1, 1, 1, 1)
+    assert controller.runState == expected_run_state
+    assert expected_status in controller.statusText
+    assert notices == []
+    assert (1, 1, 1, 1) in state_stats
+    assert terminal_stats == [(1, 1, 1, 1)]
+    if exit_code == 0:
+        assert controller.lastRunOcrResults[0]["sourceText"] == "本次原文"
+    elif force_stop:
+        assert controller._last_run_snapshot is previous_snapshot
+    if exit_code != 0 and not force_stop:
+        assert errors and errors[0][0] == "实时翻译进程异常退出"
     controller.shutdown()
 
 

@@ -73,6 +73,7 @@ from game_screen_translator.translation.transport import (
     TranslationTransportError,
     parse_model_ids,
 )
+from game_screen_translator.translation.cache import CacheStats
 from game_screen_translator.live.snapshot import LastRunSnapshot, load_snapshot
 
 from .theme import (
@@ -2245,11 +2246,25 @@ class WorkbenchController(QObject):
         except (OSError, RuntimeError, ValueError) as exc:
             self._show_error("刷新统计失败", exc)
             return
+        self._set_cache_stats(stats)
+        self._notice("已刷新当前 Profile 的真实缓存统计", "neutral")
+
+    def _set_cache_stats(self, stats: CacheStats) -> None:
         self._automatic_entries = stats.automatic_entries
         self._automatic_hits = stats.automatic_hits
         self._manual_corrections = stats.manual_corrections
         self._manual_hits = stats.manual_hits
-        self._notice("已刷新当前 Profile 的真实缓存统计", "neutral")
+
+    def _refresh_cache_stats_silently(self) -> None:
+        profile = self._profile
+        if profile is None:
+            return
+        try:
+            stats = profile.cache.stats()
+        except (OSError, RuntimeError, ValueError):
+            # Keep the process-exit status visible if the cache cannot be read.
+            return
+        self._set_cache_stats(stats)
 
     # ----- live process ------------------------------------------------
 
@@ -2392,6 +2407,7 @@ class WorkbenchController(QObject):
         self._live_stop_started_at = None
         self._live_force_stop_available = False
         self._live_force_stop_requested = False
+        self._refresh_cache_stats_silently()
         if exit_code == 0:
             self._set_run_state("已停止", "neutral", False)
             self._set_status("实时翻译已关闭", "neutral")
