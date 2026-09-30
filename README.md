@@ -71,7 +71,13 @@ RefraTranslator 是一款 Windows 游戏屏幕翻译工具：它自动识别画�
 
 ## 更新
 
-如果最初使用 `git clone` 下载项目，关闭 RefraTranslator 后双击 `update.bat` 即可更新。配置、Profile、模型、日志和翻译缓存会保留。
+如果最初使用 `git clone` 下载项目，关闭 RefraTranslator，在克隆的项目目录打开 PowerShell，然后执行：
+
+```powershell
+git pull
+```
+
+如果更新修改了 `pyproject.toml` 中的依赖，更新后再双击 `install.bat` 安装依赖。
 
 ZIP 下载的项目不能使用增量更新；想长期更新，建议使用下面的方式只克隆一次：
 

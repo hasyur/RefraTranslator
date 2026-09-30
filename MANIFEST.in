@@ -7,8 +7,6 @@ include install.bat
 include start_gui.bat
 include start_gui(debug).bat
 include start_test_scenes.bat
-include update.bat
-include update.ps1
 recursive-include scripts *.py
 recursive-include src/game_screen_translator/gui/qml *.qml
 recursive-include tests *.py

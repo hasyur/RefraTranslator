@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import os
 import re
-import shutil
 import subprocess
 import sys
 import tarfile
 import tomllib
 import zipfile
 from pathlib import Path
-
-import pytest
 
 from game_screen_translator.config import load_config
 
@@ -26,8 +22,6 @@ SOURCE_RELEASE_FILES = (
     "start_gui.bat",
     "start_gui(debug).bat",
     "start_test_scenes.bat",
-    "update.bat",
-    "update.ps1",
 )
 QML_SOURCE_FILES = tuple(
     sorted(
@@ -162,6 +156,9 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
 
     assert wheel_qml == expected
     assert sdist_qml == expected
+    sdist_files = {name.split("/", 1)[1] for name in sdist_names if "/" in name}
+    assert set(SOURCE_RELEASE_FILES) <= sdist_files
+    assert {"update.bat", "update.ps1"}.isdisjoint(sdist_files)
     assert any(
         name.endswith("game_screen_translator/gui_entry.py")
         for name in wheel_names
@@ -293,105 +290,3 @@ def test_install_batch_runs_gui_bootstrap_and_preserves_exit_code() -> None:
     assert 'set "install_exit=%ERRORLEVEL%"' in script
     assert 'exit /b %install_exit%' in script
     assert "start_gui.bat" in script
-
-
-def test_update_batch_runs_powershell_updater_and_preserves_exit_code() -> None:
-    script = (PROJECT_ROOT / "update.bat").read_text(encoding="ascii")
-
-    assert 'cd /d "%~dp0"' in script
-    assert '-File "%~dp0update.ps1"' in script
-    assert 'set "update_exit=%ERRORLEVEL%"' in script
-    assert 'exit /b %update_exit%' in script
-
-
-def test_update_script_uses_safe_incremental_main_update() -> None:
-    script = (PROJECT_ROOT / "update.ps1").read_bytes()
-    text = script.decode("ascii")
-
-    assert '$supportedBranches = @("main", "master")' in text
-    assert 'if ($currentBranch -notin $supportedBranches)' in text
-    assert 'if ($currentBranch -eq "master")' in text
-    assert "Legacy master branch detected" in text
-    assert '"--porcelain"' in text
-    assert '"--untracked-files=no"' in text
-    assert '@("pull", "--ff-only", "origin", "main")' in text
-    assert "diff --quiet" in text
-    assert "$oldCommit $newCommit -- pyproject.toml" in text
-    assert "-File $bootstrapPath -WithGui" in text
-    assert '$venvPython = Join-Path $projectRoot ".venv\\Scripts\\python.exe"' in text
-    assert "if ($environmentMissing -or $dependencyChanged)" in text
-    assert "GitHub ZIP downloads cannot be" in text
-
-
-@pytest.mark.skipif(os.name != "nt", reason="update.ps1 requires Windows PowerShell")
-def test_update_script_fast_forwards_a_clean_legacy_master_clone(
-    tmp_path: Path,
-) -> None:
-    git = shutil.which("git")
-    powershell = shutil.which("powershell.exe")
-    if git is None or powershell is None:
-        pytest.skip("Git and Windows PowerShell are required")
-
-    remote = tmp_path / "remote.git"
-    seed = tmp_path / "seed"
-    legacy = tmp_path / "legacy"
-
-    def run(*arguments: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            arguments,
-            cwd=cwd,
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-
-    run(git, "init", "--bare", str(remote))
-    run(git, "init", "--initial-branch=main", str(seed))
-    run(git, "config", "user.name", "RefraTranslator Test", cwd=seed)
-    run(git, "config", "user.email", "test@example.invalid", cwd=seed)
-    shutil.copy2(PROJECT_ROOT / "update.ps1", seed / "update.ps1")
-    (seed / "pyproject.toml").write_text("[project]\nname='fixture'\n", encoding="ascii")
-    (seed / "bootstrap.ps1").write_text(
-        'throw "bootstrap should not run"\n',
-        encoding="ascii",
-    )
-    run(git, "add", ".", cwd=seed)
-    run(git, "commit", "-m", "base", cwd=seed)
-    run(git, "remote", "add", "origin", str(remote), cwd=seed)
-    run(git, "push", "-u", "origin", "main", cwd=seed)
-
-    run(git, "clone", "--branch", "main", str(remote), str(legacy))
-    run(git, "branch", "-m", "master", cwd=legacy)
-    venv_python = legacy / ".venv" / "Scripts" / "python.exe"
-    venv_python.parent.mkdir(parents=True)
-    venv_python.write_bytes(b"")
-
-    (seed / "source.txt").write_text("new source\n", encoding="ascii")
-    run(git, "add", "source.txt", cwd=seed)
-    run(git, "commit", "-m", "remote update", cwd=seed)
-    run(git, "push", "origin", "main", cwd=seed)
-
-    completed = run(
-        powershell,
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        str(legacy / "update.ps1"),
-        cwd=legacy,
-    )
-
-    assert "Legacy master branch detected" in completed.stdout
-    assert "Updated source:" in completed.stdout
-    assert "keeping the existing .venv" in completed.stdout
-    assert run(git, "branch", "--show-current", cwd=legacy).stdout.strip() == "master"
-    assert run(git, "rev-parse", "HEAD", cwd=legacy).stdout == run(
-        git,
-        "rev-parse",
-        "HEAD",
-        cwd=seed,
-    ).stdout
-    assert (legacy / "source.txt").read_text(encoding="ascii") == "new source\n"
-    assert venv_python.is_file()

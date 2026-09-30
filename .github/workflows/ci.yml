@@ -39,21 +39,20 @@ jobs:
       - name: Check dependency consistency
         run: python -m pip check
 
-      - name: Parse PowerShell entrypoints with Windows PowerShell 5.1
+      - name: Parse PowerShell installer with Windows PowerShell 5.1
         shell: powershell
         run: |
-          foreach ($script in @("bootstrap.ps1", "update.ps1")) {
-            $tokens = $null
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile(
-              (Resolve-Path $script),
-              [ref]$tokens,
-              [ref]$errors
-            ) | Out-Null
-            if ($errors.Count -gt 0) {
-              $errors | ForEach-Object { Write-Error "$script`: $($_.Message)" }
-              exit 1
-            }
+          $script = "bootstrap.ps1"
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path $script),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error "$script`: $($_.Message)" }
+            exit 1
           }
 
       - name: Run offline tests
