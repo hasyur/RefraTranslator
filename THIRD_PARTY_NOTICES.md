@@ -37,8 +37,8 @@ RefraTranslator 自身的源代码采用 [Apache License 2.0](LICENSE)。第三�
 
 | 组件 | 固定版本或文件 | 下载来源 | 上游许可证 |
 | --- | --- | --- | --- |
-| [llama.cpp](https://github.com/ggml-org/llama.cpp) | `b10621`，对应稳定标签 `v0.3.0` 的同一提交 | [官方 GitHub Release](https://github.com/ggml-org/llama.cpp/releases/tag/b10621) | [MIT](https://github.com/ggml-org/llama.cpp/blob/c1d0e7a004015f23bc0233470b747b596f29b264/LICENSE) |
-| NVIDIA CUDA 运行库 | llama.cpp 官方 Windows CUDA 12.4 运行库包 | [官方 GitHub Release](https://github.com/ggml-org/llama.cpp/releases/tag/b10621) | [NVIDIA Software License Agreement / CUDA Supplement](https://docs.nvidia.com/cuda/eula/index.html) |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) | `b11146`，对应稳定标签 `v0.5.0` 的同一提交 | [官方 GitHub Release](https://github.com/ggml-org/llama.cpp/releases/tag/b11146) | [MIT](https://github.com/ggml-org/llama.cpp/blob/7fe450e19305b828c199d602c23a8337aaa1f03b/LICENSE) |
+| NVIDIA CUDA 运行库 | llama.cpp 官方 Windows CUDA 12.4 运行库包 | [官方 GitHub Release](https://github.com/ggml-org/llama.cpp/releases/tag/b11146) | [NVIDIA Software License Agreement / CUDA Supplement](https://docs.nvidia.com/cuda/eula/index.html) |
 | Tencent Hy-MT2 1.8B GGUF | `Hy-MT2-1.8B-Q8_0.gguf` | [Tencent-Hunyuan ModelScope](https://www.modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B-GGUF/files) | [Apache-2.0](https://github.com/Tencent-Hunyuan/Hy-MT2/blob/main/LICENSE.txt) |
 | Tencent Hy-MT2 7B GGUF | `Hy-MT2-7B-Q4_K_M.gguf` | [Tencent-Hunyuan ModelScope](https://www.modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-7B-GGUF/files) | [Apache-2.0](https://github.com/Tencent-Hunyuan/Hy-MT2/blob/main/LICENSE.txt) |
 

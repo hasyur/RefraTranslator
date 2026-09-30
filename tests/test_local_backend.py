@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import threading
 import zipfile
 from pathlib import Path
@@ -44,14 +45,31 @@ def _zip_bytes(files: dict[str, bytes]) -> bytes:
 
 
 def test_curated_catalog_pins_stable_cuda_runtime_and_modelscope_models() -> None:
-    assert LLAMA_CPP_VERSION == "b10621"
-    assert LLAMA_CPP_STABLE_VERSION == "v0.3.0"
+    assert LLAMA_CPP_VERSION == "b11146"
+    assert LLAMA_CPP_STABLE_VERSION == "v0.5.0"
     assert HY_MT2_1_8B_REVISION == "00451019639c4214392db1f02a9ee824e223f1e4"
     assert HY_MT2_7B_REVISION == "47b1dd35c1f984e23ec7b3c72e5d01620dce8f40"
-    assert [artifact.size_bytes for artifact in LLAMA_CPP_ARTIFACTS] == [
-        250_464_283,
-        391_443_627,
+    assert [
+        (artifact.filename, artifact.size_bytes, artifact.sha256)
+        for artifact in LLAMA_CPP_ARTIFACTS
+    ] == [
+        (
+            "llama-b11146-bin-win-cuda-12.4-x64.zip",
+            253_869_799,
+            "3c806a6ceccc3dae1c743ceb1a1fb2cce5b76f40bfbd4c6b7b8afb6ef45a5807",
+        ),
+        (
+            "cudart-llama-bin-win-cuda-12.4-x64.zip",
+            391_443_627,
+            "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+        ),
     ]
+    assert all(
+        artifact.url
+        == "https://github.com/ggml-org/llama.cpp/releases/download/"
+        f"b11146/{artifact.filename}"
+        for artifact in LLAMA_CPP_ARTIFACTS
+    )
     assert [model.model_id for model in BUILTIN_MODELS] == [
         "Hy-MT2-1.8B-Q8_0.gguf",
         "Hy-MT2-7B-Q4_K_M.gguf",
@@ -107,7 +125,12 @@ def test_artifact_download_resumes_and_marks_verified(tmp_path: Path) -> None:
     assert marker["sha256"] == artifact.sha256
     assert {event[0] for event in events} >= {"download", "verify", "ready"}
 
+    previous_mtime_ns = destination.stat().st_mtime_ns
     destination.write_bytes(b"abcdEfgh")
+    os.utime(
+        destination,
+        ns=(previous_mtime_ns, previous_mtime_ns + 1_000_000_000),
+    )
     assert not local_backend._artifact_is_verified(destination, artifact)
 
 
@@ -166,6 +189,14 @@ def test_artifact_download_cancellation_keeps_partial_for_resume(
 def test_runtime_extraction_merges_archives_and_rejects_path_traversal(
     tmp_path: Path,
 ) -> None:
+    root = tmp_path / "store"
+    legacy_runtime = root / "runtime" / "b10621"
+    legacy_runtime.mkdir(parents=True)
+    legacy_executable = legacy_runtime / "llama-server.exe"
+    legacy_executable.write_bytes(b"previous verified runtime")
+    legacy_marker = legacy_runtime / "runtime.json"
+    legacy_marker.write_text('{"version":"b10621"}', encoding="utf-8")
+
     server_zip = tmp_path / "server.zip"
     cuda_zip = tmp_path / "cuda.zip"
     server_zip.write_bytes(
@@ -178,12 +209,15 @@ def test_runtime_extraction_merges_archives_and_rejects_path_traversal(
     )
     cuda_zip.write_bytes(_zip_bytes({"bin/cudart64_12.dll": b"cuda"}))
 
-    local_backend._extract_runtime(tmp_path / "store", (server_zip, cuda_zip))
+    assert not local_backend.runtime_is_ready(root)
+    local_backend._extract_runtime(root, (server_zip, cuda_zip))
 
-    executable = local_backend.runtime_executable(tmp_path / "store")
+    executable = local_backend.runtime_executable(root)
     assert executable is not None
     assert executable.read_bytes() == b"server"
     assert (executable.parent / "cudart64_12.dll").read_bytes() == b"cuda"
+    assert legacy_executable.read_bytes() == b"previous verified runtime"
+    assert legacy_marker.read_text(encoding="utf-8") == '{"version":"b10621"}'
 
     unsafe_zip = tmp_path / "unsafe.zip"
     unsafe_zip.write_bytes(_zip_bytes({"../outside.txt": b"no"}))

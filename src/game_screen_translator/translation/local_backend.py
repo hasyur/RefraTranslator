@@ -32,8 +32,8 @@ from game_screen_translator.config import (
 )
 
 
-LLAMA_CPP_VERSION = "b10621"
-LLAMA_CPP_STABLE_VERSION = "v0.3.0"
+LLAMA_CPP_VERSION = "b11146"
+LLAMA_CPP_STABLE_VERSION = "v0.5.0"
 HY_MT2_1_8B_REVISION = "00451019639c4214392db1f02a9ee824e223f1e4"
 HY_MT2_7B_REVISION = "47b1dd35c1f984e23ec7b3c72e5d01620dce8f40"
 LOCAL_BACKEND_DIRECTORY = ".cache/local-llm"
@@ -79,8 +79,8 @@ LLAMA_CPP_ARTIFACTS = (
             f"{LLAMA_CPP_VERSION}/"
             f"llama-{LLAMA_CPP_VERSION}-bin-win-cuda-12.4-x64.zip"
         ),
-        size_bytes=250_464_283,
-        sha256="81c2ff62e14b549cd5c766ccdd5c61f09e821a171655c3047bdccfddc2d1a1e2",
+        size_bytes=253_869_799,
+        sha256="3c806a6ceccc3dae1c743ceb1a1fb2cce5b76f40bfbd4c6b7b8afb6ef45a5807",
     ),
     DownloadArtifact(
         label="CUDA 12.4 运行库",
