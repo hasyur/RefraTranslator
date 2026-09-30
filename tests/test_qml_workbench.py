@@ -949,13 +949,30 @@ def test_real_profile_dropdown_switches_and_restores_runtime_state(
     assert window is not None
     selector = window.findChild(QObject, "homeProfileSelector")
     assert isinstance(selector, QQuickItem)
+    profile_card = window.findChild(QObject, "activeProfileCard")
+    profile_name = window.findChild(QObject, "activeProfileName")
+    assert isinstance(profile_card, QQuickItem)
+    assert isinstance(profile_name, QQuickItem)
     assert controller.profileNames == ["Galgame A", "Galgame B"]
     assert controller.currentProfileIndex == 0
     assert selector.property("currentIndex") == 0
     activated_indices: list[int] = []
     selector.activated.connect(activated_indices.append)
 
+    def assert_active_profile(name: str) -> None:
+        visible_text = [
+            item.property("text")
+            for item in profile_card.findChildren(QQuickItem)
+            if item.isVisible() and item.property("text") is not None
+        ]
+        assert sorted(visible_text) == sorted(["ACTIVE PROFILE", name])
+        assert profile_name.property("text") == name
+        assert profile_name.property("font").pixelSize() == (
+            selector.property("font").pixelSize()
+        )
+
     def assert_profile_a() -> None:
+        assert_active_profile("Galgame A")
         assert controller.currentProfileId == "galgame-a"
         assert controller.captureLeft == 10
         assert controller.captureTop == 20
@@ -971,6 +988,7 @@ def test_real_profile_dropdown_switches_and_restores_runtime_state(
         assert selector.property("currentIndex") == 0
 
     def assert_profile_b() -> None:
+        assert_active_profile("Galgame B")
         assert controller.currentProfileId == "galgame-b"
         assert controller.captureLeft == 40
         assert controller.captureTop == 50

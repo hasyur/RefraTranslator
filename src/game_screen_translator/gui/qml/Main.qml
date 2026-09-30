@@ -295,8 +295,9 @@ ApplicationWindow {
                 Item { Layout.fillHeight: true }
 
                 Rectangle {
+                    objectName: "activeProfileCard"
                     Layout.fillWidth: true
-                    implicitHeight: 92
+                    implicitHeight: 72
                     color: "transparent"
                     border.color: prism.line
                     ColumnLayout {
@@ -311,20 +312,13 @@ ApplicationWindow {
                             font.letterSpacing: 1
                         }
                         Text {
+                            objectName: "activeProfileName"
                             text: root.boundWorkbench.currentProfileName
                             color: prism.text
                             font.family: prism.uiFontFor(text)
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                             font.weight: Font.Medium
                             elide: Text.ElideRight
-                            Layout.fillWidth: true
-                        }
-                        Text {
-                            text: root.boundWorkbench.hasProfile ? root.boundWorkbench.currentProfileId : "配置必需"
-                            color: root.boundWorkbench.hasProfile ? prism.accent : prism.amber
-                            font.family: prism.monoFontFor(text)
-                            font.pixelSize: 8
-                            elide: Text.ElideMiddle
                             Layout.fillWidth: true
                         }
                     }
