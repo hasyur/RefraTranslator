@@ -84,7 +84,10 @@ Item {
                                 height: Math.max(2, (modelData.bottom - modelData.top)
                                                     * overlayCanvas.height / lastRunCanvas.canvasHeight)
                                 color: Qt.rgba(0, 0, 0, maskOpacity)
-                                border.color: root.theme.accent
+                                border.color: Qt.rgba(root.theme.accent.r,
+                                                      root.theme.accent.g,
+                                                      root.theme.accent.b,
+                                                      0.22)
                                 border.width: 1
                                 Text {
                                     anchors.fill: parent

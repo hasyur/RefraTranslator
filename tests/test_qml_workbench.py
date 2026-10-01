@@ -2400,17 +2400,27 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     app.processEvents()
     window = host.window
     assert window is not None
+    window.resize(980, 700)
+    app.processEvents()
     assert window.width() >= 980
     assert window.height() >= 700
 
+    home_scroll = _find_quick_item(window, "homePrimaryScroll")
+    home_metrics_content = _find_quick_item(window, "homeLastRunMetricsContent")
     home_metrics = window.findChild(QObject, "homeLastRunMetrics")
+    home_status = window.findChild(QObject, "homeLastRunStatus")
     home_peak_cards = window.findChild(QObject, "homePeakCards")
+    home_footnote = window.findChild(QObject, "homeLastRunFootnote")
     home_ocr_peak_group = window.findChild(QObject, "homeOcrPeakGroup")
     home_llm_peak_group = window.findChild(QObject, "homeLlmPeakGroup")
     home_ocr_peak = window.findChild(QObject, "homeOcrPeakValue")
     home_llm_peak = window.findChild(QObject, "homeLlmPeakValue")
+    assert home_scroll is not None
+    assert home_metrics_content is not None
     assert home_metrics is not None
+    assert home_status is not None
     assert home_peak_cards is not None
+    assert home_footnote is not None
     assert home_ocr_peak_group is not None
     assert home_llm_peak_group is not None
     assert home_ocr_peak is not None
@@ -2425,6 +2435,29 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     assert home_llm_peak_group.property("color") is None
     assert home_ocr_peak_group.property("height") >= 142
     assert home_llm_peak_group.property("height") >= 142
+    assert float(home_metrics.property("height")) >= float(
+        home_metrics_content.property("implicitHeight")
+    ) + 32
+    for child in (home_status, home_peak_cards, home_footnote):
+        child_y = child.mapToItem(home_metrics, QPointF(0, 0)).y()
+        assert child_y >= -1e-3
+        assert child_y + float(child.property("height")) <= float(
+            home_metrics.property("height")
+        ) + 1e-3
+    assert float(home_scroll.property("contentHeight")) > float(
+        home_scroll.property("height")
+    )
+    home_scroll.setProperty(
+        "contentY",
+        float(home_scroll.property("contentHeight"))
+        - float(home_scroll.property("height")),
+    )
+    app.processEvents()
+    footnote_y = home_footnote.mapToItem(home_scroll, QPointF(0, 0)).y()
+    assert footnote_y >= -1e-3
+    assert footnote_y + float(home_footnote.property("height")) <= float(
+        home_scroll.property("height")
+    ) + 1e-3
 
     controller.setPage("OCR")
     app.processEvents()
@@ -2437,6 +2470,8 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     assert translation_list is not None
     assert translation_list.property("visible") is True
     controller.setPage("OVERLAY")
+    app.processEvents()
+    controller.setOverlayOpacity(0.1)
     app.processEvents()
     canvas = window.findChild(QObject, "overlayLastRunCanvas")
     canvas_item = _find_quick_item(window, "overlayLastRunCanvas")
@@ -2476,12 +2511,44 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
             controller.overlayOpacity,
             abs_tol=1 / 255,
         )
+        frame_color = QQmlProperty(entry, "border.color").read()
+        assert 0 < frame_color.alphaF() <= 0.25
+    controller.setOverlayOpacity(0.8)
+    app.processEvents()
+    assert all(
+        math.isclose(
+            float(entry.property("maskOpacity")),
+            0.8,
+            abs_tol=1e-6,
+        )
+        for entry in entries
+    )
     assert qml_warnings == []
     controller.setPage("CACHE")
     app.processEvents()
     cache_hits = window.findChild(QObject, "cacheLastRunHits")
+    cache_summary = _find_quick_item(window, "cacheSummaryMetrics")
+    cache_hint = _find_quick_item(window, "cacheSummarySourceHint")
     assert cache_hits is not None
+    assert cache_summary is not None
+    assert cache_hint is not None
     assert cache_hits.property("visible") is True
+    assert cache_hint.property("text") == (
+        "上方为 Profile SQLite 累计统计；上次运行命中列表仅代表最近一次运行。"
+    )
+    assert cache_summary.mapToItem(cache_hits, QPointF(0, 0)).y() < 0
+    unavailable_titles = _find_quick_items(window, "unavailableStateTitle")
+    assert any(
+        title.property("text") == "暂不支持浏览自动缓存明细"
+        for title in unavailable_titles
+    )
+
+    window.resize(1280, 820)
+    controller.setPage("HOME")
+    app.processEvents()
+    assert float(home_scroll.property("contentHeight")) <= float(
+        home_scroll.property("height")
+    )
     host.shutdown()
 
 
@@ -2526,6 +2593,63 @@ def test_real_overlay_snapshot_keeps_portrait_canvas_contain_fit(
     host.shutdown()
 
 
+def test_page_subtitle_stays_clear_of_dividers_across_pages_themes_and_sizes(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+    window = host.window
+    assert window is not None
+    header = _find_quick_item(window, "pageHeaderBar")
+    underline = _find_quick_item(window, "pageHeaderUnderline")
+    subtitle = _find_quick_item(window, "pageSubtitle")
+    assert header is not None
+    assert underline is not None
+    assert subtitle is not None
+
+    pages = ("HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS")
+    underline_points = (
+        QPointF(0, 0),
+        QPointF(float(underline.property("width")), 0),
+        QPointF(0, float(underline.property("height"))),
+        QPointF(
+            float(underline.property("width")),
+            float(underline.property("height")),
+        ),
+    )
+    for width, height in ((980, 700), (1280, 820)):
+        window.resize(width, height)
+        app.processEvents()
+        for theme_name in ("dark", "light"):
+            controller.setTheme(theme_name)
+            app.processEvents()
+            for page in pages:
+                controller.setPage(page)
+                app.processEvents()
+                subtitle_top = subtitle.mapToItem(header, QPointF(0, 0)).y()
+                subtitle_bottom = subtitle_top + float(subtitle.property("height"))
+                underline_bottom = max(
+                    underline.mapToItem(header, point).y()
+                    for point in underline_points
+                )
+                assert subtitle_top >= underline_bottom + 3
+                assert subtitle_bottom <= float(header.property("height")) - 4
+
+    host.shutdown()
+
+
 def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     tmp_path: Path,
 ) -> None:
@@ -2553,6 +2677,7 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     cyan_edge = window.findChild(QObject, "pageTitleCyanEdge")
     spectrum_edge = window.findChild(QObject, "pageTitleSpectrumEdge")
     header_underline = window.findChild(QObject, "pageHeaderUnderline")
+    page_subtitle = window.findChild(QObject, "pageSubtitle")
     cyan_counter_rotation = window.findChild(
         QObject,
         "pageTitleCyanCounterRotation",
@@ -2573,6 +2698,7 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     assert cyan_edge is not None
     assert spectrum_edge is not None
     assert header_underline is not None
+    assert page_subtitle is not None
     assert cyan_counter_rotation is not None
     assert spectrum_counter_rotation is not None
     assert header_bar is not None
@@ -2648,6 +2774,26 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
         assert title_light.property("text") == light_text
         assert title_heavy.property("text") == heavy_text
 
+    def assert_subtitle_clearance() -> None:
+        subtitle_top = page_subtitle.mapToItem(header_bar, QPointF(0, 0)).y()
+        subtitle_bottom = subtitle_top + float(page_subtitle.property("height"))
+        header_height = float(header_bar.property("height"))
+        assert subtitle_bottom <= header_height - 4
+        underline_points = (
+            QPointF(0, 0),
+            QPointF(float(header_underline.property("width")), 0),
+            QPointF(0, float(header_underline.property("height"))),
+            QPointF(
+                float(header_underline.property("width")),
+                float(header_underline.property("height")),
+            ),
+        )
+        underline_bottom = max(
+            header_underline.mapToItem(header_bar, point).y()
+            for point in underline_points
+        )
+        assert subtitle_top >= underline_bottom + 3
+
     def assert_title_inside_container() -> None:
         for segment in (title_light, title_heavy):
             assert segment.property("y") >= 0
@@ -2671,21 +2817,29 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
         assert heavy_right + 8 <= save_left
 
     assert_title_inside_container()
-
     window.resize(980, 700)
+    controller.setTheme("dark")
     controller.setPage("OVERLAY")
     app.processEvents()
     compact_title_size = title_light.property("font").pixelSize()
     assert 60 <= compact_title_size < 80
     assert_title_inside_container()
+    assert_subtitle_clearance()
 
     window.resize(1280, 820)
     controller.setPage("HOME")
     app.processEvents()
     assert title_light.property("font").pixelSize() == 80
     assert_title_inside_container()
+    assert_subtitle_clearance()
 
     QTest.qWait(820)
+    refraction_states: list[bool] = []
+    title.refractionRunningChanged.connect(
+        lambda *_args: refraction_states.append(
+            bool(title.property("refractionRunning"))
+        )
+    )
     controller.setPage("CAPTURE")
     app.processEvents()
     QTest.qWait(1)
@@ -2736,6 +2890,7 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     assert float(page_content.property("opacity")) == 1
     assert primary_panel.property("entryRunning") is True
     assert secondary_panel.property("entryRunning") is True
+    assert True in refraction_states
     QTest.qWait(90)
     app.processEvents()
     primary_offset = float(primary_panel.property("visualOffsetX"))
@@ -2743,7 +2898,14 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     assert 0 <= primary_offset < secondary_offset <= 18
     assert 0 < float(primary_panel.property("opacity")) < 1
     assert 0 < float(window.findChild(QObject, "pageHeaderSlice").property("opacity")) < 1
-    assert title.property("refractionRunning") is True
+    refraction_deadline = time.monotonic() + 0.25
+    while bool(title.property("refractionRunning")) and time.monotonic() < refraction_deadline:
+        QTest.qWait(5)
+        app.processEvents()
+    assert title.property("refractionRunning") is False
+    assert False in refraction_states
+    assert float(title.property("refractionShift")) == 3
+    assert float(title.property("refractionEnergy")) == 0
     assert 0 < float(tertiary_rail.property("opacity")) < theme.property(
         "tertiaryRailOpacity"
     )

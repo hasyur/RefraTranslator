@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -230,6 +231,44 @@ def test_controller_reloads_snapshot_when_live_process_finishes(
 
     assert controller.lastRunAvailable is True
     assert controller.lastRunOcrResults[0]["sourceText"] == "结束后原文"
+    controller.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("created_at", "convert_to_local"),
+    (
+        ("2026-02-03T04:05:06+00:00", True),
+        ("2026-02-03T04:05:06+05:30", True),
+        ("2026-02-03T04:05:06Z", True),
+        ("legacy-run-time", False),
+    ),
+)
+def test_controller_formats_snapshot_time_for_local_display_and_keeps_invalid_text(
+    tmp_path: Path,
+    created_at: str,
+    convert_to_local: bool,
+) -> None:
+    controller, _config_path = _controller_with_profile(tmp_path)
+    profile = controller._profile
+    assert profile is not None
+    snapshot = new_snapshot(
+        (SnapshotEntry("a", 1, "原文", "译文", 0.9, (1, 2, 30, 40)),),
+        (),
+        ocr_peak_seconds=0.2,
+        llm_peak_seconds=1.2,
+    )
+    save_snapshot(profile.directory, replace(snapshot, created_at=created_at))
+    controller._reload_last_run_snapshot()
+
+    if convert_to_local:
+        expected_time = datetime.fromisoformat(created_at).astimezone().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        assert "T" not in expected_time
+        assert "+05:30" not in expected_time
+    else:
+        expected_time = created_at
+    assert controller.lastRunStatus == f"上次运行：{expected_time}"
     controller.shutdown()
 
 

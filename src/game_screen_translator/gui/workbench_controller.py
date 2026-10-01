@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -621,7 +622,13 @@ class WorkbenchController(QObject):
             return "请先选择一个 Profile"
         if self._last_run_snapshot is None:
             return "尚无上次正常且有效运行结果"
-        return f"上次运行：{self._last_run_snapshot.created_at}"
+        created_at = self._last_run_snapshot.created_at
+        try:
+            local_time = datetime.fromisoformat(created_at).astimezone()
+            display_time = local_time.strftime("%Y-%m-%d %H:%M:%S")
+        except (OverflowError, OSError, ValueError):
+            display_time = created_at
+        return f"上次运行：{display_time}"
 
     @Property(list, notify=stateChanged)
     def lastRunOcrResults(self) -> list[dict[str, object]]:

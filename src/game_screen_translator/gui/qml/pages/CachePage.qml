@@ -166,7 +166,8 @@ Item {
                         }
                     }
                     Text {
-                        text: "下方累计统计来自 Profile SQLite；上方仅代表最近一次运行。"
+                        objectName: "cacheSummarySourceHint"
+                        text: "上方为 Profile SQLite 累计统计；上次运行命中列表仅代表最近一次运行。"
                         color: root.theme.textDim
                         font.family: root.theme.uiFontFor(text)
                         font.pixelSize: 11
@@ -248,7 +249,7 @@ Item {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             eyebrow: "ENTRY LIST · UNAVAILABLE"
-                            title: "控制器只提供统计数据"
+                            title: "暂不支持浏览自动缓存明细"
                             detail: "自动缓存仍由现有 SQLite 路径管理；本工作台暂不浏览或改写记录。"
                         }
                         Text {

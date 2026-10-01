@@ -65,9 +65,21 @@ Item {
             Layout.fillHeight: true
             Layout.minimumWidth: 390
 
-            ColumnLayout {
+            Flickable {
+                objectName: "homePrimaryScroll"
                 anchors.fill: parent
-                spacing: 18
+                contentWidth: width
+                contentHeight: homePrimaryContent.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                ColumnLayout {
+                    id: homePrimaryContent
+                    objectName: "homePrimaryContent"
+                    width: parent.width
+                    height: implicitHeight
+                    spacing: 18
 
                 SectionHeader {
                     theme: root.theme
@@ -222,10 +234,15 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.minimumHeight: 196
-                    implicitHeight: 196
+                    implicitHeight: Math.max(
+                        196,
+                        homeLastRunMetricsContent.implicitHeight + 32
+                    )
                     color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.025)
                     border.color: root.theme.line
                     ColumnLayout {
+                        id: homeLastRunMetricsContent
+                        objectName: "homeLastRunMetricsContent"
                         anchors.fill: parent
                         anchors.margins: 16
                         spacing: 12
@@ -311,6 +328,7 @@ Item {
                             }
                         }
                         Text {
+                            objectName: "homeLastRunFootnote"
                             text: "仅统计上次正常且有效运行；未产生的单项显示“未产生”。"
                             color: root.theme.textDim
                             font.family: root.theme.uiFontFor(text)
@@ -320,6 +338,7 @@ Item {
                         }
                     }
                 }
+            }
             }
         }
 

@@ -363,7 +363,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.preferredHeight: Math.max(
                         root.height <= 820 ? 116 : 142,
-                        prism.displayTitleSize(root.width) + 52
+                        pageHeaderTextColumn.implicitHeight + 16
                     )
                     color: prism.dark ? "#c20b0f13" : "#d8d7dde0"
                     border.color: prism.line
@@ -375,6 +375,7 @@ ApplicationWindow {
                         spacing: 14
 
                         ColumnLayout {
+                            id: pageHeaderTextColumn
                             Layout.fillWidth: true
                             spacing: 0
                             Text {
@@ -422,10 +423,12 @@ ApplicationWindow {
                                 }
                             }
                             Text {
+                                objectName: "pageSubtitle"
                                 text: root.pageSubtitle(root.boundWorkbench.currentPage)
                                 color: prism.textSoft
                                 font.family: prism.uiFontFor(text)
                                 font.pixelSize: 11
+                                Layout.topMargin: 10
                             }
                         }
 
