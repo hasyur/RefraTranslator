@@ -25,7 +25,7 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtGui import QColor
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQml import QQmlApplicationEngine, QQmlProperty
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
@@ -1811,8 +1811,12 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
     for stepper in steppers:
         width = float(stepper.property("width"))
         compact_width = float(stepper.property("compactWidth"))
-        assert compact_width in {176.0, 200.0}
-        assert 176 <= width <= 200
+        if str(stepper.property("settingKey")).startswith("capture-"):
+            assert stepper.property("compact") is True
+            assert compact_width == 144
+        else:
+            assert stepper.property("compact") is False
+            assert compact_width in {176.0, 200.0}
         assert width == compact_width
 
     window.resize(980, 700)
@@ -1912,7 +1916,7 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
             - (stepper.property("width") - increase_rect[0] - increase_rect[2])
         ) <= 0.5
 
-        if stepper.property("suffix"):
+        if stepper.property("suffix") and not stepper.property("compact"):
             assert suffix.property("visible") is True
             assert suffix.parentItem() == editor
             suffix_origin = suffix.mapToItem(editor, QPointF(0, 0))
@@ -1965,6 +1969,124 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
                 checked_names.add(str(stepper.property("accessibleName")))
         assert checked_names == expected_names
     host.shutdown()
+
+
+@pytest.mark.parametrize("theme_name", ["dark", "light"])
+@pytest.mark.parametrize("window_size", [(980, 700), (1280, 820), (1600, 900)])
+def test_capture_fields_use_two_rows_and_keep_geometry_clear(
+    tmp_path: Path,
+    theme_name: str,
+    window_size: tuple[int, int],
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(True)
+    controller.setCaptureRegion(30, 40, 640, 180)
+    controller.setPage("CAPTURE")
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        host.show()
+        window = host.window
+        assert window is not None
+        window.resize(*window_size)
+        panel = _find_quick_item(window, "captureSecondaryPanel")
+        assert panel is not None
+        _wait_for_page_layout(window, panel, app)
+        steppers = {
+            str(item.property("settingKey")): item
+            for item in panel.findChildren(QQuickItem)
+            if item.metaObject().indexOfProperty("compactWidth") >= 0
+        }
+        assert set(steppers) == {
+            "capture-left", "capture-top", "capture-width", "capture-height",
+        }
+        origins = {
+            key: stepper.mapToScene(QPointF(0, 0))
+            for key, stepper in steppers.items()
+        }
+        left = origins["capture-left"]
+        top = origins["capture-top"]
+        width = origins["capture-width"]
+        height = origins["capture-height"]
+        assert math.isclose(left.y(), top.y(), abs_tol=0.5)
+        assert math.isclose(width.y(), height.y(), abs_tol=0.5)
+        assert math.isclose(left.x(), width.x(), abs_tol=0.5)
+        assert math.isclose(top.x(), height.x(), abs_tol=0.5)
+        assert left.x() + steppers["capture-left"].width() < top.x()
+        assert left.y() + steppers["capture-left"].height() < width.y()
+
+        panel_origin = panel.mapToScene(QPointF(0, 0))
+        for key, stepper in steppers.items():
+            origin = origins[key]
+            assert stepper.width() == 144
+            assert origin.x() >= panel_origin.x()
+            assert origin.y() >= panel_origin.y()
+            assert origin.x() + stepper.width() <= panel_origin.x() + panel.width()
+            assert origin.y() + stepper.height() <= panel_origin.y() + panel.height()
+            editor = stepper.findChild(QQuickItem, "numberStepperEditor")
+            suffix = stepper.findChild(QQuickItem, "numberStepperSuffix")
+            assert editor is not None
+            assert suffix is not None
+            editor.forceActiveFocus()
+            editor.setProperty("text", "32768")
+            app.processEvents()
+            assert (
+                float(editor.property("contentWidth"))
+                + float(editor.property("leftPadding"))
+                + float(editor.property("rightPadding"))
+                <= editor.width()
+            )
+            assert suffix.property("visible") is False
+            editor.setProperty("text", str(stepper.property("value")))
+
+        # Click each narrow button and verify it still edits the correct field.
+        controller.setCaptureRegion(30, 40, 640, 180)
+        app.processEvents()
+        for stepper in steppers.values():
+            original = int(stepper.property("value"))
+            for button_name, expected in (
+                ("numberStepperIncrease", original + 10),
+                ("numberStepperDecrease", original),
+            ):
+                button = stepper.findChild(QQuickItem, button_name)
+                assert button is not None
+                point = button.mapToScene(QPointF(button.width() / 2, button.height() / 2))
+                QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=point.toPoint())
+                app.processEvents()
+                assert stepper.property("value") == expected
+
+        theme = window.findChild(QObject, "prismTheme")
+        surface = _find_quick_item(window, "captureGeometrySurface")
+        outline = _find_quick_item(window, "captureDisplayOutline")
+        preview = _find_quick_item(window, "captureRegionPreview")
+        stage = _find_quick_item(window, "opticalStage")
+        assert all(item is not None for item in (theme, surface, outline, preview, stage))
+        assert surface.property("color") == theme.property("panel")
+        assert surface.property("color").alphaF() == 1
+        assert QQmlProperty(outline, "border.color").read() == theme.property("line")
+        assert QQmlProperty(preview, "border.color").read() == theme.property("accent")
+        assert QQmlProperty(preview, "border.width").read() == 2
+        assert preview.property("visible") is True
+        assert 0 < float(stage.property("opacity")) < 0.2
+
+        controller.useFullScreen()
+        app.processEvents()
+        assert preview.property("visible") is False
+        assert all(stepper.property("enabled") is False for stepper in steppers.values())
+        controller.setPage("HOME")
+        app.processEvents()
+        assert stage.property("opacity") == theme.property("opticalStageOpacity")
+    finally:
+        host.shutdown()
 
 
 def test_capture_geometry_projects_bottom_right_region_against_full_display(

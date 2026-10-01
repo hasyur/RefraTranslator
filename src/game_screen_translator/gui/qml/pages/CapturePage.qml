@@ -100,9 +100,10 @@ Item {
                 }
 
                 Rectangle {
+                    objectName: "captureGeometrySurface"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.025)
+                    color: root.theme.panel
                     border.color: root.theme.line
 
                     Item {
@@ -112,9 +113,10 @@ Item {
                         anchors.margins: 28
 
                         Rectangle {
+                            objectName: "captureDisplayOutline"
                             anchors.fill: parent
                             color: "transparent"
-                            border.color: root.theme.lineStrong
+                            border.color: root.theme.line
                             border.width: 1
                         }
 
@@ -178,7 +180,7 @@ Item {
             transitionSerial: root.transitionSerial
             motionEnabled: root.pageMotionEnabled && root.visible
             Layout.preferredWidth: 344
-            Layout.minimumWidth: 310
+            Layout.minimumWidth: 344
             Layout.fillHeight: true
 
             Flickable {
@@ -258,89 +260,124 @@ Item {
                         }
                     }
 
-                    SettingLabel {
-                        theme: root.theme
-                        title: "左边界"
-                        meta: "PIXELS"
-                        description: "设置自定义捕获区域的左侧位置。"
-                        settingKey: "capture-left"
-                    }
-                    NumberStepper {
-                        theme: root.theme
-                        accessibleName: "捕获区域左边界"
-                        settingDescription: "设置自定义捕获区域的左侧位置。"
-                        settingKey: "capture-left"
-                        value: root.workbench.captureLeft
-                        minimum: 0
-                        maximum: 32768
-                        stepSize: 10
-                        suffix: "px"
-                        enabled: root.workbench.hasProfile && root.workbench.customRegion
+                    GridLayout {
+                        objectName: "captureRegionFields"
                         Layout.fillWidth: true
-                        onEdited: value => root.updateRegion("left", value)
-                    }
-                    SettingLabel {
-                        theme: root.theme
-                        title: "上边界"
-                        meta: "PIXELS"
-                        description: "设置自定义捕获区域的上侧位置。"
-                        settingKey: "capture-top"
-                    }
-                    NumberStepper {
-                        theme: root.theme
-                        accessibleName: "捕获区域上边界"
-                        settingDescription: "设置自定义捕获区域的上侧位置。"
-                        settingKey: "capture-top"
-                        value: root.workbench.captureTop
-                        minimum: 0
-                        maximum: 32768
-                        stepSize: 10
-                        suffix: "px"
-                        enabled: root.workbench.hasProfile && root.workbench.customRegion
-                        Layout.fillWidth: true
-                        onEdited: value => root.updateRegion("top", value)
-                    }
-                    SettingLabel {
-                        theme: root.theme
-                        title: "宽度"
-                        meta: "PIXELS"
-                        description: "设置自定义捕获区域的宽度。"
-                        settingKey: "capture-width"
-                    }
-                    NumberStepper {
-                        theme: root.theme
-                        accessibleName: "捕获区域宽度"
-                        settingDescription: "设置自定义捕获区域的宽度。"
-                        settingKey: "capture-width"
-                        value: root.workbench.captureWidth
-                        minimum: 1
-                        maximum: 32768
-                        stepSize: 10
-                        suffix: "px"
-                        enabled: root.workbench.hasProfile && root.workbench.customRegion
-                        Layout.fillWidth: true
-                        onEdited: value => root.updateRegion("width", value)
-                    }
-                    SettingLabel {
-                        theme: root.theme
-                        title: "高度"
-                        meta: "PIXELS"
-                        description: "设置自定义捕获区域的高度。"
-                        settingKey: "capture-height"
-                    }
-                    NumberStepper {
-                        theme: root.theme
-                        accessibleName: "捕获区域高度"
-                        settingDescription: "设置自定义捕获区域的高度。"
-                        settingKey: "capture-height"
-                        value: root.workbench.captureHeight
-                        minimum: 1
-                        maximum: 32768
-                        stepSize: 10
-                        suffix: "px"
-                        enabled: root.workbench.hasProfile && root.workbench.customRegion
-                        Layout.fillWidth: true
-                        onEdited: value => root.updateRegion("height", value)
+                        columns: 2
+                        columnSpacing: 12
+                        rowSpacing: 12
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            SettingLabel {
+                                theme: root.theme
+                                title: "左边界"
+                                meta: "PIXELS"
+                                description: "设置自定义捕获区域的左侧位置。"
+                                settingKey: "capture-left"
+                            }
+                            NumberStepper {
+                                theme: root.theme
+                                compact: true
+                                accessibleName: "捕获区域左边界"
+                                settingDescription: "设置自定义捕获区域的左侧位置。"
+                                settingKey: "capture-left"
+                                value: root.workbench.captureLeft
+                                minimum: 0
+                                maximum: 32768
+                                stepSize: 10
+                                suffix: "px"
+                                enabled: root.workbench.hasProfile && root.workbench.customRegion
+                                Layout.fillWidth: true
+                                onEdited: value => root.updateRegion("left", value)
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            SettingLabel {
+                                theme: root.theme
+                                title: "上边界"
+                                meta: "PIXELS"
+                                description: "设置自定义捕获区域的上侧位置。"
+                                settingKey: "capture-top"
+                            }
+                            NumberStepper {
+                                theme: root.theme
+                                compact: true
+                                accessibleName: "捕获区域上边界"
+                                settingDescription: "设置自定义捕获区域的上侧位置。"
+                                settingKey: "capture-top"
+                                value: root.workbench.captureTop
+                                minimum: 0
+                                maximum: 32768
+                                stepSize: 10
+                                suffix: "px"
+                                enabled: root.workbench.hasProfile && root.workbench.customRegion
+                                Layout.fillWidth: true
+                                onEdited: value => root.updateRegion("top", value)
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            SettingLabel {
+                                theme: root.theme
+                                title: "宽度"
+                                meta: "PIXELS"
+                                description: "设置自定义捕获区域的宽度。"
+                                settingKey: "capture-width"
+                            }
+                            NumberStepper {
+                                theme: root.theme
+                                compact: true
+                                accessibleName: "捕获区域宽度"
+                                settingDescription: "设置自定义捕获区域的宽度。"
+                                settingKey: "capture-width"
+                                value: root.workbench.captureWidth
+                                minimum: 1
+                                maximum: 32768
+                                stepSize: 10
+                                suffix: "px"
+                                enabled: root.workbench.hasProfile && root.workbench.customRegion
+                                Layout.fillWidth: true
+                                onEdited: value => root.updateRegion("width", value)
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            SettingLabel {
+                                theme: root.theme
+                                title: "高度"
+                                meta: "PIXELS"
+                                description: "设置自定义捕获区域的高度。"
+                                settingKey: "capture-height"
+                            }
+                            NumberStepper {
+                                theme: root.theme
+                                compact: true
+                                accessibleName: "捕获区域高度"
+                                settingDescription: "设置自定义捕获区域的高度。"
+                                settingKey: "capture-height"
+                                value: root.workbench.captureHeight
+                                minimum: 1
+                                maximum: 32768
+                                stepSize: 10
+                                suffix: "px"
+                                enabled: root.workbench.hasProfile && root.workbench.customRegion
+                                Layout.fillWidth: true
+                                onEdited: value => root.updateRegion("height", value)
+                            }
+                        }
                     }
 
                 }

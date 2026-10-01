@@ -351,6 +351,7 @@ ApplicationWindow {
                 reducedMotion: root.boundWorkbench.reducedMotion
                 motionEnabled: root.animationsRunning
                 opacity: prism.opticalStageOpacity
+                         * (page === "CAPTURE" ? 0.25 : 1)
             }
 
             ColumnLayout {

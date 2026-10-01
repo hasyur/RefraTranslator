@@ -14,7 +14,8 @@ RowLayout {
     property string accessibleName: ""
     property string settingDescription: ""
     property string settingKey: ""
-    readonly property real compactWidth: suffix.length > 0 ? 200 : 176
+    property bool compact: false
+    readonly property real compactWidth: compact ? 144 : suffix.length > 0 ? 200 : 176
     readonly property real suffixSpacing: 5
     signal edited(int value)
 
@@ -34,8 +35,8 @@ RowLayout {
         objectName: "numberStepperDecrease"
         theme: root.theme
         text: "−"
-        implicitWidth: 42
-        Layout.preferredWidth: 42
+        implicitWidth: root.compact ? 32 : 42
+        Layout.preferredWidth: implicitWidth
         enabled: root.enabled && root.value > root.minimum
         onClicked: root.submit(root.value - root.stepSize)
     }
@@ -44,15 +45,15 @@ RowLayout {
         id: editor
         objectName: "numberStepperEditor"
         Layout.fillWidth: true
-        Layout.minimumWidth: root.suffix.length > 0 ? 116 : 92
+        Layout.minimumWidth: root.compact ? 80 : root.suffix.length > 0 ? 116 : 92
         implicitHeight: 42
         text: String(root.value)
         color: root.theme.text
         clip: true
-        leftPadding: 8
+        leftPadding: root.compact ? 6 : 8
         rightPadding: suffixLabel.visible
                       ? 8 + suffixLabel.implicitWidth + root.suffixSpacing
-                      : 8
+                      : leftPadding
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         font.family: root.theme.monoFontFor(text)
@@ -69,7 +70,7 @@ RowLayout {
         Text {
             id: suffixLabel
             objectName: "numberStepperSuffix"
-            visible: root.suffix.length > 0
+            visible: root.suffix.length > 0 && !root.compact
             x: editor.leftPadding
                + Math.max(0, (editor.width
                               - editor.leftPadding
@@ -89,8 +90,8 @@ RowLayout {
         objectName: "numberStepperIncrease"
         theme: root.theme
         text: "+"
-        implicitWidth: 42
-        Layout.preferredWidth: 42
+        implicitWidth: root.compact ? 32 : 42
+        Layout.preferredWidth: implicitWidth
         enabled: root.enabled && root.value < root.maximum
         onClicked: root.submit(root.value + root.stepSize)
     }
