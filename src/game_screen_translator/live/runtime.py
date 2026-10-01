@@ -1093,12 +1093,14 @@ class LiveController:
             return
         self._observe_capture_geometry(frame)
         self._sync_overlay_geometry()
+        self._expire_missing_tracks(now)
         if frame is None:
             self._mark_capture_waiting(now)
+            self._publish_scene(self._latest_frame, self._tracker.visible_tracks)
+            self._tick_dynamic_roi_without_frame(now)
             return
 
         self._mark_capture_resumed(now)
-        self._expire_missing_tracks(now)
         self._queue_untranslated_visible_sources()
         self._dispatch_translation_work()
         self._latest_frame = frame
@@ -1269,6 +1271,12 @@ class LiveController:
                 self._submit_ocr(frame, triggered_at=now)
             return
 
+        # A full-frame OCR task is outside the ROI scheduler's in-flight
+        # slot. Do not let observe dispatch an unowned ROI job while it
+        # occupies the controller's single OCR future.
+        if self._ocr_future is not None and self._active_roi_job is None:
+            return
+
         job = scheduler.observe(frame, now)
         if job is not None:
             self._submit_roi_ocr(job)
@@ -1276,10 +1284,59 @@ class LiveController:
             self._pending_roi_empty_retry
             and not scheduler.busy
             and not scheduler.has_pending
+            and self._ocr_future is None
         ):
-            # The changed pixels returned to the accepted baseline before the
-            # retry ran. Do not turn the next unrelated local scan into a retry.
-            self._pending_roi_empty_retry = False
+            # Preserve the one confirmation requested by the empty ROI result
+            # even when Latest Wins drops its pixel work at the accepted baseline.
+            self._submit_ocr(frame, triggered_at=now)
+
+    def _observe_latest_dynamic_roi_frame(self, now: float) -> None:
+        scheduler = self._roi_scheduler
+        frame = self._latest_frame
+        if (
+            self._finalizing
+            or self._shutting_down
+            or scheduler is None
+            or not scheduler.primed
+            or frame is None
+            or self._ocr_future is not None
+            or self._active_roi_job is not None
+            or scheduler.busy
+        ):
+            return
+        job = scheduler.observe(frame, now)
+        if job is not None:
+            self._submit_roi_ocr(job)
+
+    def _tick_dynamic_roi_without_frame(self, now: float) -> None:
+        scheduler = self._roi_scheduler
+        frame = self._latest_frame
+        if (
+            self._finalizing
+            or self._shutting_down
+            or scheduler is None
+            or not scheduler.primed
+            or frame is None
+            or self._ocr_future is not None
+            or self._active_roi_job is not None
+            or scheduler.busy
+        ):
+            return
+
+        if self._pending_roi_empty_retry:
+            self._observe_latest_dynamic_roi_frame(now)
+            if (
+                self._ocr_future is not None
+                or scheduler.busy
+                or scheduler.has_pending
+            ):
+                return
+            self._submit_ocr(frame, triggered_at=now)
+            return
+        if scheduler.has_pending:
+            job = scheduler.poll(now)
+            if job is not None:
+                self._submit_roi_ocr(job)
 
     def _tick_legacy_ocr(self, frame: np.ndarray, now: float) -> None:
         changed = self._detector.changed(frame)
@@ -1396,7 +1453,15 @@ class LiveController:
         scheduler = self._roi_scheduler
         if scheduler is None:
             raise RuntimeError("动态 ROI 调度器未初始化")
-        anchors = self._active_ocr_lines()
+        empty_retry = (
+            self._pending_roi_empty_retry
+            and not job.proposal.fallback_full_frame
+        )
+        anchors = (
+            self._ocr_line_tracker.visible_tracks
+            if empty_retry
+            else self._active_ocr_lines()
+        )
         frame_height, frame_width = job.frame.shape[:2]
         change_rois = job.proposal.change_rois or job.proposal.rois
         detector_candidates = scheduler.detector.candidate_rois_for_changes(
@@ -1414,10 +1479,6 @@ class LiveController:
                 candidate_coverage_fraction=detector_coverage,
                 candidate_region_count=len(detector_candidates),
             )
-        empty_retry = (
-            self._pending_roi_empty_retry
-            and not job.proposal.fallback_full_frame
-        )
         try:
             plan = planner.plan_proposal(
                 planning_proposal,
@@ -1678,6 +1739,9 @@ class LiveController:
         active_frame = self._active_ocr_frame
         active_epoch = self._active_ocr_epoch
         roi_job = self._active_roi_job
+        scheduler_was_primed = (
+            self._roi_scheduler is not None and self._roi_scheduler.primed
+        )
         roi_plan = self._active_roi_plan
         roi_anchors = self._active_roi_anchors
         roi_empty_retry = self._active_roi_empty_retry
@@ -1736,8 +1800,14 @@ class LiveController:
                 retry_hint = "等待画面变化或定时复查后重试"
             self._control.set_status(f"OCR 暂时失败，{retry_hint}", str(exc))
             print(f"OCR 错误：{exc}", file=sys.stderr)
-            if follow_up is not None:
+            if follow_up is not None and not self._finalizing:
                 self._submit_roi_ocr(follow_up)
+            elif (
+                roi_job is None
+                and scheduler_was_primed
+                and not self._finalizing
+            ):
+                self._observe_latest_dynamic_roi_frame(now)
             return
 
         raw_observations = task_result.observations
@@ -1790,7 +1860,6 @@ class LiveController:
         if (
             contextual_update is not None
             and not roi_plan.fallback_full_frame
-            and not empty_roi_retry_requested
         ):
             self._ocr_line_tracker.observe_partial(
                 contextual_update.observations,
@@ -1901,10 +1970,6 @@ class LiveController:
                     confirmation_requested=confirmation_requested,
                     dispatch_follow_up=not empty_roi_retry_requested,
                 )
-                if empty_roi_retry_requested and not scheduler.has_pending:
-                    # The pixels already returned to the accepted baseline;
-                    # there is no changed local region left to retry.
-                    self._pending_roi_empty_retry = False
             elif not scheduler.primed:
                 if active_frame is None:
                     raise RuntimeError("首次动态 ROI OCR 缺少基准帧")
@@ -1944,6 +2009,12 @@ class LiveController:
             self._refresh_latency_display()
         if follow_up is not None and not self._finalizing:
             self._submit_roi_ocr(follow_up)
+        elif (
+            roi_job is None
+            and scheduler_was_primed
+            and not self._finalizing
+        ):
+            self._observe_latest_dynamic_roi_frame(now)
 
     def _observe_translation_layout(
         self,

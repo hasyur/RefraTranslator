@@ -208,7 +208,7 @@ class StableTextTracker:
                 del self._tracks[track_id]
                 continue
             missing_since = (
-                track.last_seen if track.missing_since is None else track.missing_since
+                track.missing_since if track.missing_since is not None else now
             )
             if now - missing_since >= self.clear_after_seconds:
                 removed.append(track_id)

@@ -183,6 +183,28 @@ def test_missing_ocr_keeps_translation_during_clear_grace_period() -> None:
     assert tracker.visible_tracks == ()
 
 
+def test_first_empty_scan_starts_full_grace_and_repeated_empty_does_not_reset() -> None:
+    tracker = StableTextTracker(
+        "zone",
+        stable_observations=1,
+        stable_seconds=0,
+        clear_after_seconds=0.9,
+    )
+    source = tracker.observe((_ocr("久未刷新的字幕"),), 1.0).stable_sources[0]
+    tracker.apply_translations((TranslationResult(source, "仍应保留"),))
+
+    first_missing = tracker.observe((), 10.0)
+    assert first_missing.visible_tracks[0].missing_since == 10.0
+    assert first_missing.visible_tracks[0].display_translation == "仍应保留"
+
+    repeated_missing = tracker.observe((), 10.5)
+    assert repeated_missing.visible_tracks[0].missing_since == 10.0
+    assert tracker.expire_missing(10.89).removed_track_ids == ()
+
+    expired = tracker.expire_missing(10.9)
+    assert expired.removed_track_ids == (source.track_id,)
+    assert tracker.visible_tracks == ()
+
 def test_missing_track_rejects_late_translation_result() -> None:
     tracker = StableTextTracker(
         "zone",
@@ -227,8 +249,12 @@ def test_track_clears_only_after_an_empty_ocr_observation() -> None:
 
     assert len(tracker.visible_tracks) == 1
     update = tracker.expire(2.0)
+    assert update.removed_track_ids == ()
+    assert tracker.visible_tracks[0].missing_since == 2.0
+    assert tracker.expire_missing(2.89).removed_track_ids == ()
 
-    assert len(update.removed_track_ids) == 1
+    expired = tracker.expire_missing(2.91)
+    assert len(expired.removed_track_ids) == 1
     assert tracker.visible_tracks == ()
 
 

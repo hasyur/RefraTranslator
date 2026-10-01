@@ -9,6 +9,8 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import (
@@ -42,6 +44,14 @@ from game_screen_translator.profiles import (
     save_profile_capture_settings,
     save_profile_runtime_settings,
 )
+
+
+@pytest.fixture(autouse=True)
+def _drain_deferred_qt_deletes() -> None:
+    app = QApplication.instance()
+    if app is not None:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
 
 
 class _SignalRecorder:
@@ -2387,6 +2397,7 @@ def test_real_overlay_snapshot_keeps_portrait_canvas_contain_fit(
     drawn_canvas = _find_quick_item(window, "overlayCanvas")
     assert canvas_item is not None
     assert drawn_canvas is not None
+    _wait_for_page_layout(window, canvas_item, app)
     assert float(drawn_canvas.property("width")) <= float(canvas_item.property("width"))
     assert float(drawn_canvas.property("height")) <= float(canvas_item.property("height"))
     assert float(drawn_canvas.property("height")) > float(drawn_canvas.property("width"))

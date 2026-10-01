@@ -209,12 +209,14 @@ class ScriptedEmptyColorBlockOcr(ColorBlockOcr):
 class FakeOverlay:
     def __init__(self) -> None:
         self.scenes = 0
+        self.last_frame = None
         self.last_tracks = ()
         self.roi_debug_snapshots = []
         self.geometries: list[tuple[int, int, int, int]] = []
 
     def set_scene(self, frame, tracks) -> None:
         self.scenes += 1
+        self.last_frame = frame
         self.last_tracks = tuple(tracks)
 
     def setGeometry(self, x, y, width, height) -> None:  # noqa: N802 - Qt API
@@ -1361,6 +1363,12 @@ def _dynamic_roi_frame(*, changed: bool = False) -> np.ndarray:
     return frame
 
 
+def _dynamic_roi_frame_with_background_change() -> np.ndarray:
+    frame = _dynamic_roi_frame()
+    frame[180:280, 180:620] = 50
+    frame[200:260, 200:600] = 100
+    return frame
+
 def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     monkeypatch,
     capsys,
@@ -1524,7 +1532,13 @@ def test_dynamic_roi_empty_result_retries_once_with_a_wider_fresh_crop(
     clock[0] = 10.05
     controller._tick()
 
-    capture.frame = _dynamic_roi_frame(changed=True)
+    original = next(
+        track for track in controller._tracker.visible_tracks if track.text == "待って。"
+    )
+    controller._tracker.apply_translations(
+        (TranslationResult(original.source(controller._tracker.zone_id), "旧译文"),)
+    )
+    capture.frame = _dynamic_roi_frame_with_background_change()
     clock[0] = 10.3
     controller._tick()
     assert controller._ocr_future is None
@@ -1542,6 +1556,15 @@ def test_dynamic_roi_empty_result_retries_once_with_a_wider_fresh_crop(
     controller._tick()
     assert controller._ocr_future is None
     assert controller._pending_roi_empty_retry
+    waiting = next(
+        track for track in controller._tracker.visible_tracks if track.track_id == original.track_id
+    )
+    outside = next(
+        track for track in controller._tracker.visible_tracks if track.text == "先へ進め。"
+    )
+    assert waiting.missing_since == pytest.approx(10.4)
+    assert waiting.display_translation == "旧译文"
+    assert outside.missing_since is None
     assert "待って。" in [
         track.text for track in controller._ocr_line_tracker.visible_tracks
     ]
@@ -1569,9 +1592,422 @@ def test_dynamic_roi_empty_result_retries_once_with_a_wider_fresh_crop(
     assert controller._roi_empty_retry_recovered_count == 1
     assert controller._roi_full_fallback_count == 0
     assert not controller._pending_roi_empty_retry
-    assert "止まれ。" in [track.text for track in controller._tracker.visible_tracks]
+    restored = next(
+        track for track in controller._tracker.visible_tracks if track.track_id == original.track_id
+    )
+    assert restored.missing_since is None
+    assert restored.translated_text == "旧译文"
+    assert "待って。" in [track.text for track in controller._tracker.visible_tracks]
     controller.close()
 
+
+@pytest.mark.parametrize("retry_recovers", [True, False])
+def test_dynamic_roi_baseline_reversion_keeps_one_retry_confirmation(
+    monkeypatch,
+    retry_recovers: bool,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=99,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            clear_after_ms=100,
+            dynamic_roi_response_target_ms=500,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    overlay = FakeOverlay()
+    browser_overlay = FakeBrowserOverlay()
+
+    class BaselineRetryOcr(ColorBlockOcr):
+        def __init__(self) -> None:
+            super().__init__()
+            self.call_count = 0
+
+        def recognize_frame(self, frame):
+            self.call_count += 1
+            if self.call_count == 2:
+                self.input_shapes.append(tuple(frame.shape))
+                return ()
+            observations = super().recognize_frame(frame)
+            if self.call_count == 3 and not retry_recovers:
+                return tuple(item for item in observations if item.text != "待って。")
+            return observations
+
+    ocr = BaselineRetryOcr()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=overlay,
+        control=FakeControl(),
+        app=app,
+        browser_overlay=browser_overlay,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    try:
+        controller._tick()
+        controller._ocr_future.result(timeout=2)
+        clock[0] = 10.05
+        controller._tick()
+        original = next(
+            track for track in controller._tracker.visible_tracks if track.text == "待って。"
+        )
+        controller._tracker.apply_translations(
+            (TranslationResult(original.source(controller._tracker.zone_id), "旧译文"),)
+        )
+
+        capture.frame = _dynamic_roi_frame_with_background_change()
+        clock[0] = 10.3
+        controller._tick()
+        clock[0] = 10.35
+        controller._tick()
+        assert controller._ocr_future is not None
+        controller._ocr_future.result(timeout=2)
+
+        clock[0] = 10.4
+        controller._tick()
+        missing = next(
+            track for track in controller._tracker.visible_tracks if track.track_id == original.track_id
+        )
+        assert missing.missing_since == pytest.approx(10.4)
+        assert next(
+            track for track in controller._tracker.visible_tracks if track.text == "先へ進め。"
+        ).missing_since is None
+
+        capture.frame = _dynamic_roi_frame()
+        clock[0] = 10.45
+        controller._tick()
+        assert controller._ocr_future is not None
+        assert controller._active_roi_plan is None
+        controller._ocr_future.result(timeout=2)
+
+        clock[0] = 10.49
+        controller._tick()
+        assert ocr.call_count == 3
+        assert ocr.input_shapes[2] == (900, 1600, 3)
+        target = next(
+            track for track in controller._tracker.visible_tracks if track.track_id == original.track_id
+        )
+        if retry_recovers:
+            assert target.missing_since is None
+            assert target.translated_text == "旧译文"
+        else:
+            assert target.missing_since == pytest.approx(10.4)
+            assert target.translated_text == "旧译文"
+
+        clock[0] = 10.51
+        controller._tick()
+        assert ocr.call_count == 3
+        if retry_recovers:
+            assert any(track.track_id == original.track_id for track in controller._tracker.visible_tracks)
+        else:
+            assert all(track.track_id != original.track_id for track in controller._tracker.visible_tracks)
+            assert all(track.track_id != original.track_id for track in overlay.last_tracks)
+            assert all(
+                track.track_id != original.track_id
+                for track in browser_overlay.published[-1]
+            )
+        assert any(track.text == "先へ進め。" for track in controller._tracker.visible_tracks)
+    finally:
+        controller.close()
+
+@pytest.mark.parametrize("retry_recovers", [True, False])
+def test_dynamic_roi_baseline_returns_before_empty_roi_completes(
+    monkeypatch,
+    retry_recovers: bool,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=99,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            clear_after_ms=100,
+            dynamic_roi_response_target_ms=500,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+
+    class EmptyRoiReturnsAfterBaselineOcr(ColorBlockOcr):
+        def __init__(self) -> None:
+            super().__init__()
+            self.call_count = 0
+            self.empty_roi_started = threading.Event()
+            self.release_empty_roi = threading.Event()
+
+        def recognize_frame(self, frame):
+            self.call_count += 1
+            if self.call_count == 2:
+                self.input_shapes.append(tuple(frame.shape))
+                self.empty_roi_started.set()
+                self.release_empty_roi.wait(timeout=2)
+                return ()
+            observations = super().recognize_frame(frame)
+            if self.call_count == 3 and not retry_recovers:
+                return tuple(item for item in observations if item.text != "待って。")
+            return observations
+
+    ocr = EmptyRoiReturnsAfterBaselineOcr()
+    overlay = FakeOverlay()
+    browser_overlay = FakeBrowserOverlay()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=overlay,
+        control=FakeControl(),
+        app=app,
+        browser_overlay=browser_overlay,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    try:
+        controller._tick()
+        controller._ocr_future.result(timeout=2)
+        clock[0] = 10.05
+        controller._tick()
+        original = next(
+            track
+            for track in controller._tracker.visible_tracks
+            if track.text == "待って。"
+        )
+        controller._tracker.apply_translations(
+            (TranslationResult(original.source(controller._tracker.zone_id), "旧译文"),)
+        )
+
+        capture.frame = _dynamic_roi_frame_with_background_change()
+        clock[0] = 10.3
+        controller._tick()
+        clock[0] = 10.35
+        controller._tick()
+        assert ocr.empty_roi_started.wait(timeout=2)
+        assert controller._active_roi_job is not None
+        assert controller._roi_scheduler is not None
+        assert controller._roi_scheduler.busy
+
+        # Return to the accepted pixels before the in-flight empty OCR returns.
+        capture.frame = _dynamic_roi_frame()
+        clock[0] = 10.38
+        controller._tick()
+        # After the baseline was observed, no fresh capture arrives before the
+        # empty OCR result is collected; recovery must use the saved frame.
+        capture.frame = None
+        capture.latest_frame = lambda: None
+        ocr.release_empty_roi.set()
+        controller._ocr_future.result(timeout=2)
+
+        clock[0] = 10.4
+        controller._tick()
+        missing = next(
+            track
+            for track in controller._tracker.visible_tracks
+            if track.track_id == original.track_id
+        )
+        assert missing.missing_since == pytest.approx(10.4)
+        assert missing.display_translation == "旧译文"
+        # The empty request survives the baseline reversion until this single
+        # full-frame confirmation is actually dispatched.
+        assert not controller._pending_roi_empty_retry
+        assert controller._ocr_future is not None
+        assert controller._active_roi_job is None
+        assert not controller._roi_scheduler.busy
+        controller._ocr_future.result(timeout=2)
+        clock[0] = 10.49
+        controller._tick()
+
+        assert ocr.call_count == 3
+        assert ocr.input_shapes[2] == (900, 1600, 3)
+        target = next(
+            track
+            for track in controller._tracker.visible_tracks
+            if track.track_id == original.track_id
+        )
+        assert target.display_translation == "旧译文"
+        if retry_recovers:
+            assert target.missing_since is None
+        else:
+            assert target.missing_since == pytest.approx(10.4)
+            clock[0] = 10.51
+            controller._tick()
+            assert all(
+                track.track_id != original.track_id
+                for track in controller._tracker.visible_tracks
+            )
+            assert all(
+                track.track_id != original.track_id
+                for track in overlay.last_tracks
+            )
+            assert all(
+                track.track_id != original.track_id
+                for track in browser_overlay.published[-1]
+            )
+        assert any(track.text == "先へ進め。" for track in controller._tracker.visible_tracks)
+        assert ocr.call_count == 3
+    finally:
+        ocr.release_empty_roi.set()
+        controller.close()
+
+
+@pytest.mark.parametrize(
+    "completion_mode",
+    ("retry_running", "tick_collects", "completion_collects_first"),
+)
+def test_dynamic_roi_expiry_runs_without_frame_while_retry_ocr_is_running(
+    monkeypatch,
+    completion_mode: str,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=99,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            clear_after_ms=100,
+            dynamic_roi_response_target_ms=500,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    overlay = FakeOverlay()
+    browser_overlay = FakeBrowserOverlay()
+
+    class BlockingRetryOcr(ColorBlockOcr):
+        def __init__(self) -> None:
+            super().__init__()
+            self.call_count = 0
+            self.retry_started = threading.Event()
+            self.release_retry = threading.Event()
+
+        def recognize_frame(self, frame):
+            self.call_count += 1
+            if self.call_count == 2:
+                self.input_shapes.append(tuple(frame.shape))
+                return ()
+            if self.call_count == 3:
+                self.retry_started.set()
+                self.release_retry.wait()
+                if completion_mode != "retry_running":
+                    return ()
+            return super().recognize_frame(frame)
+
+    ocr = BlockingRetryOcr()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=overlay,
+        control=FakeControl(),
+        app=app,
+        browser_overlay=browser_overlay,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    try:
+        controller._tick()
+        controller._ocr_future.result(timeout=2)
+        clock[0] = 10.05
+        controller._tick()
+        original = next(
+            track for track in controller._tracker.visible_tracks if track.text == "待って。"
+        )
+        controller._tracker.apply_translations(
+            (TranslationResult(original.source(controller._tracker.zone_id), "旧译文"),)
+        )
+
+        capture.frame = _dynamic_roi_frame_with_background_change()
+        clock[0] = 10.3
+        controller._tick()
+        clock[0] = 10.35
+        controller._tick()
+        assert controller._ocr_future is not None
+        controller._ocr_future.result(timeout=2)
+
+        clock[0] = 10.4
+        controller._tick()
+        waiting = next(
+            track for track in controller._tracker.visible_tracks if track.track_id == original.track_id
+        )
+        assert waiting.missing_since == pytest.approx(10.4)
+        assert next(
+            track for track in controller._tracker.visible_tracks if track.text == "先へ進め。"
+        ).missing_since is None
+
+        clock[0] = 10.45
+        controller._tick()
+        assert ocr.retry_started.wait(timeout=2)
+        assert ocr.call_count == 3
+        assert controller._ocr_future is not None
+        assert not controller._ocr_future.done()
+
+        capture.frame = None
+        capture.latest_frame = lambda: None
+        clock[0] = 10.51
+        if completion_mode == "retry_running":
+            controller._tick()
+            assert controller._ocr_future is not None
+            assert not controller._ocr_future.done()
+        else:
+            retry_future = controller._ocr_future
+            assert retry_future is not None
+            ocr.release_retry.set()
+            retry_future.result(timeout=2)
+            if completion_mode == "completion_collects_first":
+                # Exercise the independent completion timer ordering: the OCR
+                # result removes the expired track before this no-frame tick.
+                controller._collect_completed_work()
+                assert all(
+                    track.track_id != original.track_id
+                    for track in controller._tracker.visible_tracks
+                )
+                controller._tick()
+            else:
+                controller._tick()
+            assert controller._ocr_future is None
+
+        remaining = controller._tracker.visible_tracks
+        assert [track.text for track in remaining] == ["先へ進め。"]
+        assert all(track.track_id != original.track_id for track in overlay.last_tracks)
+        assert all(
+            track.track_id != original.track_id
+            for track in browser_overlay.published[-1]
+        )
+        assert overlay.last_tracks == remaining
+        assert browser_overlay.published[-1] == remaining
+        assert overlay.last_frame is controller._latest_frame
+        assert overlay.last_frame is not None
+        assert ocr.call_count == 3
+
+        # A later static no-frame tick continues to publish cached state but
+        # does not trigger an OCR rescan.
+        clock[0] = 15.0
+        controller._tick()
+        assert overlay.last_tracks == controller._tracker.visible_tracks
+        assert browser_overlay.published[-1] == controller._tracker.visible_tracks
+        assert overlay.last_frame is controller._latest_frame
+        assert ocr.call_count == 3
+    finally:
+        ocr.release_retry.set()
+        controller.close()
 
 def test_dynamic_roi_empty_retry_stops_after_one_failed_retry(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
@@ -1693,6 +2129,204 @@ def test_dynamic_roi_debug_reports_full_frame_fallback(
     assert snapshot.executed_rois == ((0, 0, 1600, 900),)
     controller._ocr_future.result(timeout=2)
     controller.close()
+
+
+def test_dynamic_roi_full_frame_confirmation_reconciles_latest_saved_frame(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            stable_observations=99,
+            dynamic_roi_enabled=True,
+            change_poll_fps=10,
+            clear_after_ms=1000,
+            dynamic_roi_response_target_ms=500,
+        ),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+
+    class BlockingFullConfirmationOcr(ColorBlockOcr):
+        def __init__(self) -> None:
+            super().__init__()
+            self.call_count = 0
+            self.confirmation_started = threading.Event()
+            self.release_confirmation = threading.Event()
+
+        def recognize_frame(self, frame):
+            self.call_count += 1
+            if self.call_count == 2:
+                self.input_shapes.append(tuple(frame.shape))
+                return ()
+            if self.call_count == 3:
+                self.confirmation_started.set()
+                self.release_confirmation.wait(timeout=3)
+            return super().recognize_frame(frame)
+
+    ocr = BlockingFullConfirmationOcr()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    try:
+        controller._tick()
+        controller._ocr_future.result(timeout=2)
+        clock[0] = 10.05
+        controller._tick()
+        original = next(
+            track
+            for track in controller._tracker.visible_tracks
+            if track.text == "待って。"
+        )
+        controller._tracker.apply_translations(
+            (TranslationResult(original.source(controller._tracker.zone_id), "旧译文"),)
+        )
+
+        capture.frame = _dynamic_roi_frame_with_background_change()
+        clock[0] = 10.3
+        controller._tick()
+        clock[0] = 10.35
+        controller._tick()
+        assert controller._ocr_future is not None
+        controller._ocr_future.result(timeout=2)
+        clock[0] = 10.4
+        controller._tick()
+
+        capture.frame = _dynamic_roi_frame()
+        clock[0] = 10.45
+        controller._tick()
+        assert ocr.confirmation_started.wait(timeout=2)
+        assert controller._ocr_future is not None
+        assert controller._active_roi_job is None
+        assert controller._roi_scheduler is not None
+        assert not controller._roi_scheduler.busy
+        assert ocr.call_count == 3
+
+        first_new = _dynamic_roi_frame()
+        first_new[200:260, 200:600] = 220
+        capture.frame = first_new
+        clock[0] = 10.55
+        controller._tick()
+        assert controller._ocr_future is not None
+        assert controller._active_roi_job is None
+        assert not controller._roi_scheduler.busy
+        assert ocr.call_count == 3
+
+        latest = first_new.copy()
+        latest[200:260, 200:600] = 150
+        capture.frame = latest
+        clock[0] = 10.65
+        controller._tick()
+        assert controller._ocr_future is not None
+        assert controller._active_roi_job is None
+        assert not controller._roi_scheduler.busy
+        assert ocr.call_count == 3
+
+        capture.frame = None
+        capture.latest_frame = lambda: None
+        confirmation_future = controller._ocr_future
+        ocr.release_confirmation.set()
+        confirmation_future.result(timeout=2)
+        clock[0] = 10.7
+        controller._tick()
+        scheduler = controller._roi_scheduler
+        assert scheduler is not None
+        assert scheduler.has_pending or controller._ocr_future is not None
+        assert not scheduler.busy or controller._active_roi_job is not None
+
+        if controller._ocr_future is None:
+            clock[0] = 10.8
+            controller._tick()
+        assert controller._ocr_future is not None
+        assert controller._active_roi_job is not None
+        assert not controller._active_roi_plan.fallback_full_frame
+        assert controller._ocr_future.result(timeout=2)
+        assert ocr.call_count == 4
+
+        clock[0] = 10.9
+        controller._tick()
+        if controller._ocr_future is not None:
+            # The existing semantic confirmation may consume one follow-up
+            # scan while the line tracker settles the changed source.
+            controller._ocr_future.result(timeout=2)
+            clock[0] = 11.0
+            controller._tick()
+        top_tracks = [
+            track
+            for track in controller._tracker.visible_tracks
+            if track.bounds[1] < 500
+        ]
+        assert any(track.text == "先へ進め。" for track in top_tracks)
+        assert not any(track.text == "止まれ。" for track in top_tracks)
+        assert not controller._roi_scheduler.busy
+
+        for now in (11.1, 12.0, 15.0):
+            clock[0] = now
+            controller._tick()
+            assert controller._ocr_future is None
+        assert ocr.call_count <= 5
+        assert not controller._roi_scheduler.has_pending
+    finally:
+        ocr.release_confirmation.set()
+        controller.close()
+
+
+def test_dynamic_roi_completion_does_not_dispatch_while_finalizing(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(dynamic_roi_enabled=True, change_poll_fps=10),
+    )
+    capture = MutableCapture(_dynamic_roi_frame())
+    ocr = ColorBlockOcr()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    clock = [20.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    try:
+        controller._tick()
+        controller._ocr_future.result(timeout=2)
+        clock[0] = 20.05
+        controller._tick()
+        scheduler = controller._roi_scheduler
+        assert scheduler is not None and scheduler.primed
+
+        controller._latest_frame = _dynamic_roi_frame(changed=True)
+        controller._submit_ocr(_dynamic_roi_frame(), triggered_at=20.1)
+        controller._finalizing = True
+        controller._ocr_future.result(timeout=2)
+        clock[0] = 20.2
+        controller._collect_completed_work()
+
+        assert controller._ocr_future is None
+        assert not scheduler.busy
+        assert not scheduler.has_pending
+        assert len(ocr.input_shapes) == 2
+    finally:
+        controller.close()
 
 
 def test_dynamic_roi_full_frame_confirmation_does_not_replay_static_scene(
