@@ -10,6 +10,7 @@ Item {
     required property var workbench
     property int transitionSerial: 0
     property bool pageMotionEnabled: false
+    readonly property bool compactOverview: height < 580
     readonly property var themeValues: ["system", "dark", "light"]
 
     PrismDialog {
@@ -79,7 +80,7 @@ Item {
                     objectName: "homePrimaryContent"
                     width: parent.width
                     height: implicitHeight
-                    spacing: 18
+                    spacing: root.compactOverview ? 8 : 18
 
                 SectionHeader {
                     theme: root.theme
@@ -90,7 +91,7 @@ Item {
 
                 ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 7
+                    spacing: root.compactOverview ? 4 : 7
                     Text {
                         objectName: "homeRunHero"
                         text: root.workbench.runState
@@ -98,7 +99,7 @@ Item {
                              : root.workbench.runTone === "warning" ? root.theme.amber
                              : root.workbench.running ? root.theme.accent : root.theme.text
                         font.family: root.theme.displayFontFor(text)
-                        font.pixelSize: 54
+                        font.pixelSize: root.compactOverview ? 40 : 54
                         font.weight: Font.Bold
                     }
                     Text {
@@ -106,7 +107,7 @@ Item {
                         text: root.workbench.currentProfileName
                         color: root.theme.textSoft
                         font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 18
+                        font.pixelSize: root.compactOverview ? 16 : 18
                         font.weight: Font.Medium
                     }
                 }
@@ -114,8 +115,8 @@ Item {
                 RowLayout {
                     objectName: "homeSignalCards"
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 132
-                    Layout.minimumHeight: 132
+                    Layout.preferredHeight: root.compactOverview ? 100 : 132
+                    Layout.minimumHeight: Layout.preferredHeight
                     spacing: 12
 
                     Item {
@@ -134,8 +135,8 @@ Item {
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: 18
-                            anchors.leftMargin: 24
+                            anchors.margins: root.compactOverview ? 10 : 18
+                            anchors.leftMargin: root.compactOverview ? 16 : 24
                             spacing: 6
                             Text {
                                 objectName: "homeOcrSignalLabel"
@@ -183,8 +184,8 @@ Item {
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: 18
-                            anchors.leftMargin: 24
+                            anchors.margins: root.compactOverview ? 10 : 18
+                            anchors.leftMargin: root.compactOverview ? 16 : 24
                             spacing: 6
                             Text {
                                 objectName: "homeTranslationSignalLabel"

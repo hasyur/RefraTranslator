@@ -2444,15 +2444,10 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
         assert child_y + float(child.property("height")) <= float(
             home_metrics.property("height")
         ) + 1e-3
-    assert float(home_scroll.property("contentHeight")) > float(
+    assert float(home_scroll.property("contentHeight")) <= float(
         home_scroll.property("height")
     )
-    home_scroll.setProperty(
-        "contentY",
-        float(home_scroll.property("contentHeight"))
-        - float(home_scroll.property("height")),
-    )
-    app.processEvents()
+    assert float(home_scroll.property("contentY")) == 0
     footnote_y = home_footnote.mapToItem(home_scroll, QPointF(0, 0)).y()
     assert footnote_y >= -1e-3
     assert footnote_y + float(home_footnote.property("height")) <= float(
@@ -2550,6 +2545,76 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
         home_scroll.property("height")
     )
     host.shutdown()
+
+
+@pytest.mark.parametrize("theme_name", ("dark", "light"))
+def test_nearly_fitting_pages_compact_spacing_before_requiring_scroll(
+    tmp_path: Path,
+    theme_name: str,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    profile = create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    save_snapshot(
+        profile.directory,
+        new_snapshot(
+            (SnapshotEntry("track", 0, "原文", "译文", 0.9, (20, 40, 420, 75)),),
+            (),
+            ocr_peak_seconds=0.4,
+            llm_peak_seconds=2.5,
+        ),
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        host.show()
+        window = host.window
+        assert window is not None
+        home_panel = _find_quick_item(window, "homePrimaryPanel")
+        home_scroll = _find_quick_item(window, "homePrimaryScroll")
+        hero = _find_quick_item(window, "homeRunHero")
+        footnote = _find_quick_item(window, "homeLastRunFootnote")
+        assert all(item is not None for item in (home_panel, home_scroll, hero, footnote))
+        for size in ((980, 700), (1100, 760), (1280, 820)):
+            window.resize(*size)
+            _wait_for_page_layout(window, home_panel, app)
+            assert home_scroll.property("contentHeight") <= home_scroll.height()
+            assert home_scroll.property("contentY") == 0
+            footnote_origin = footnote.mapToItem(home_scroll, QPointF(0, 0))
+            assert footnote_origin.y() + footnote.height() <= home_scroll.height()
+            assert hero.property("font").pixelSize() >= 40
+            for group_name in ("homeOcrSignalGroup", "homeTranslationSignalGroup"):
+                group = _find_quick_item(window, group_name)
+                assert group is not None
+                for text in group.findChildren(QQuickItem):
+                    if text.metaObject().indexOfProperty("font") < 0 or not text.isVisible():
+                        continue
+                    origin = text.mapToItem(group, QPointF(0, 0))
+                    assert origin.y() >= 0
+                    assert origin.y() + text.height() <= group.height()
+
+        controller.setPage("OCR")
+        ocr_panel = _find_quick_item(window, "ocrSecondaryPanel")
+        ocr_scroll = _find_quick_item(window, "ocrSettingsScroll")
+        assert ocr_panel is not None
+        assert ocr_scroll is not None
+        _wait_for_page_layout(window, ocr_panel, app)
+        assert ocr_scroll.property("contentHeight") <= ocr_scroll.height()
+        assert ocr_scroll.property("contentY") == 0
+        for quality_index in range(len(controller.detectionQualityNames)):
+            controller.setDetectionQualityIndex(quality_index)
+            app.processEvents()
+            assert ocr_scroll.property("contentHeight") <= ocr_scroll.height()
+    finally:
+        host.shutdown()
 
 
 def test_real_overlay_snapshot_keeps_portrait_canvas_contain_fit(

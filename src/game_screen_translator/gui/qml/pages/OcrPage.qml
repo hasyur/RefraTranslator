@@ -126,6 +126,7 @@ Item {
 
             Flickable {
                 id: ocrFormScroll
+                objectName: "ocrSettingsScroll"
                 anchors.fill: parent
                 contentWidth: width
                 contentHeight: form.implicitHeight
@@ -138,7 +139,7 @@ Item {
                 ColumnLayout {
                     id: form
                     width: parent.width
-                    spacing: 13
+                    spacing: 10
 
                     SectionHeader {
                         theme: root.theme
