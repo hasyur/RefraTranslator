@@ -27,6 +27,8 @@ from game_screen_translator.config import load_config
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.gui import workbench_controller as controller_module
 from game_screen_translator.gui.theme import (
+    SKIN_DOHNA,
+    SKIN_PRISM,
     THEME_DARK,
     THEME_LIGHT,
     gui_settings_path,
@@ -779,6 +781,69 @@ def test_theme_preference_does_not_change_when_project_save_fails(
     assert controller.effectiveTheme == initial_effective
     assert not gui_settings_path(config_path).exists()
     assert errors == [("保存界面主题失败", "disk full")]
+    controller.shutdown()
+
+
+def test_skin_preference_persists_independently_and_dohna_uses_light_canvas(
+    tmp_path: Path,
+) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+
+    controller.setTheme(THEME_DARK)
+    controller.setSkin(SKIN_DOHNA)
+
+    assert controller.themePreference == THEME_DARK
+    assert controller.skinPreference == SKIN_DOHNA
+    assert controller.effectiveTheme == THEME_LIGHT
+    stored = load_gui_preferences(config_path)
+    assert stored.theme == THEME_DARK
+    assert stored.skin == SKIN_DOHNA
+
+    restored_dohna = WorkbenchController(config_path, probe_ocr_devices=False)
+    assert restored_dohna.themePreference == THEME_DARK
+    assert restored_dohna.skinPreference == SKIN_DOHNA
+    assert restored_dohna.effectiveTheme == THEME_LIGHT
+    restored_dohna.shutdown()
+
+    controller.setTheme(THEME_LIGHT)
+    assert controller.skinPreference == SKIN_DOHNA
+    assert load_gui_preferences(config_path).skin == SKIN_DOHNA
+    controller.setTheme(THEME_DARK)
+    assert controller.skinPreference == SKIN_DOHNA
+
+    controller.setSkin(SKIN_PRISM)
+
+    assert controller.skinPreference == SKIN_PRISM
+    assert controller.themePreference == THEME_DARK
+    assert controller.effectiveTheme == THEME_DARK
+    controller.shutdown()
+
+    restored = WorkbenchController(config_path, probe_ocr_devices=False)
+    assert restored.themePreference == THEME_DARK
+    assert restored.skinPreference == SKIN_PRISM
+    restored.shutdown()
+
+
+def test_skin_preference_does_not_change_when_project_save_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    initial_effective = controller.effectiveTheme
+    errors: list[tuple[str, str]] = []
+    controller.errorRaised.connect(lambda title, message: errors.append((title, message)))
+    monkeypatch.setattr(
+        controller_module,
+        "save_gui_preferences",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    controller.setSkin(SKIN_DOHNA)
+
+    assert controller.skinPreference == SKIN_PRISM
+    assert controller.effectiveTheme == initial_effective
+    assert not gui_settings_path(config_path).exists()
+    assert errors == [("保存界面皮肤失败", "disk full")]
     controller.shutdown()
 
 

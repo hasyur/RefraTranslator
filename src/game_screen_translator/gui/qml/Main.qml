@@ -51,6 +51,18 @@ ApplicationWindow {
     }
 
     function pageTitleLight(page) {
+        if (root.boundWorkbench.skinPreference === "dohna") {
+            const titles = {
+                "HOME": "翻译控制台",
+                "CAPTURE": "画面捕获",
+                "OCR": "文字识别",
+                "TRANSLATION": "译文设置",
+                "OVERLAY": "字幕叠加",
+                "CACHE": "翻译缓存",
+                "SETTINGS": "高级设置"
+            }
+            return titles[page] || page
+        }
         const titles = {
             "HOME": "折射",
             "CAPTURE": "捕获",
@@ -64,6 +76,8 @@ ApplicationWindow {
     }
 
     function pageTitleHeavy(page) {
+        if (root.boundWorkbench.skinPreference === "dohna")
+            return ""
         const titles = {
             "HOME": "控制台",
             "CAPTURE": "光圈",
@@ -74,6 +88,22 @@ ApplicationWindow {
             "SETTINGS": "设置"
         }
         return titles[page] || ""
+    }
+
+    function navigationLabel(page) {
+        if (root.boundWorkbench.skinPreference === "dohna") {
+            const labels = {
+                "HOME": "总览",
+                "CAPTURE": "画面捕获",
+                "OCR": "文字识别",
+                "TRANSLATION": "译文设置",
+                "OVERLAY": "字幕叠加",
+                "CACHE": "翻译缓存",
+                "SETTINGS": "高级设置"
+            }
+            return labels[page] || page
+        }
+        return page
     }
 
     function pageSubtitle(page) {
@@ -185,14 +215,15 @@ ApplicationWindow {
         id: prism
         objectName: "prismTheme"
         dark: root.boundWorkbench.effectiveTheme !== "light"
+        dohna: root.boundWorkbench.skinPreference === "dohna"
         reducedMotion: root.boundWorkbench.reducedMotion
     }
 
     background: Rectangle {
         gradient: Gradient {
-            GradientStop { position: 0; color: prism.ink }
+            GradientStop { position: 0; color: prism.backgroundTop }
             GradientStop { position: 0.62; color: prism.inkRaised }
-            GradientStop { position: 1; color: prism.dark ? "#0b1118" : "#b8c5ca" }
+            GradientStop { position: 1; color: prism.backgroundBottom }
         }
     }
 
@@ -239,7 +270,7 @@ ApplicationWindow {
         Rectangle {
             Layout.preferredWidth: root.width < 1100 ? 178 : 222
             Layout.fillHeight: true
-            color: prism.dark ? "#d4070a0d" : "#c8d1dade"
+            color: prism.navigationSurface
             border.color: prism.line
 
             ColumnLayout {
@@ -253,7 +284,7 @@ ApplicationWindow {
                     spacing: 0
                     Text {
                         text: "REFRA"
-                        color: prism.text
+                        color: prism.navigationText
                         font.family: prism.displayFontFor(text)
                         font.pixelSize: 23
                         font.weight: Font.Bold
@@ -283,7 +314,10 @@ ApplicationWindow {
                         required property int index
                         required property var modelData
                         theme: prism
-                        text: String(index + 1).padStart(2, "0") + "   " + String(modelData)
+                        navigation: true
+                        text: prism.dohna
+                              ? String(modelData) + "\n" + root.navigationLabel(String(modelData))
+                              : String(index + 1).padStart(2, "0") + "   " + root.navigationLabel(String(modelData))
                         primary: root.boundWorkbench.currentPage === modelData
                         quiet: root.boundWorkbench.currentPage !== modelData
                         implicitWidth: 150
@@ -306,7 +340,7 @@ ApplicationWindow {
                         spacing: 3
                         Text {
                             text: "ACTIVE PROFILE"
-                            color: prism.textDim
+                            color: prism.navigationTextDim
                             font.family: prism.monoFontFor(text)
                             font.pixelSize: 8
                             font.letterSpacing: 1
@@ -314,7 +348,7 @@ ApplicationWindow {
                         Text {
                             objectName: "activeProfileName"
                             text: root.boundWorkbench.currentProfileName
-                            color: prism.text
+                            color: prism.navigationText
                             font.family: prism.uiFontFor(text)
                             font.pixelSize: 13
                             font.weight: Font.Medium
@@ -326,7 +360,8 @@ ApplicationWindow {
 
                 Text {
                     text: "NATIVE QML · 7 SURFACES"
-                    color: prism.textDim
+                    visible: !prism.dohna
+                    color: prism.navigationTextDim
                     font.family: prism.monoFontFor(text)
                     font.pixelSize: 8
                     font.letterSpacing: 0.8
@@ -340,6 +375,15 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
+            DohnaBackdrop {
+                id: dohnaBackdrop
+                objectName: "dohnaBackdrop"
+                anchors.fill: parent
+                anchors.margins: 12
+                theme: prism
+                visible: prism.dohna
+            }
+
             OpticalStage {
                 id: stage
                 objectName: "opticalStage"
@@ -350,6 +394,7 @@ ApplicationWindow {
                 pageTransitionSequence: root.pageTransitionSequence
                 reducedMotion: root.boundWorkbench.reducedMotion
                 motionEnabled: root.animationsRunning
+                visible: !prism.dohna
                 opacity: prism.opticalStageOpacity
                          * (page === "CAPTURE" ? 0.25 : 1)
             }
@@ -365,7 +410,7 @@ ApplicationWindow {
                         root.height <= 820 ? 116 : 142,
                         pageHeaderTextColumn.implicitHeight + 16
                     )
-                    color: prism.dark ? "#c20b0f13" : "#d8d7dde0"
+                    color: prism.headerSurface
                     border.color: prism.line
 
                     RowLayout {
@@ -381,7 +426,7 @@ ApplicationWindow {
                             Text {
                                 text: String(root.pageIndex(root.boundWorkbench.currentPage) + 1).padStart(2, "0")
                                       + " / " + root.boundWorkbench.currentPage
-                                color: prism.accent
+                                color: prism.accentText
                                 font.family: prism.monoFontFor(text)
                                 font.pixelSize: 9
                                 font.letterSpacing: 1.8
@@ -582,7 +627,7 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 34
-                    color: prism.dark ? "#d4070a0d" : "#c8d1dade"
+                    color: prism.navigationSurface
                     border.color: prism.line
 
                     RowLayout {
@@ -601,7 +646,7 @@ ApplicationWindow {
                         }
                         Text {
                             text: root.boundWorkbench.statusText
-                            color: prism.textSoft
+                            color: prism.navigationText
                             font.family: prism.uiFontFor(text)
                             font.pixelSize: 10
                             elide: Text.ElideRight
@@ -609,7 +654,7 @@ ApplicationWindow {
                         }
                         Text {
                             text: root.boundWorkbench.runPhase.toUpperCase()
-                            color: root.boundWorkbench.running ? prism.accent : prism.textDim
+                            color: root.boundWorkbench.running ? prism.accent : prism.navigationTextDim
                             font.family: prism.monoFontFor(text)
                             font.pixelSize: 9
                             font.letterSpacing: 1

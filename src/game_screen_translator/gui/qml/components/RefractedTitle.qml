@@ -12,8 +12,8 @@ Item {
     readonly property real heavyTitleSize: titleSize * 0.94
     readonly property real facetWidthRatio: 0.075
     readonly property real facetAngle: 6
-    readonly property real cyanFacetOpacity: theme.dark ? 0.43 : 0.31
-    readonly property real spectrumFacetOpacity: theme.dark ? 0.27 : 0.19
+    readonly property real cyanFacetOpacity: theme.dohna ? 0 : (theme.dark ? 0.43 : 0.31)
+    readonly property real spectrumFacetOpacity: theme.dohna ? 0 : (theme.dark ? 0.27 : 0.19)
     readonly property bool refractionRunning: refractionKick.running
     property real refractionShift: 6
     property real refractionEnergy: 0
@@ -63,8 +63,8 @@ Item {
         color: root.theme.text
         font.family: root.theme.displayFontFor(text)
         font.pixelSize: root.titleSize
-        font.weight: Font.Light
-        font.letterSpacing: -root.titleSize * 0.035
+        font.weight: root.theme.dohna ? Font.Bold : Font.Light
+        font.letterSpacing: root.theme.dohna ? 0 : -root.titleSize * 0.035
         renderType: Text.CurveRendering
         renderTypeQuality: Text.VeryHighRenderTypeQuality
     }
@@ -94,6 +94,7 @@ Item {
         height: root.height
         clip: true
         z: 2
+        visible: !root.theme.dohna
 
         Item {
             id: cyanFacet

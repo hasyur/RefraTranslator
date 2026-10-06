@@ -30,7 +30,7 @@ RowLayout {
     Text {
         visible: root.meta.length > 0
         text: root.meta
-        color: root.theme.accent
+        color: root.theme.accentText
         font.family: root.theme.monoFontFor(text)
         font.pixelSize: 10
         font.letterSpacing: 1

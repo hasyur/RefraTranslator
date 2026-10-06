@@ -4,27 +4,50 @@ QtObject {
     id: theme
 
     property bool dark: true
+    property bool dohna: false
     property bool reducedMotion: false
 
-    readonly property color ink: dark ? "#07090b" : "#cbd4d7"
-    readonly property color inkRaised: dark ? "#0b0f13" : "#d7dde0"
-    readonly property color panel: dark ? "#0e1318" : "#becace"
-    readonly property color line: dark ? "#252d34" : "#9eacb3"
-    readonly property color lineStrong: dark ? "#46545f" : "#687c86"
-    readonly property color text: dark ? "#edf2f5" : "#111a1f"
-    readonly property color textSoft: dark ? "#a4afb8" : "#384a53"
-    readonly property color textDim: dark ? "#66727c" : "#60727b"
-    readonly property color accent: dark ? "#62e1ff" : "#00758f"
-    readonly property color spectrum: dark ? "#f27bd7" : "#992477"
-    readonly property color violet: dark ? "#8f7cff" : "#6655cf"
-    readonly property color amber: dark ? "#ffc857" : "#9b6800"
-    readonly property color electric: dark ? "#4d8dff" : "#2f67c7"
-    readonly property color glass: dark ? "#99121a22" : "#bfd3dde0"
-    readonly property color glassRaised: dark ? "#c4182430" : "#dce7ecee"
-    readonly property color stageShadow: dark ? "#6b000000" : "#3d253d47"
-    readonly property color danger: dark ? "#ff7f8f" : "#a62d43"
+    // Prism keeps its original palette. Dohna is a fixed-light print palette;
+    // the controller still remembers the user's Prism light/dark preference.
+    readonly property color paper: dohna ? "#F7F3E8" : (dark ? "#07090b" : "#cbd4d7")
+    readonly property color white: dohna ? "#FFFDF7" : (dark ? "#0b0f13" : "#d7dde0")
+    readonly property color ink: dohna ? "#17151E" : (dark ? "#07090b" : "#cbd4d7")
+    readonly property color inkRaised: dohna ? "#FFFDF7" : (dark ? "#0b0f13" : "#d7dde0")
+    readonly property color panel: dohna ? "#FFFDF7" : (dark ? "#0e1318" : "#becace")
+    readonly property color line: dohna ? "#17151E" : (dark ? "#252d34" : "#9eacb3")
+    readonly property color lineStrong: dohna ? "#17151E" : (dark ? "#46545f" : "#687c86")
+    readonly property color text: dohna ? "#17151E" : (dark ? "#edf2f5" : "#111a1f")
+    readonly property color textSoft: dohna ? "#4F4653" : (dark ? "#a4afb8" : "#384a53")
+    readonly property color textDim: dohna ? "#766D77" : (dark ? "#66727c" : "#60727b")
+    readonly property color accent: dohna ? "#FF4384" : (dark ? "#62e1ff" : "#00758f")
+    readonly property color spectrum: dohna ? "#00DAD5" : (dark ? "#f27bd7" : "#992477")
+    readonly property color accentText: dohna ? "#B51F59" : accent
+    readonly property color spectrumText: dohna ? "#007A78" : spectrum
+    readonly property color violet: dohna ? "#F5F044" : (dark ? "#8f7cff" : "#6655cf")
+    readonly property color amber: dohna ? "#8D7600" : (dark ? "#ffc857" : "#9b6800")
+    readonly property color electric: dohna ? "#00DAD5" : (dark ? "#4d8dff" : "#2f67c7")
+    readonly property color glass: dohna ? "#FFFDF7" : (dark ? "#99121a22" : "#bfd3dde0")
+    readonly property color glassRaised: dohna ? "#FFFDF7" : (dark ? "#c4182430" : "#dce7ecee")
+    readonly property color stageShadow: dohna ? "#4017151E" : (dark ? "#6b000000" : "#3d253d47")
+    readonly property color danger: dohna ? "#D62855" : (dark ? "#ff7f8f" : "#a62d43")
+    readonly property color backgroundTop: dohna ? paper : ink
+    readonly property color backgroundBottom: dohna ? paper : (dark ? "#0b1118" : "#b8c5ca")
+    readonly property color navigationSurface: dohna ? ink : (dark ? "#d4070a0d" : "#c8d1dade")
+    readonly property color navigationText: dohna ? white : text
+    readonly property color navigationTextDim: dohna ? "#F5F044" : textDim
+    readonly property color headerSurface: dohna ? paper : (dark ? "#c20b0f13" : "#d8d7dde0")
+    readonly property color inputSurface: dohna ? white : (dark ? "#8f0b1016" : "#b8eef2f3")
+    readonly property color inputTrack: dohna ? paper : (dark ? "#7a182333" : "#b8e3e9eb")
+    readonly property color previewSurface: dohna ? white : (dark ? "#141b24" : "#edf2f4")
+    readonly property color selectionEdge: dohna ? "#F5F044" : accent
 
-    readonly property var displayFonts: [
+    readonly property var displayFonts: dohna ? [
+        "Arial Black",
+        "Microsoft YaHei UI",
+        "Bahnschrift",
+        "Arial",
+        "sans-serif"
+    ] : [
         "Bahnschrift",
         "Microsoft YaHei UI",
         "DIN Alternate",
@@ -71,10 +94,12 @@ QtObject {
     }
 
     function displayTitleSize(viewportWidth) {
-        return Math.max(52, Math.min(80, viewportWidth * 0.0625))
+        return dohna
+                ? Math.max(48, Math.min(68, viewportWidth * 0.052))
+                : Math.max(52, Math.min(80, viewportWidth * 0.0625))
     }
 
-    readonly property real opticalStageOpacity: dark ? 0.64 : 0.56
+    readonly property real opticalStageOpacity: dohna ? 0 : (dark ? 0.64 : 0.56)
     readonly property real sweepAccentAlpha: dark ? 0.48 : 0.34
     readonly property real sweepSpectrumAlpha: dark ? 0.42 : 0.3
     readonly property real tertiaryRailOpacity: dark ? 0.58 : 0.5

@@ -52,7 +52,7 @@ Item {
         clip: true
         color: root.raised ? root.theme.glassRaised : root.theme.glass
         border.color: root.theme.lineStrong
-        border.width: 1
+        border.width: root.theme.dohna ? 3 : 1
 
         Rectangle {
             objectName: "panelAccentEdge"
@@ -112,12 +112,33 @@ Item {
             color: root.theme.accent
             opacity: root.raised ? 0.32 : 0.2
         }
+
+        Rectangle {
+            objectName: "prismPanelDohnaChapterBar"
+            visible: root.theme.dohna
+            anchors.left: parent.left
+            anchors.top: parent.top
+            width: Math.min(parent.width * 0.42, 180)
+            height: 6
+            color: root.theme.accent
+        }
     }
 
     Item {
         id: contentItem
         anchors.fill: parent
         anchors.margins: root.padding
+    }
+
+    Rectangle {
+        objectName: "prismPanelPrintShadow"
+        visible: root.theme.dohna
+        x: 5
+        y: 5
+        width: root.width
+        height: root.height
+        color: root.theme.stageShadow
+        z: -1
     }
 
     SequentialAnimation {

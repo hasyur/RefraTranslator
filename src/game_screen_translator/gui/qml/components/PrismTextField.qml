@@ -22,7 +22,7 @@ TextField {
     font.pixelSize: 13
 
     background: Rectangle {
-        color: root.theme.dark ? "#8f0b1016" : "#b8eef2f3"
+        color: root.theme.inputSurface
         border.color: root.activeFocus ? root.theme.accent : root.theme.lineStrong
         border.width: root.activeFocus ? 2 : 1
     }

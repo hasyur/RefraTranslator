@@ -25,7 +25,7 @@ Slider {
 
         Rectangle {
             anchors.fill: parent
-            color: root.theme.dark ? "#7a182333" : "#b8e3e9eb"
+            color: root.theme.inputTrack
             border.color: root.activeFocus ? root.theme.accent : root.theme.lineStrong
             border.width: root.activeFocus ? 2 : 1
         }

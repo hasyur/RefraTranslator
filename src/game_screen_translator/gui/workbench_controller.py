@@ -80,6 +80,8 @@ from game_screen_translator.live.snapshot import LastRunSnapshot, load_snapshot
 from .theme import (
     GuiPreferences,
     GuiSettingsError,
+    SKIN_DOHNA,
+    SKIN_OPTIONS,
     THEME_DARK,
     THEME_OPTIONS,
     effective_theme,
@@ -355,8 +357,13 @@ class WorkbenchController(QObject):
             self._preferences_warning = str(exc)
 
         self._theme_preference = preferences.theme
+        self._skin_preference = preferences.skin
         app = QApplication.instance()
-        self._effective_theme = effective_theme(self._theme_preference, app) if app else THEME_DARK
+        self._effective_theme = effective_theme(
+            self._theme_preference,
+            app,
+            skin=self._skin_preference,
+        )
         self._reduced_motion = os.environ.get("REFRA_TRANSLATOR_REDUCED_MOTION") == "1"
         self._profile: GameProfile | None = None
         self._profiles: tuple[GameProfile, ...] = ()
@@ -535,6 +542,14 @@ class WorkbenchController(QObject):
     @Property(list, notify=stateChanged)
     def themeOptions(self) -> list[str]:
         return [value for value, _label in THEME_OPTIONS]
+
+    @Property(str, notify=stateChanged)
+    def skinPreference(self) -> str:
+        return self._skin_preference
+
+    @Property(list, notify=stateChanged)
+    def skinOptions(self) -> list[str]:
+        return [value for value, _label in SKIN_OPTIONS]
 
     @Property(bool, notify=stateChanged)
     def reducedMotion(self) -> bool:
@@ -1339,15 +1354,48 @@ class WorkbenchController(QObject):
         if value == self._theme_preference:
             return
         try:
-            save_gui_preferences(self._config_path, GuiPreferences(theme=value))
+            save_gui_preferences(
+                self._config_path,
+                GuiPreferences(theme=value, skin=self._skin_preference),
+            )
         except (GuiSettingsError, OSError) as exc:
             self._show_error("保存界面主题失败", exc)
             return
         self._theme_preference = value
         app = QApplication.instance()
-        self._effective_theme = effective_theme(value, app) if app else value
+        self._effective_theme = effective_theme(
+            value,
+            app,
+            skin=self._skin_preference,
+        )
         self._notice(
             f"界面已切换为“{dict(THEME_OPTIONS).get(value, value)}”并保存",
+            "success",
+        )
+
+    @Slot(str)
+    def setSkin(self, value: str) -> None:
+        if value not in {option[0] for option in SKIN_OPTIONS}:
+            return
+        if value == self._skin_preference:
+            return
+        try:
+            save_gui_preferences(
+                self._config_path,
+                GuiPreferences(theme=self._theme_preference, skin=value),
+            )
+        except (GuiSettingsError, OSError) as exc:
+            self._show_error("保存界面皮肤失败", exc)
+            return
+        self._skin_preference = value
+        app = QApplication.instance()
+        self._effective_theme = effective_theme(
+            self._theme_preference,
+            app,
+            skin=value,
+        )
+        self._notice(
+            f"界面皮肤已切换为“{dict(SKIN_OPTIONS).get(value, value)}”并保存",
             "success",
         )
 
@@ -1360,11 +1408,15 @@ class WorkbenchController(QObject):
         self._emit_state()
 
     def _system_theme_changed(self, *_args: object) -> None:
-        if self._theme_preference != "system":
+        if self._theme_preference != "system" or self._skin_preference == SKIN_DOHNA:
             return
         app = QApplication.instance()
         if app is not None:
-            self._effective_theme = effective_theme(self._theme_preference, app)
+            self._effective_theme = effective_theme(
+                self._theme_preference,
+                app,
+                skin=self._skin_preference,
+            )
             self._emit_state()
 
     # ----- capture and OCR --------------------------------------------

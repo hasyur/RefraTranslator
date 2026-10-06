@@ -67,7 +67,7 @@ Item {
                         )
                         width: Math.max(1, lastRunCanvas.canvasWidth * fitScale)
                         height: Math.max(1, lastRunCanvas.canvasHeight * fitScale)
-                        color: root.theme.dark ? "#141b24" : "#edf2f4"
+                        color: root.theme.previewSurface
                         border.color: root.theme.lineStrong
                         clip: true
 

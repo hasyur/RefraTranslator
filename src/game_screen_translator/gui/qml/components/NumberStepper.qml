@@ -62,7 +62,7 @@ RowLayout {
         Accessible.name: root.accessibleName
         onEditingFinished: root.submit(text)
         background: Rectangle {
-            color: root.theme.dark ? "#8f0b1016" : "#b8eef2f3"
+            color: root.theme.inputSurface
             border.color: editor.activeFocus ? root.theme.accent : root.theme.lineStrong
             border.width: editor.activeFocus ? 2 : 1
         }

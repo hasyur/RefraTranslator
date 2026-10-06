@@ -22,6 +22,13 @@ THEME_OPTIONS = (
     (THEME_DARK, "深色"),
 )
 _VALID_THEMES = frozenset(value for value, _label in THEME_OPTIONS)
+SKIN_PRISM = "prism"
+SKIN_DOHNA = "dohna"
+SKIN_OPTIONS = (
+    (SKIN_PRISM, "Prism（原版）"),
+    (SKIN_DOHNA, "Dohna（波普）"),
+)
+_VALID_SKINS = frozenset(value for value, _label in SKIN_OPTIONS)
 GUI_SETTINGS_FILENAME = ".gui-settings.toml"
 
 
@@ -32,11 +39,15 @@ class GuiSettingsError(ValueError):
 @dataclass(frozen=True, slots=True)
 class GuiPreferences:
     theme: str = THEME_SYSTEM
+    skin: str = SKIN_PRISM
 
     def __post_init__(self) -> None:
-        if self.theme not in _VALID_THEMES:
+        if not isinstance(self.theme, str) or self.theme not in _VALID_THEMES:
             choices = ", ".join(sorted(_VALID_THEMES))
             raise GuiSettingsError(f"界面主题必须是以下值之一：{choices}")
+        if not isinstance(self.skin, str) or self.skin not in _VALID_SKINS:
+            choices = ", ".join(sorted(_VALID_SKINS))
+            raise GuiSettingsError(f"界面皮肤必须是以下值之一：{choices}")
 
 
 def gui_settings_path(config_path: Path) -> Path:
@@ -56,7 +67,7 @@ def load_gui_preferences(config_path: Path) -> GuiPreferences:
     appearance = data.get("appearance", {})
     if not isinstance(appearance, dict):
         raise GuiSettingsError("[appearance] 必须是 TOML 表")
-    unknown = set(appearance) - {"theme"}
+    unknown = set(appearance) - {"theme", "skin"}
     if unknown:
         raise GuiSettingsError(
             f"[appearance] 含有未知字段：{', '.join(sorted(map(str, unknown)))}"
@@ -64,7 +75,10 @@ def load_gui_preferences(config_path: Path) -> GuiPreferences:
     theme = appearance.get("theme", THEME_SYSTEM)
     if not isinstance(theme, str):
         raise GuiSettingsError("appearance.theme 必须是字符串")
-    return GuiPreferences(theme=theme)
+    skin = appearance.get("skin", SKIN_PRISM)
+    if not isinstance(skin, str):
+        raise GuiSettingsError("appearance.skin 必须是字符串")
+    return GuiPreferences(theme=theme, skin=skin)
 
 
 def save_gui_preferences(config_path: Path, preferences: GuiPreferences) -> Path:
@@ -74,6 +88,7 @@ def save_gui_preferences(config_path: Path, preferences: GuiPreferences) -> Path
         f"# {PRODUCT_NAME} 的本机 GUI 设置；不会写入 Windows 注册表。\n"
         "[appearance]\n"
         f'theme = "{preferences.theme}"\n'
+        f'skin = "{preferences.skin}"\n'
     )
     try:
         temporary.write_text(content, encoding="utf-8")
@@ -112,7 +127,18 @@ def detect_system_theme(app: QApplication) -> str:
     return THEME_DARK if window_color.lightness() < 128 else THEME_LIGHT
 
 
-def effective_theme(preference: str, app: QApplication) -> str:
+def effective_theme(
+    preference: str,
+    app: QApplication | None,
+    *,
+    skin: str = SKIN_PRISM,
+) -> str:
     if preference not in _VALID_THEMES:
         raise GuiSettingsError(f"未知界面主题：{preference}")
-    return detect_system_theme(app) if preference == THEME_SYSTEM else preference
+    if skin not in _VALID_SKINS:
+        raise GuiSettingsError(f"未知界面皮肤：{skin}")
+    if skin == SKIN_DOHNA:
+        return THEME_LIGHT
+    if preference != THEME_SYSTEM:
+        return preference
+    return detect_system_theme(app) if app is not None else THEME_DARK

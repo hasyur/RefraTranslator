@@ -12,6 +12,7 @@ Item {
     property bool pageMotionEnabled: false
     readonly property bool compactOverview: height < 580
     readonly property var themeValues: ["system", "dark", "light"]
+    readonly property var skinValues: ["prism", "dohna"]
 
     PrismDialog {
         id: createProfileDialog
@@ -141,7 +142,7 @@ Item {
                             Text {
                                 objectName: "homeOcrSignalLabel"
                                 text: "OCR"
-                                color: root.theme.accent
+                                color: root.theme.accentText
                                 font.family: root.theme.monoFontFor(text)
                                 font.pixelSize: 11
                                 font.letterSpacing: 1.4
@@ -190,7 +191,7 @@ Item {
                             Text {
                                 objectName: "homeTranslationSignalLabel"
                                 text: "TRANSLATION"
-                                color: root.theme.spectrum
+                                color: root.theme.spectrumText
                                 font.family: root.theme.monoFontFor(text)
                                 font.pixelSize: 11
                                 font.letterSpacing: 1.4
@@ -354,8 +355,20 @@ Item {
             Layout.minimumWidth: 300
             Layout.fillHeight: true
 
-            ColumnLayout {
+            Flickable {
+                id: homeSecondaryScroll
+                objectName: "homeSecondaryScroll"
                 anchors.fill: parent
+                contentWidth: width
+                contentHeight: homeSecondaryContent.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                ColumnLayout {
+                    id: homeSecondaryContent
+                    width: homeSecondaryScroll.width
+                    height: implicitHeight
                 spacing: 14
 
                 SectionHeader {
@@ -408,24 +421,61 @@ Item {
 
                 SettingLabel {
                     theme: root.theme
+                    title: "界面皮肤"
+                    meta: "PRISM / DOHNA"
+                    description: "选择工作台的视觉皮肤；Dohna 使用固定的明亮配色。"
+                    settingKey: "home-skin"
+                }
+                PrismComboBox {
+                    id: skinSelector
+                    objectName: "homeSkinSelector"
+                    theme: root.theme
+                    accessibleName: "界面皮肤"
+                    settingDescription: "选择工作台的视觉皮肤；Dohna 使用固定的明亮配色。"
+                    settingKey: "home-skin"
+                    model: ["Prism（原版）", "Dohna（波普）"]
+                    currentIndex: Math.max(0, root.skinValues.indexOf(root.workbench.skinPreference))
+                    Layout.fillWidth: true
+                    onActivated: index => {
+                        if (index >= 0 && index < root.skinValues.length)
+                            root.workbench.setSkin(root.skinValues[index])
+                    }
+                }
+
+                SettingLabel {
+                    theme: root.theme
                     title: "界面主题"
                     meta: "SYSTEM / DARK / LIGHT"
-                    description: "选择工作台使用的颜色主题。"
+                    description: root.theme.dohna
+                                 ? "Dohna 使用固定的明亮配色；切回 Prism 后恢复此处保存的主题偏好。"
+                                 : "选择工作台使用的颜色主题。"
                     settingKey: "home-theme"
                 }
                 PrismComboBox {
                     id: themeSelector
+                    objectName: "homeThemeSelector"
                     theme: root.theme
                     accessibleName: "界面主题"
                     settingDescription: "选择工作台使用的颜色主题。"
                     settingKey: "home-theme"
                     model: ["跟随系统", "深色", "浅色"]
                     currentIndex: Math.max(0, root.themeValues.indexOf(root.workbench.themePreference))
+                    enabled: !root.theme.dohna
                     Layout.fillWidth: true
                     onActivated: index => {
                         if (index >= 0 && index < root.themeValues.length)
                             root.workbench.setTheme(root.themeValues[index])
                     }
+                }
+                Text {
+                    objectName: "homeDohnaThemeHint"
+                    visible: root.theme.dohna
+                    text: "Dohna 使用固定的明亮配色"
+                    color: root.theme.amber
+                    font.family: root.theme.uiFontFor(text)
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
                 }
                 PrismToggle {
                     theme: root.theme
@@ -448,6 +498,7 @@ Item {
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
+                }
                 }
             }
         }

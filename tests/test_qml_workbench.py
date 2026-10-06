@@ -34,6 +34,7 @@ from game_screen_translator.config import load_config
 from game_screen_translator.gui import qml_workbench as host_module
 from game_screen_translator.gui import workbench_controller as controller_module
 from game_screen_translator.gui.qml_workbench import QmlWorkbenchHost
+from game_screen_translator.gui.theme import SKIN_DOHNA, SKIN_PRISM
 from game_screen_translator.gui.workbench_controller import WorkbenchController
 from game_screen_translator.live.snapshot import CacheHit, SnapshotEntry, new_snapshot, save_snapshot
 from game_screen_translator.profiles import (
@@ -142,6 +143,7 @@ class _ControllerStub(QObject):
         self.host_errors: list[tuple[str, str]] = []
         self.themePreference = "dark"
         self.effectiveTheme = "dark"
+        self.skinPreference = SKIN_PRISM
 
     def acceptRegionSelection(self, *region: int) -> None:  # noqa: N802
         self.accepted_regions.append(region)
@@ -883,6 +885,29 @@ def test_real_workbench_loads_exactly_seven_pages_without_qml_warnings(
     host.shutdown()
 
 
+def test_host_uses_light_native_hint_for_dohna_without_changing_saved_theme() -> None:
+    controller = _ControllerStub()
+    applications_and_windows: list[tuple[object, QQuickWindow, str, str]] = []
+
+    def apply_theme(application, window, preference, effective_theme) -> None:
+        applications_and_windows.append(
+            (application, window, preference, effective_theme)
+        )
+
+    host, _engine = _host(controller, theme_applier=apply_theme)
+    controller.skinPreference = SKIN_DOHNA
+    controller.themePreference = "dark"
+    controller.effectiveTheme = "light"
+    controller.stateChanged.emit()
+    assert applications_and_windows[-1][2:] == ("light", "light")
+    assert controller.themePreference == "dark"
+
+    controller.skinPreference = SKIN_PRISM
+    controller.stateChanged.emit()
+    assert applications_and_windows[-1][2:] == ("dark", "light")
+    host.shutdown()
+
+
 def test_real_profile_dropdown_switches_and_restores_runtime_state(
     tmp_path: Path,
 ) -> None:
@@ -1157,6 +1182,7 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
 
     expected_parts = {
         "home-profile": {"label", "control"},
+        "home-skin": {"label", "control"},
         "home-theme": {"label", "control"},
         "home-motion": {"control"},
         "capture-monitor": {"label", "control"},
@@ -1660,6 +1686,127 @@ def test_pair_editor_existing_rows_show_one_adjacent_hint_and_remain_editable(
             assert hint.property("hintVisible") is False
             assert visible_hints() == []
 
+    host.shutdown()
+
+
+def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setTheme("dark")
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+    window = host.window
+    assert window is not None
+    window.resize(980, 700)
+    app.processEvents()
+
+    skin_selector = window.findChild(QObject, "homeSkinSelector")
+    theme_selector = window.findChild(QObject, "homeThemeSelector")
+    theme = window.findChild(QObject, "prismTheme")
+    stage = window.findChild(QObject, "opticalStage")
+    backdrop = window.findChild(QObject, "dohnaBackdrop")
+    assert skin_selector is not None
+    assert theme is not None
+    assert stage is not None
+    assert backdrop is not None
+    assert skin_selector.property("currentIndex") == 0
+    assert theme.property("dohna") is False
+    assert stage.property("visible") is True
+
+    for index in range(7):
+        navigation_button = _find_quick_item(window, f"navigationButton{index}")
+        assert navigation_button is not None
+        assert navigation_button.property("visible") is True
+
+    center = skin_selector.mapToScene(
+        QPointF(skin_selector.width() / 2, skin_selector.height() / 2)
+    ).toPoint()
+    QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=center)
+    app.processEvents()
+    QTest.keyClick(window, Qt.Key.Key_Down)
+    QTest.keyClick(window, Qt.Key.Key_Return)
+    app.processEvents()
+
+    assert controller.skinPreference == SKIN_DOHNA
+    assert controller.themePreference == "dark"
+    assert controller.effectiveTheme == "light"
+    assert skin_selector.property("currentIndex") == 1
+    assert theme.property("dohna") is True
+    assert theme.property("dark") is False
+    for index in range(7):
+        navigation_button = _find_quick_item(window, f"navigationButton{index}")
+        assert navigation_button is not None
+        assert navigation_button.property("visible") is True
+    assert theme_selector is not None
+    assert theme_selector.property("enabled") is False
+    assert stage.property("visible") is False
+    assert backdrop.property("visible") is True
+    assert window.findChild(QObject, "homeDohnaThemeHint").property("visible") is True
+    assert window.findChild(QObject, "pageDisplayTitleLight").property("text") == "翻译控制台"
+
+    secondary_scroll = window.findChild(QObject, "homeSecondaryScroll")
+    assert secondary_scroll is not None
+    motion_toggle = next(
+        item
+        for item in window.findChildren(QQuickItem)
+        if item.property("settingKey") == "home-motion"
+    )
+    secondary_scroll.setProperty(
+        "contentY",
+        max(
+            0.0,
+            float(secondary_scroll.property("contentHeight"))
+            - float(secondary_scroll.property("height")),
+        ),
+    )
+    app.processEvents()
+    motion_origin = motion_toggle.mapToItem(secondary_scroll, QPointF(0, 0))
+    assert 0 <= motion_origin.y() <= secondary_scroll.height()
+
+    page_titles = {
+        "HOME": "翻译控制台",
+        "CAPTURE": "画面捕获",
+        "OCR": "文字识别",
+        "TRANSLATION": "译文设置",
+        "OVERLAY": "字幕叠加",
+        "CACHE": "翻译缓存",
+        "SETTINGS": "高级设置",
+    }
+    for page, title in page_titles.items():
+        controller.setPage(page)
+        app.processEvents()
+        assert window.findChild(QObject, "pageDisplayTitleLight").property("text") == title
+
+    controller.setPage("HOME")
+    app.processEvents()
+    create_dialog = window.findChild(QObject, "createProfileDialog")
+    assert create_dialog is not None
+    _open_dialog(create_dialog)
+    _assert_prism_dialog_palette(window, theme, "createProfileDialog", dark=False)
+    _click_quick_item(window, "createProfileDialogRejectButton")
+
+    controller.setPage("CAPTURE")
+    app.processEvents()
+    assert window.findChild(QObject, "pageDisplayTitleLight").property("text") == "画面捕获"
+    controller.setPage("HOME")
+    controller.setSkin(SKIN_PRISM)
+    app.processEvents()
+    assert controller.themePreference == "dark"
+    assert theme.property("dohna") is False
+    assert theme.property("dark") is True
+    assert stage.property("visible") is True
     host.shutdown()
 
 

@@ -226,7 +226,7 @@ class QmlWorkbenchHost(QObject):
         self._window: QQuickWindow | None = None
         self._last_geometry: QRect | None = None
         self._was_maximized = False
-        self._last_theme_signature: tuple[int, str, str] | None = None
+        self._last_theme_signature: tuple[int, str, str, str] | None = None
         self._tray_icon: QSystemTrayIcon | None = None
 
         set_window_icon = getattr(self._application, "setWindowIcon", None)
@@ -300,9 +300,10 @@ class QmlWorkbenchHost(QObject):
         window = self._window
         if window is None:
             return
-        preference = self._controller.themePreference
+        skin = getattr(self._controller, "skinPreference", "prism")
+        preference = "light" if skin == "dohna" else self._controller.themePreference
         effective_theme = self._controller.effectiveTheme
-        signature = (id(window), preference, effective_theme)
+        signature = (id(window), skin, preference, effective_theme)
         if not force and signature == self._last_theme_signature:
             return
         # Record first: setting QStyleHints can synchronously emit a color-scheme

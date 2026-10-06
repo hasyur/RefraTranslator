@@ -6,12 +6,13 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 from game_screen_translator.config import load_config
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.gui.qml_workbench import QmlWorkbenchHost
-from game_screen_translator.gui.theme import THEME_DARK, THEME_LIGHT
+from game_screen_translator.gui.theme import THEME_DARK, THEME_LIGHT, SKIN_DOHNA, SKIN_PRISM
 from game_screen_translator.gui.workbench_controller import WorkbenchController
 from game_screen_translator.profiles import (
     ProfileCaptureSettings,
@@ -28,6 +29,25 @@ def main() -> int:
     dark_output_path = output_dir / "launcher_preview.png"
     light_output_path = output_dir / "launcher_preview_light.png"
     minimum_output_path = output_dir / "launcher_preview_minimum.png"
+    dohna_home_output_path = output_dir / "launcher_preview_dohna_home.png"
+    dohna_home_minimum_output_path = output_dir / "launcher_preview_dohna_home_minimum.png"
+    dohna_capture_output_path = output_dir / "launcher_preview_dohna_capture.png"
+    dohna_minimum_output_path = output_dir / "launcher_preview_dohna_minimum.png"
+    app = QApplication.instance() or QApplication([])
+
+    for font_name in (
+        "bahnschrift.ttf",
+        "segoeui.ttf",
+        "segoeuib.ttf",
+        "seguisym.ttf",
+        "consola.ttf",
+        "msyh.ttc",
+        "msyhbd.ttc",
+        "ariblk.ttf",
+    ):
+        font_path = Path("C:/Windows/Fonts") / font_name
+        if font_path.is_file():
+            QFontDatabase.addApplicationFont(str(font_path))
     with tempfile.TemporaryDirectory(dir=output_dir) as temporary_dir:
         config_path = Path(temporary_dir) / "config.toml"
         config_path.write_text(
@@ -67,17 +87,17 @@ target_language = "简体中文"
             target_language=config.translation.target_language,
         )
 
-        app = QApplication.instance() or QApplication([])
-
         def render(
             theme: str,
             page: str,
             output_path: Path,
             *,
             size: tuple[int, int] = (1440, 960),
+            skin: str = SKIN_PRISM,
         ) -> None:
             controller = WorkbenchController(config_path, probe_ocr_devices=False)
             controller.setTheme(theme)
+            controller.setSkin(skin)
             controller.setReducedMotion(True)
             controller.setPage(page)
             host = QmlWorkbenchHost(controller, application=app)
@@ -105,9 +125,39 @@ target_language = "简体中文"
             minimum_output_path,
             size=(980, 700),
         )
+        render(
+            THEME_DARK,
+            "HOME",
+            dohna_home_output_path,
+            skin=SKIN_DOHNA,
+        )
+        render(
+            THEME_DARK,
+            "HOME",
+            dohna_home_minimum_output_path,
+            size=(980, 700),
+            skin=SKIN_DOHNA,
+        )
+        render(
+            THEME_DARK,
+            "CAPTURE",
+            dohna_capture_output_path,
+            skin=SKIN_DOHNA,
+        )
+        render(
+            THEME_DARK,
+            "SETTINGS",
+            dohna_minimum_output_path,
+            size=(980, 700),
+            skin=SKIN_DOHNA,
+        )
     print(dark_output_path)
     print(light_output_path)
     print(minimum_output_path)
+    print(dohna_home_output_path)
+    print(dohna_home_minimum_output_path)
+    print(dohna_capture_output_path)
+    print(dohna_minimum_output_path)
     return 0
 
 
