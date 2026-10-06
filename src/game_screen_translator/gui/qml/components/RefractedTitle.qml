@@ -52,6 +52,9 @@ Item {
             if (root.theme.reducedMotion)
                 root.settleRefraction()
         }
+        function onDohnaChanged() {
+            root.settleRefraction()
+        }
     }
 
     Text {
@@ -67,6 +70,10 @@ Item {
         font.letterSpacing: root.theme.dohna ? 0 : -root.titleSize * 0.035
         renderType: Text.CurveRendering
         renderTypeQuality: Text.VeryHighRenderTypeQuality
+        transform: Translate {
+            x: root.theme.dohna ? root.refractionEnergy * 10 : 0
+            y: root.theme.dohna ? -root.refractionEnergy * 2 : 0
+        }
     }
 
     Text {
@@ -217,14 +224,14 @@ Item {
                 target: root
                 property: "refractionShift"
                 to: 3
-                duration: 175
+                duration: root.theme.dohna ? root.theme.popActionMotion : 175
                 easing.type: Easing.OutCubic
             }
             NumberAnimation {
                 target: root
                 property: "refractionEnergy"
                 to: 0
-                duration: 205
+                duration: root.theme.dohna ? root.theme.popPageMotion : 205
                 easing.type: Easing.OutCubic
             }
         }

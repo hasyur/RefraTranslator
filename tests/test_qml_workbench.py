@@ -1064,6 +1064,111 @@ def test_real_profile_dropdown_switches_and_restores_runtime_state(
     host.shutdown()
 
 
+@pytest.mark.parametrize("skin", [SKIN_PRISM, SKIN_DOHNA])
+def test_real_skin_dropdown_highlight_uses_skin_specific_surface(
+    tmp_path: Path,
+    skin: str,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(skin)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+
+    window = host.window
+    assert window is not None
+    selector = window.findChild(QObject, "homeSkinSelector")
+    theme = window.findChild(QObject, "prismTheme")
+    assert isinstance(selector, QQuickItem)
+    assert theme is not None
+    center = selector.mapToScene(
+        QPointF(selector.width() / 2, selector.height() / 2)
+    ).toPoint()
+    QTest.mouseClick(
+        window,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        center,
+    )
+    app.processEvents()
+
+    def wait_for_delegates(object_name: str, minimum: int = 1) -> list[QQuickItem]:
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            app.processEvents()
+            delegates = _find_quick_items(window, object_name)
+            if len(delegates) >= minimum:
+                return delegates
+            QTest.qWait(10)
+        return _find_quick_items(window, object_name)
+
+    def assert_prism_highlight(delegates: list[QQuickItem]) -> None:
+        assert delegates
+        input_surface = QColor(theme.property("inputSurface"))
+        accent = QColor(theme.property("accent"))
+        colors = [QColor(delegate.property("color")) for delegate in delegates]
+        highlighted = [color for color in colors if color != input_surface]
+        assert highlighted
+        for color in highlighted:
+            assert (color.red(), color.green(), color.blue()) == (
+                accent.red(),
+                accent.green(),
+                accent.blue(),
+            )
+            assert 0 < color.alpha() < 255
+        if len(colors) >= 2:
+            assert input_surface in colors
+            assert len({color.name(QColor.HexArgb) for color in colors}) >= 2
+
+    if skin == SKIN_PRISM:
+        rows = wait_for_delegates(
+            "prismComboBoxDelegatePrismBackground",
+            minimum=2,
+        )
+        assert_prism_highlight(rows)
+
+        assert selector.property("highlightedIndex") == 0
+        QTest.keyClick(window, Qt.Key.Key_Down)
+        rows = wait_for_delegates(
+            "prismComboBoxDelegatePrismBackground",
+            minimum=2,
+        )
+        assert selector.property("highlightedIndex") == 1
+        assert_prism_highlight(rows)
+    else:
+        cuts = wait_for_delegates("prismComboBoxDohnaDelegateCut")
+        assert cuts
+        assert any(
+            item.property("visible") is True
+            and item.property("width") == selector.width()
+            and item.property("height") > 0
+            for item in cuts
+        )
+        QTest.keyClick(window, Qt.Key.Key_Up)
+        cuts = wait_for_delegates("prismComboBoxDohnaDelegateCut")
+        assert selector.property("highlightedIndex") == 0
+        assert any(
+            item.property("visible") is True
+            and item.property("width") == selector.width()
+            and item.property("height") > 0
+            for item in cuts
+        )
+
+    QTest.keyClick(window, Qt.Key.Key_Escape)
+    app.processEvents()
+    host.shutdown()
+
+
 def test_profile_and_external_model_names_use_one_control(tmp_path: Path) -> None:
     app = _application()
     config_path = tmp_path / "config.toml"
@@ -1810,6 +1915,183 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     host.shutdown()
 
 
+def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setTheme("dark")
+    controller.setSkin(SKIN_DOHNA)
+    controller.setReducedMotion(False)
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+
+    window = host.window
+    assert window is not None
+    theme = window.findChild(QObject, "prismTheme")
+    stage = window.findChild(QObject, "opticalStage")
+    feedback = window.findChild(QObject, "dohnaFeedbackLayer")
+    sweep = window.findChild(QObject, "pageTransitionSweep")
+    page_impact = window.findChild(QObject, "dohnaPageImpact")
+    panel_body = window.findChild(QObject, "prismPanelDohnaBody")
+    toggle_cut = window.findChild(QObject, "prismToggleDohnaCut")
+    save_button = window.findChild(QObject, "saveAllButton")
+    nav_button = _find_quick_item(window, "navigationButton1")
+    required_items = {
+        "theme": theme,
+        "stage": stage,
+        "feedback": feedback,
+        "sweep": sweep,
+        "page_impact": page_impact,
+        "panel_body": panel_body,
+        "toggle_cut": toggle_cut,
+        "save_button": save_button,
+        "nav_button": nav_button,
+    }
+    assert all(item is not None for item in required_items.values()), [
+        name for name, item in required_items.items() if item is None
+    ]
+    assert theme.property("dohna") is True
+    assert stage.property("motionEnabled") is False
+    assert sweep.property("visible") is False
+    assert panel_body.property("visible") is True
+    assert panel_body.property("width") > 0
+    assert panel_body.property("height") > 0
+    assert toggle_cut.property("width") == 34
+    assert toggle_cut.property("height") == 18
+    for path_name in (
+        "prismToggleDohnaPathTopRight",
+        "prismToggleDohnaPathBottomRight",
+        "prismToggleDohnaPathBottomLeft",
+    ):
+        path = toggle_cut.findChild(QObject, path_name)
+        assert path is not None
+        assert 0 <= float(path.property("x")) <= float(toggle_cut.property("width"))
+        assert 0 <= float(path.property("y")) <= float(toggle_cut.property("height"))
+    dohna_shape = save_button.findChild(QObject, "prismButtonDohnaCut")
+    assert dohna_shape is not None
+    assert dohna_shape.property("visible") is True
+
+    skin_selector = window.findChild(QObject, "homeSkinSelector")
+    assert skin_selector is not None
+    selector_center = skin_selector.mapToScene(
+        QPointF(skin_selector.width() / 2, skin_selector.height() / 2)
+    ).toPoint()
+    QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=selector_center)
+    app.processEvents()
+    delegate_cuts = _find_quick_items(
+        window, "prismComboBoxDohnaDelegateCut"
+    )
+    assert delegate_cuts
+    assert any(
+        item.property("visible") is True
+        and item.property("width") == skin_selector.width()
+        and item.property("height") > 0
+        for item in delegate_cuts
+    )
+    QTest.keyClick(window, Qt.Key.Key_Escape)
+    app.processEvents()
+
+    controller.setPage("CAPTURE")
+    app.processEvents()
+    assert window.property("pageContentReady") is True
+    assert window.property("pageTransitioning") is True
+    assert feedback.property("pagePulseRunning") is True
+    assert page_impact.property("visible") is True
+    QTest.qWait(int(theme.property("popPageMotion")) + 80)
+    app.processEvents()
+    assert feedback.property("pagePulseRunning") is False
+    assert window.property("pageTransitioning") is False
+    assert page_impact.property("visible") is False
+
+    # The selected navigation face and ordinary action face are both slanted;
+    # pressing an ordinary real button gives a local offset without rotating
+    # its text hit target.
+    nav_cut = nav_button.findChild(QObject, "prismNavigationCut")
+    assert nav_cut is not None
+    assert nav_cut.property("visible") is True
+    button_center = save_button.mapToScene(
+        QPointF(save_button.width() / 2, save_button.height() / 2)
+    ).toPoint()
+    QTest.mouseMove(window, button_center)
+    QTest.mousePress(window, Qt.MouseButton.LeftButton, pos=button_center)
+    app.processEvents()
+    assert save_button.property("down") is True
+    assert save_button.findChild(QObject, "prismButtonDohnaFocusSlash").property(
+        "visible"
+    ) is True
+    assert float(save_button.property("dohnaImpact")) >= 0
+    QTest.mouseRelease(window, Qt.MouseButton.LeftButton, pos=button_center)
+    QTest.qWait(int(theme.property("popPressMotion")) + 50)
+    app.processEvents()
+    assert float(save_button.property("dohnaImpact")) == 0
+
+    # Save and error signals use the real controller boundary and each create
+    # one short visual pulse.
+    controller.setPage("SETTINGS")
+    QTest.qWait(int(theme.property("popPageMotion")) + 40)
+    app.processEvents()
+    _click_quick_item(window, "saveAllButton")
+    assert feedback.property("actionPulseRunning") is True
+    action_sequence = int(feedback.property("actionSequence"))
+    QTest.qWait(int(theme.property("popActionMotion")) + 60)
+    app.processEvents()
+    assert feedback.property("actionPulseRunning") is False
+    assert int(feedback.property("actionSequence")) == action_sequence
+
+    controller.reportHostError("测试错误", "反馈动画")
+    app.processEvents()
+    assert feedback.property("warningPulseRunning") is True
+    error_dialog = window.findChild(QObject, "errorDialog")
+    assert error_dialog is not None
+    _click_quick_item(window, "errorDialogAcceptButton")
+    QTest.qWait(int(theme.property("popWarningMotion")) + 60)
+    app.processEvents()
+    assert feedback.property("warningPulseRunning") is False
+
+    # Reduced motion and hiding the window immediately stop every Dohna pulse.
+    assert QMetaObject.invokeMethod(feedback, "pulseStart") is True
+    app.processEvents()
+    assert feedback.property("startPulseRunning") is True
+    controller.setReducedMotion(True)
+    app.processEvents()
+    assert feedback.property("reducedMotion") is True
+    assert feedback.property("startPulseRunning") is False
+    assert feedback.property("pagePulseRunning") is False
+    controller.setReducedMotion(False)
+    controller.setPage("HOME")
+    app.processEvents()
+    assert QMetaObject.invokeMethod(feedback, "pulseStart") is True
+    window.hide()
+    app.processEvents()
+    assert feedback.property("motionEnabled") is False
+    assert feedback.property("startPulseRunning") is False
+    window.show()
+    app.processEvents()
+
+    controller.setPage("OCR")
+    app.processEvents()
+    assert feedback.property("pagePulseRunning") is True
+    controller.setSkin(SKIN_PRISM)
+    app.processEvents()
+    assert stage.property("motionEnabled") is True
+    assert sweep.property("visible") is True
+    assert feedback.property("visible") is False
+    assert feedback.property("pagePulseRunning") is False
+    assert window.property("pageTransitioning") is False
+    assert window.property("pageContentReady") is True
+    host.shutdown()
+
+
 def test_real_prism_dialogs_follow_dark_and_light_themes_and_keep_actions(
     tmp_path: Path,
 ) -> None:
@@ -2493,6 +2775,66 @@ def test_real_ocr_quality_slider_snaps_three_presets_and_keeps_merge_guard(
     app.processEvents()
     assert controller.detectionQualityIndex == 0
     assert controller.textMergeAllowed is False
+    host.shutdown()
+
+
+@pytest.mark.parametrize("skin", [SKIN_PRISM, SKIN_DOHNA])
+def test_real_slider_press_feedback_uses_skin_specific_accent(
+    tmp_path: Path,
+    skin: str,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(skin)
+    controller.setPage("OCR")
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+
+    window = host.window
+    assert window is not None
+    slider = _find_quick_item(window, "ocrQualitySlider")
+    theme = window.findChild(QObject, "prismTheme")
+    assert isinstance(slider, QQuickItem)
+    assert theme is not None
+    handle = slider.property("handle")
+    assert isinstance(handle, QQuickItem)
+    point = _slider_scene_point(slider, float(slider.property("visualPosition")))
+
+    QTest.mouseMove(window, point)
+    QTest.mousePress(
+        window,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        point,
+    )
+    app.processEvents()
+    assert slider.property("pressed") is True
+    expected_pressed = QColor(
+        theme.property("violet") if skin == SKIN_DOHNA else theme.property("accent")
+    )
+    assert QColor(handle.property("color")) == expected_pressed
+
+    QTest.mouseRelease(
+        window,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        point,
+    )
+    app.processEvents()
+    assert slider.property("pressed") is False
+    assert QColor(handle.property("color")) == QColor(
+        theme.property("inkRaised")
+    )
     host.shutdown()
 
 
@@ -3813,8 +4155,10 @@ def test_capture_custom_action_preserves_cancel_and_applies_boundary_edits(
     host.shutdown()
 
 
+@pytest.mark.parametrize("skin", [SKIN_PRISM, SKIN_DOHNA])
 def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     tmp_path: Path,
+    skin: str,
 ) -> None:
     class RecordingController(WorkbenchController):
         def __init__(self, config_path: Path) -> None:
@@ -3835,20 +4179,29 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
         display_name="测试游戏",
     )
     controller = RecordingController(config_path)
+    controller.setSkin(skin)
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
     app.processEvents()
     window = host.window
     assert window is not None
+    theme = window.findChild(QObject, "prismTheme")
     stage = window.findChild(QObject, "opticalStage")
     start_feedback = window.findChild(QObject, "startPreludeFeedback")
+    dohna_feedback = window.findChild(QObject, "dohnaFeedbackLayer")
     assert stage is not None
     assert start_feedback is not None
+    assert dohna_feedback is not None
+    assert theme is not None
 
     _click_quick_item(window, "startLiveButton")
     assert window.property("startPreludePending") is True
     assert controller.toggle_calls == 0
-    assert stage.property("startPreludeRunning") is True
+    if skin == SKIN_DOHNA:
+        assert stage.property("startPreludeRunning") is False
+        assert dohna_feedback.property("startPulseRunning") is True
+    else:
+        assert stage.property("startPreludeRunning") is True
     assert stage.property("startPreludeSequence") == 1
     QTest.qWait(280)
     assert controller.toggle_calls == 0
@@ -3867,12 +4220,29 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     assert controller.toggle_calls == 2
     assert window.property("startPreludePending") is False
     assert start_feedback.property("visible") is False
+    assert dohna_feedback.property("startPulseRunning") is False
     QTest.qWait(16)
     app.processEvents()
     assert stage.property("startPreludeRunning") is False
 
     _click_quick_item(window, "startLiveButton")
     assert controller.toggle_calls == 3
+    assert window.property("startPreludePending") is False
+
+    # Switching skins during the pending prelude must settle only the visual
+    # pulse; the one-shot timer still toggles the real controller exactly once.
+    controller.setReducedMotion(False)
+    controller.setSkin(SKIN_DOHNA if skin == SKIN_PRISM else SKIN_PRISM)
+    app.processEvents()
+    _click_quick_item(window, "startLiveButton")
+    assert window.property("startPreludePending") is True
+    pending_calls = controller.toggle_calls
+    controller.setSkin(skin)
+    app.processEvents()
+    assert window.property("startPreludePending") is True
+    QTest.qWait(int(theme.property("startPreludeMotion")) + 70)
+    app.processEvents()
+    assert controller.toggle_calls == pending_calls + 1
     assert window.property("startPreludePending") is False
     host.shutdown()
 
@@ -3938,7 +4308,7 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
     assert "setDynamicRoiEnabled" not in settings_source
     assert settings_source.count('root.visualAction("calibrate")') >= 8
     assert 'objectName: "saveAllButton"' in main_source
-    assert 'stage.pulseAction("calibrate")' in main_source
+    assert 'root.pulseVisualAction("calibrate")' in main_source
     assert "TransientFeedbackLayer" in main_source
     assert "pageActionFeedback" not in feedback_source
     assert "startPreludeFeedback" in feedback_source

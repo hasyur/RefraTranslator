@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import os
 import tempfile
+from argparse import ArgumentParser
+from io import BytesIO
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PIL import Image
+from PySide6.QtCore import QBuffer, QIODevice, QPointF, Qt
 from PySide6.QtGui import QFontDatabase
+from PySide6.QtQuick import QQuickItem
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from game_screen_translator.config import load_config
@@ -23,6 +29,13 @@ from game_screen_translator.profiles import (
 
 
 def main() -> int:
+    parser = ArgumentParser(description="Render isolated RefraTranslator QML previews")
+    parser.add_argument(
+        "--motion",
+        action="store_true",
+        help="also capture a short real-QML Dohna page-transition GIF",
+    )
+    args = parser.parse_args()
     project_root = Path(__file__).resolve().parents[1]
     output_dir = project_root / "output"
     output_dir.mkdir(exist_ok=True)
@@ -33,6 +46,7 @@ def main() -> int:
     dohna_home_minimum_output_path = output_dir / "launcher_preview_dohna_home_minimum.png"
     dohna_capture_output_path = output_dir / "launcher_preview_dohna_capture.png"
     dohna_minimum_output_path = output_dir / "launcher_preview_dohna_minimum.png"
+    dohna_motion_output_path = output_dir / "launcher_preview_dohna_motion.gif"
     app = QApplication.instance() or QApplication([])
 
     for font_name in (
@@ -113,6 +127,88 @@ target_language = "简体中文"
             host.shutdown()
             app.processEvents()
 
+        def render_motion(output_path: Path) -> None:
+            controller = WorkbenchController(config_path, probe_ocr_devices=False)
+            controller.setTheme(THEME_DARK)
+            controller.setSkin(SKIN_DOHNA)
+            controller.setReducedMotion(False)
+            controller.setPage("HOME")
+            host = QmlWorkbenchHost(controller, application=app)
+            window = host.window
+            if window is None:
+                raise RuntimeError("QML 工作台没有创建窗口")
+            window.resize(1280, 820)
+            host.show()
+            app.processEvents()
+
+            frames = []
+
+            def find_quick_item(item: QQuickItem, object_name: str):
+                if item.objectName() == object_name:
+                    return item
+                for child in item.childItems():
+                    match = find_quick_item(child, object_name)
+                    if match is not None:
+                        return match
+                return None
+
+            def capture_frame() -> None:
+                app.processEvents()
+                image = window.grabWindow()
+                if image.isNull():
+                    raise RuntimeError("无法抓取 QML 动效帧")
+                buffer = QBuffer()
+                buffer.open(QIODevice.WriteOnly)
+                image.save(buffer, "PNG")
+                frames.append(
+                    Image.open(BytesIO(bytes(buffer.data()))).convert("RGB")
+                )
+
+            def capture_frames(count: int, *, delay_ms: int = 45) -> None:
+                for _ in range(count):
+                    capture_frame()
+                    QTest.qWait(delay_ms)
+
+            # Let HOME settle, then drive the same navigation hit target a
+            # user sees: hover, press, release, and observe the short page pop.
+            QTest.qWait(360)
+            capture_frames(10)
+            navigation_button = find_quick_item(window.contentItem(), "navigationButton1")
+            if navigation_button is None:
+                raise RuntimeError("无法找到 Dohna 导航命中区")
+            navigation_point = navigation_button.mapToScene(
+                QPointF(navigation_button.width() / 2, navigation_button.height() / 2)
+            ).toPoint()
+            QTest.mouseMove(window, navigation_point)
+            capture_frames(3)
+            QTest.mousePress(
+                window,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                navigation_point,
+            )
+            capture_frames(3)
+            QTest.mouseRelease(
+                window,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                navigation_point,
+            )
+            capture_frames(14)
+            capture_frames(10)
+
+            frames[0].save(
+                output_path,
+                save_all=True,
+                append_images=frames[1:],
+                duration=45,
+                loop=0,
+                disposal=2,
+            )
+            window.close()
+            host.shutdown()
+            app.processEvents()
+
         render(THEME_DARK, "HOME", dark_output_path)
         save_profile_capture_settings(
             profile,
@@ -151,6 +247,8 @@ target_language = "简体中文"
             size=(980, 700),
             skin=SKIN_DOHNA,
         )
+        if args.motion:
+            render_motion(dohna_motion_output_path)
     print(dark_output_path)
     print(light_output_path)
     print(minimum_output_path)
@@ -158,6 +256,8 @@ target_language = "简体中文"
     print(dohna_home_minimum_output_path)
     print(dohna_capture_output_path)
     print(dohna_minimum_output_path)
+    if args.motion:
+        print(dohna_motion_output_path)
     return 0
 
 

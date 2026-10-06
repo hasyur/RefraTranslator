@@ -31,6 +31,8 @@ ApplicationWindow {
     readonly property bool reduceMotion: boundWorkbench.reducedMotion
     property string lastAnimatedPage: ""
     readonly property bool pageTransitioning: pageTransitionAnimation.running
+                                              || dohnaPageTransitionAnimation.running
+                                              || dohnaFeedback.pagePulseRunning
     property int pageTransitionSequence: 0
     property bool startPreludePending: false
 
@@ -130,15 +132,42 @@ ApplicationWindow {
         tertiaryRail.opacity = prism.tertiaryRailOpacity
     }
 
+    function pulseVisualAction(action) {
+        stage.pulseAction(action)
+        dohnaFeedback.pulseAction(action)
+    }
+
+    function pulseVisualWarning() {
+        stage.pulseWarning()
+        dohnaFeedback.pulseWarning()
+    }
+
+    function pulseVisualStart() {
+        stage.pulseStart()
+        dohnaFeedback.pulseStart()
+    }
+
     function beginPageTransition() {
         if (visualPage === lastAnimatedPage)
             return
         lastAnimatedPage = visualPage
         pageTransitionSequence += 1
+        dohnaFeedback.pulsePage()
         if (reduceMotion || !visible) {
             pageTransitionAnimation.stop()
+            dohnaPageTransitionAnimation.stop()
             pageContentReady = true
             settlePageTransition()
+            return
+        }
+        if (prism.dohna) {
+            pageTransitionAnimation.stop()
+            pageContentReady = true
+            pageContentMotion.opacity = 1
+            pageContentTranslate.x = 18
+            pageHeaderSlice.opacity = 1
+            pageHeaderTranslate.x = 18
+            dohnaPageTransitionAnimation.restart()
             return
         }
         pageContentReady = false
@@ -169,15 +198,17 @@ ApplicationWindow {
             return
         }
         startPreludePending = true
-        stage.pulseStart()
+        pulseVisualStart()
         startPreludeTimer.restart()
     }
 
     function settleReducedMotion() {
         pageTransitionAnimation.stop()
+        dohnaPageTransitionAnimation.stop()
         pageContentReady = true
         settlePageTransition()
         stage.settleMotion()
+        dohnaFeedback.settle()
         if (startPreludePending)
             completeStartPrelude()
     }
@@ -196,8 +227,10 @@ ApplicationWindow {
                 startPreludeTimer.stop()
                 startPreludePending = false
                 stage.settleMotion()
+                dohnaFeedback.settle()
             }
             pageTransitionAnimation.stop()
+            dohnaPageTransitionAnimation.stop()
             pageContentReady = true
             settlePageTransition()
         }
@@ -217,6 +250,17 @@ ApplicationWindow {
         dark: root.boundWorkbench.effectiveTheme !== "light"
         dohna: root.boundWorkbench.skinPreference === "dohna"
         reducedMotion: root.boundWorkbench.reducedMotion
+    }
+
+    Connections {
+        target: prism
+        function onDohnaChanged() {
+            pageTransitionAnimation.stop()
+            dohnaPageTransitionAnimation.stop()
+            root.pageContentReady = true
+            root.settlePageTransition()
+            dohnaFeedback.settle()
+        }
     }
 
     background: Rectangle {
@@ -258,7 +302,7 @@ ApplicationWindow {
         function onErrorRaised(title, message) {
             errorDialog.errorTitle = title
             errorDialog.errorMessage = message
-            stage.pulseWarning()
+            root.pulseVisualWarning()
             errorDialog.open()
         }
     }
@@ -393,7 +437,7 @@ ApplicationWindow {
                 page: root.boundWorkbench.currentPage
                 pageTransitionSequence: root.pageTransitionSequence
                 reducedMotion: root.boundWorkbench.reducedMotion
-                motionEnabled: root.animationsRunning
+                motionEnabled: root.animationsRunning && !prism.dohna
                 visible: !prism.dohna
                 opacity: prism.opticalStageOpacity
                          * (page === "CAPTURE" ? 0.25 : 1)
@@ -458,12 +502,12 @@ ApplicationWindow {
                                 Rectangle {
                                     objectName: "pageHeaderUnderline"
                                     width: Math.min(parent.width * 0.72, 420)
-                                    height: 1
+                                    height: prism.dohna ? 5 : 1
                                     anchors.left: parent.left
                                     anchors.bottom: parent.bottom
                                     color: prism.accent
-                                    opacity: 0.46
-                                    rotation: -1.2
+                                    opacity: prism.dohna ? 1 : 0.46
+                                    rotation: prism.dohna ? -1.8 : -1.2
                                     antialiasing: true
                                 }
                             }
@@ -492,7 +536,7 @@ ApplicationWindow {
                             onClicked: {
                                 root.boundWorkbench.saveAll()
                                 if (root.boundWorkbench.currentPage === "SETTINGS")
-                                    stage.pulseAction("calibrate")
+                                    root.pulseVisualAction("calibrate")
                             }
                         }
                         PrismButton {
@@ -539,7 +583,7 @@ ApplicationWindow {
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
                                 pageMotionEnabled: root.pageMotionEnabled
-                                onVisualAction: action => stage.pulseAction(action)
+                                onVisualAction: action => root.pulseVisualAction(action)
                             }
                             OcrPage {
                                 objectName: "ocrPage"
@@ -547,7 +591,7 @@ ApplicationWindow {
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
                                 pageMotionEnabled: root.pageMotionEnabled
-                                onVisualAction: action => stage.pulseAction(action)
+                                onVisualAction: action => root.pulseVisualAction(action)
                             }
                             TranslationPage {
                                 objectName: "translationPage"
@@ -555,7 +599,7 @@ ApplicationWindow {
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
                                 pageMotionEnabled: root.pageMotionEnabled
-                                onVisualAction: action => stage.pulseAction(action)
+                                onVisualAction: action => root.pulseVisualAction(action)
                             }
                             OverlayPage {
                                 objectName: "overlayPage"
@@ -563,7 +607,7 @@ ApplicationWindow {
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
                                 pageMotionEnabled: root.pageMotionEnabled
-                                onVisualAction: action => stage.pulseAction(action)
+                                onVisualAction: action => root.pulseVisualAction(action)
                             }
                             CachePage {
                                 objectName: "cachePage"
@@ -571,7 +615,7 @@ ApplicationWindow {
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
                                 pageMotionEnabled: root.pageMotionEnabled
-                                onVisualAction: action => stage.pulseAction(action)
+                                onVisualAction: action => root.pulseVisualAction(action)
                             }
                             SettingsPage {
                                 objectName: "settingsPage"
@@ -579,7 +623,7 @@ ApplicationWindow {
                                 workbench: root.boundWorkbench
                                 transitionSerial: root.pageTransitionSequence
                                 pageMotionEnabled: root.pageMotionEnabled
-                                onVisualAction: action => stage.pulseAction(action)
+                                onVisualAction: action => root.pulseVisualAction(action)
                             }
                         }
                     }
@@ -598,6 +642,7 @@ ApplicationWindow {
                     Rectangle {
                         id: transitionSweep
                         objectName: "pageTransitionSweep"
+                        visible: !prism.dohna
                         readonly property real accentAlpha: prism.sweepAccentAlpha
                         readonly property real spectrumAlpha: prism.sweepSpectrumAlpha
                         width: Math.max(190, parent.width * 0.28)
@@ -627,7 +672,7 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 34
-                    color: prism.navigationSurface
+                    color: prism.dohna ? prism.ink : prism.navigationSurface
                     border.color: prism.line
 
                     RowLayout {
@@ -671,7 +716,37 @@ ApplicationWindow {
                 startRunning: stage.startPreludeRunning
                 reducedMotion: root.reduceMotion
             }
+
+            DohnaFeedbackLayer {
+                id: dohnaFeedback
+                objectName: "dohnaFeedbackLayer"
+                anchors.fill: parent
+                theme: prism
+                reducedMotion: root.reduceMotion
+                motionEnabled: root.animationsRunning
+            }
         }
+    }
+
+    SequentialAnimation {
+        id: dohnaPageTransitionAnimation
+        ParallelAnimation {
+            NumberAnimation {
+                target: pageContentTranslate
+                property: "x"
+                to: 0
+                duration: prism.popPageMotion
+                easing.type: Easing.OutBack
+            }
+            NumberAnimation {
+                target: pageHeaderTranslate
+                property: "x"
+                to: 0
+                duration: prism.popActionMotion
+                easing.type: Easing.OutCubic
+            }
+        }
+        ScriptAction { script: root.settlePageTransition() }
     }
 
     SequentialAnimation {

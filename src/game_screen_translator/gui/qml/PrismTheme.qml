@@ -100,9 +100,9 @@ QtObject {
     }
 
     readonly property real opticalStageOpacity: dohna ? 0 : (dark ? 0.64 : 0.56)
-    readonly property real sweepAccentAlpha: dark ? 0.48 : 0.34
-    readonly property real sweepSpectrumAlpha: dark ? 0.42 : 0.3
-    readonly property real tertiaryRailOpacity: dark ? 0.58 : 0.5
+    readonly property real sweepAccentAlpha: dohna ? 0 : (dark ? 0.48 : 0.34)
+    readonly property real sweepSpectrumAlpha: dohna ? 0 : (dark ? 0.42 : 0.3)
+    readonly property real tertiaryRailOpacity: dohna ? 0 : (dark ? 0.58 : 0.5)
     readonly property real feedbackLineWidth: 3
 
     readonly property int fast: reducedMotion ? 0 : 100
@@ -122,4 +122,9 @@ QtObject {
     readonly property int actionMotion: 520
     readonly property int settleMotion: 460
     readonly property int warningMotion: 780
+    readonly property int popPageMotion: reducedMotion ? 0 : 220
+    readonly property int popActionMotion: reducedMotion ? 0 : 180
+    readonly property int popStartMotion: reducedMotion ? 0 : 240
+    readonly property int popWarningMotion: reducedMotion ? 0 : 260
+    readonly property int popPressMotion: reducedMotion ? 0 : 120
 }

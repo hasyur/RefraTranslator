@@ -13,6 +13,7 @@ Item {
     readonly property bool reducedMotion: theme.reducedMotion
     readonly property bool entryRunning: panelEntry.running
     readonly property real visualOffsetX: panelTranslate.x
+    property real dohnaStamp: 1
     default property alias contentData: contentItem.data
 
     implicitWidth: 320
@@ -24,6 +25,8 @@ Item {
         panelEntry.running = false
         panelTranslate.x = 0
         root.opacity = 1
+        dohnaStamp = 1
+        dohnaStickerEntry.stop()
     }
 
     function playEntry() {
@@ -32,6 +35,8 @@ Item {
             return
         }
         panelEntry.restart()
+        if (theme.dohna)
+            dohnaStickerEntry.restart()
     }
 
     onTransitionSerialChanged: Qt.callLater(root.playEntry)
@@ -46,16 +51,71 @@ Item {
             settleEntry()
     }
 
+    Connections {
+        target: root.theme
+        function onDohnaChanged() {
+            root.settleEntry()
+        }
+    }
+
+    Shape {
+        objectName: "prismPanelDohnaBodyShadow"
+        visible: root.theme.dohna
+        x: 6
+        y: 6
+        width: root.width
+        height: root.height
+        z: -2
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+            strokeColor: "transparent"
+            fillColor: root.theme.stageShadow
+            startX: 12
+            startY: 0
+            PathLine { x: root.width - 8; y: 0 }
+            PathLine { x: root.width; y: 12 }
+            PathLine { x: root.width; y: root.height - 10 }
+            PathLine { x: root.width - 10; y: root.height }
+            PathLine { x: 12; y: root.height }
+            PathLine { x: 0; y: root.height - 10 }
+            PathLine { x: 0; y: 12 }
+            PathLine { x: 12; y: 0 }
+        }
+    }
+
+    Shape {
+        objectName: "prismPanelDohnaBody"
+        visible: root.theme.dohna
+        anchors.fill: parent
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+            strokeColor: root.theme.ink
+            strokeWidth: 3
+            fillColor: root.theme.white
+            startX: 12
+            startY: 0
+            PathLine { x: root.width - 8; y: 0 }
+            PathLine { x: root.width; y: 12 }
+            PathLine { x: root.width; y: root.height - 10 }
+            PathLine { x: root.width - 10; y: root.height }
+            PathLine { x: 12; y: root.height }
+            PathLine { x: 0; y: root.height - 10 }
+            PathLine { x: 0; y: 12 }
+            PathLine { x: 12; y: 0 }
+        }
+    }
+
     Rectangle {
         objectName: "prismPanelSurface"
         anchors.fill: parent
-        clip: true
-        color: root.raised ? root.theme.glassRaised : root.theme.glass
+        clip: !root.theme.dohna
+        color: root.theme.dohna ? "transparent" : (root.raised ? root.theme.glassRaised : root.theme.glass)
         border.color: root.theme.lineStrong
-        border.width: root.theme.dohna ? 3 : 1
+        border.width: root.theme.dohna ? 0 : 1
 
         Rectangle {
             objectName: "panelAccentEdge"
+            visible: !root.theme.dohna
             width: 2
             height: Math.min(parent.height * 0.28, 82)
             anchors.top: parent.top
@@ -66,6 +126,7 @@ Item {
 
         Rectangle {
             objectName: "panelSpectrumEdge"
+            visible: !root.theme.dohna
             width: Math.min(parent.width * 0.34, 160)
             height: 2
             anchors.left: parent.left
@@ -77,6 +138,7 @@ Item {
 
         Rectangle {
             objectName: "prismPanelTopLight"
+            visible: !root.theme.dohna
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
@@ -87,6 +149,7 @@ Item {
 
         Shape {
             objectName: "prismPanelCutFacet"
+            visible: !root.theme.dohna
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
@@ -105,6 +168,7 @@ Item {
 
         Rectangle {
             objectName: "prismPanelInsetRule"
+            visible: !root.theme.dohna
             x: 14
             y: 16
             width: Math.min(parent.width * 0.22, 96)
@@ -122,6 +186,52 @@ Item {
             height: 6
             color: root.theme.accent
         }
+
+        Rectangle {
+            objectName: "prismPanelDohnaShadow"
+            visible: root.theme.dohna
+            x: 22
+            y: parent.height - 13
+            width: Math.min(parent.width * 0.34, 150)
+            height: 7
+            rotation: 1
+            color: root.theme.stageShadow
+        }
+
+        Rectangle {
+            objectName: "prismPanelDohnaStampShadow"
+            visible: root.theme.dohna
+            x: parent.width - 91
+            y: -3
+            width: 88
+            height: 24
+            rotation: -6
+            color: root.theme.stageShadow
+            opacity: root.dohnaStamp
+        }
+
+        Shape {
+            objectName: "prismPanelDohnaStamp"
+            visible: root.theme.dohna
+            x: parent.width - 96
+            y: -8
+            width: 88
+            height: 24
+            rotation: -6 + root.dohnaStamp * 2
+            opacity: root.dohnaStamp
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.theme.ink
+                strokeWidth: 2
+                fillColor: root.theme.violet
+                startX: 0
+                startY: 2
+                PathLine { x: 78; y: 0 }
+                PathLine { x: 88; y: 22 }
+                PathLine { x: 8; y: 24 }
+                PathLine { x: 0; y: 2 }
+            }
+        }
     }
 
     Item {
@@ -132,7 +242,7 @@ Item {
 
     Rectangle {
         objectName: "prismPanelPrintShadow"
-        visible: root.theme.dohna
+        visible: false
         x: 5
         y: 5
         width: root.width
@@ -153,22 +263,38 @@ Item {
             value: root.motionRole === "secondary" ? 18 : 15
         }
         PropertyAction { target: root; property: "opacity"; value: root.motionRole === "secondary" ? 0 : 0.1 }
-        PauseAnimation { duration: root.motionRole === "secondary" ? 58 : 0 }
+        PauseAnimation { duration: root.theme.dohna ? 0 : (root.motionRole === "secondary" ? 58 : 0) }
         ParallelAnimation {
             NumberAnimation {
                 target: panelTranslate
                 property: "x"
                 to: 0
-                duration: root.motionRole === "secondary" ? root.theme.pageSecondaryMotion : root.theme.pageMotion
+                duration: root.theme.dohna
+                          ? root.theme.popPageMotion
+                          : (root.motionRole === "secondary" ? root.theme.pageSecondaryMotion : root.theme.pageMotion)
                 easing.type: Easing.OutQuart
             }
             NumberAnimation {
                 target: root
                 property: "opacity"
                 to: 1
-                duration: root.motionRole === "secondary" ? root.theme.pageSecondaryMotion : root.theme.pageMotion
+                duration: root.theme.dohna
+                          ? root.theme.popPageMotion
+                          : (root.motionRole === "secondary" ? root.theme.pageSecondaryMotion : root.theme.pageMotion)
                 easing.type: Easing.OutQuart
             }
+        }
+    }
+
+    SequentialAnimation {
+        id: dohnaStickerEntry
+        PropertyAction { target: root; property: "dohnaStamp"; value: 0 }
+        NumberAnimation {
+            target: root
+            property: "dohnaStamp"
+            to: 1
+            duration: root.theme.popActionMotion
+            easing.type: Easing.OutBack
         }
     }
 }

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 import QtQuick.Controls
 
 TextField {
@@ -22,9 +23,43 @@ TextField {
     font.pixelSize: 13
 
     background: Rectangle {
+        objectName: "prismTextFieldBackground"
+        clip: !root.theme.dohna
         color: root.theme.inputSurface
-        border.color: root.activeFocus ? root.theme.accent : root.theme.lineStrong
-        border.width: root.activeFocus ? 2 : 1
+        border.color: root.activeFocus ? root.theme.selectionEdge : root.theme.lineStrong
+        border.width: root.theme.dohna || root.activeFocus ? 2 : 1
+
+        Rectangle {
+            objectName: "prismTextFieldDohnaShadow"
+            visible: root.theme.dohna
+            x: 4
+            y: 4
+            width: parent.width
+            height: parent.height
+            color: root.theme.stageShadow
+            z: -1
+        }
+
+        Shape {
+            objectName: "prismTextFieldDohnaCorner"
+            visible: root.theme.dohna && root.activeFocus
+            anchors.right: parent.right
+            anchors.top: parent.top
+            width: 36
+            height: 16
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.theme.ink
+                strokeWidth: 1
+                fillColor: root.theme.violet
+                startX: 2
+                startY: 0
+                PathLine { x: 33; y: 0 }
+                PathLine { x: 36; y: 14 }
+                PathLine { x: 8; y: 16 }
+                PathLine { x: 2; y: 0 }
+            }
+        }
     }
 
     SettingHint {
