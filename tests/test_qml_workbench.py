@@ -1148,6 +1148,20 @@ def test_real_skin_dropdown_highlight_uses_skin_specific_surface(
     else:
         cuts = wait_for_delegates("prismComboBoxDohnaDelegateCut")
         assert cuts
+
+        def assert_borderless_selection() -> None:
+            for item in wait_for_delegates("prismComboBoxDohnaDelegateCut"):
+                path = item.findChild(QObject, "prismComboBoxDohnaDelegatePath")
+                assert path.property("strokeWidth") == 0
+                assert QColor(path.property("strokeColor")).alpha() == 0
+            for name in ("prismComboBoxDohnaBodyPath", "prismComboBoxDohnaPopupPath"):
+                paths = window.findChildren(QObject, name)
+                assert paths
+                assert all(path.property("strokeWidth") == 0 for path in paths)
+            assert selector.findChild(QObject, "prismComboBoxDohnaArrowFace") is None
+            assert not window.findChildren(QObject, "prismComboBoxDohnaPopupShadow")
+
+        assert_borderless_selection()
         assert any(
             item.property("visible") is True
             and item.property("x") >= 4
@@ -1178,6 +1192,12 @@ def test_real_skin_dropdown_highlight_uses_skin_specific_surface(
         ]
         assert QColor(theme.property("violet")) in colors
         assert QColor(theme.property("accent")) in colors
+        assert_borderless_selection()
+
+        # Border removal must keep the real keyboard selection path working.
+        QTest.keyClick(window, Qt.Key.Key_Return)
+        app.processEvents()
+        assert controller.skinPreference == SKIN_PRISM
 
     QTest.keyClick(window, Qt.Key.Key_Escape)
     app.processEvents()
@@ -1876,16 +1896,12 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     assert window.findChild(QObject, "homeDohnaThemeHint").property("visible") is True
     assert window.findChild(QObject, "pageDisplayTitleLight").property("text") == "翻译控制台"
     skin_body = skin_selector.findChild(QObject, "prismComboBoxDohnaBody")
-    skin_arrow = skin_selector.findChild(QObject, "prismComboBoxDohnaArrowFace")
-    skin_shadow = skin_selector.findChild(QObject, "prismComboBoxDohnaShadow")
     assert skin_body is not None
-    assert skin_arrow is not None
-    assert skin_shadow is not None
     assert skin_body.property("visible") is True
-    assert skin_arrow.property("visible") is True
+    assert skin_body.findChild(QObject, "prismComboBoxDohnaBodyPath").property("strokeWidth") == 0
+    assert skin_selector.findChild(QObject, "prismComboBoxDohnaArrowFace") is None
+    assert skin_selector.findChild(QObject, "prismComboBoxDohnaShadow") is None
     assert skin_selector.findChild(QObject, "prismComboBoxDohnaCorner") is None
-    assert skin_shadow.property("x") == 5
-    assert skin_shadow.property("y") == 5
 
     secondary_scroll = window.findChild(QObject, "homeSecondaryScroll")
     assert secondary_scroll is not None
@@ -1967,8 +1983,6 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     stage = window.findChild(QObject, "opticalStage")
     feedback = window.findChild(QObject, "dohnaFeedbackLayer")
     sweep = window.findChild(QObject, "pageTransitionSweep")
-    page_impact = window.findChild(QObject, "dohnaPageImpact")
-    page_impact_shadow = window.findChild(QObject, "dohnaPageImpactShadow")
     page_content = window.findChild(QObject, "pageContentMotion")
     content_translate = window.findChild(QObject, "pageContentTranslate")
     page_header = window.findChild(QObject, "pageHeaderSlice")
@@ -1982,8 +1996,6 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
         "stage": stage,
         "feedback": feedback,
         "sweep": sweep,
-        "page_impact": page_impact,
-        "page_impact_shadow": page_impact_shadow,
         "page_content": page_content,
         "content_translate": content_translate,
         "page_header": page_header,
@@ -1997,6 +2009,17 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
         name for name, item in required_items.items() if item is None
     ]
     assert theme.property("dohna") is True
+    for decoration in (
+        "dohnaPageImpact",
+        "dohnaPageImpactShadow",
+        "prismPanelDohnaStamp",
+        "prismPanelDohnaStampShadow",
+        "prismButtonDohnaFocusSlash",
+    ):
+        assert not window.findChildren(QObject, decoration)
+    backdrop = window.findChild(QObject, "dohnaBackdrop")
+    assert backdrop is not None
+    assert backdrop.findChild(QObject, "dohnaPrintFacet").property("visible") is True
     assert stage.property("motionEnabled") is False
     assert sweep.property("visible") is False
     assert panel_body.property("visible") is True
@@ -2030,11 +2053,8 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     QTest.qWait(30)
     app.processEvents()
     popup_bodies = window.findChildren(QObject, "prismComboBoxDohnaPopupBody")
-    popup_shadows = window.findChildren(QObject, "prismComboBoxDohnaPopupShadow")
     assert popup_bodies
-    assert popup_shadows
     assert any(item.property("visible") is True for item in popup_bodies)
-    assert any(item.property("visible") is True for item in popup_shadows)
     delegate_cuts = _find_quick_items(
         window, "prismComboBoxDohnaDelegateCut"
     )
@@ -2099,8 +2119,6 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
                 )
 
     assert_opaque_capture_tree()
-    assert page_impact.property("visible") is True
-    assert page_impact_shadow.property("visible") is True
     assert float(page_content.property("opacity")) == 1
     assert float(page_header.property("opacity")) == 1
     assert float(page_title.property("opacity")) == 1
@@ -2126,7 +2144,6 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     )
     app.processEvents()
     assert window.property("pageTransitioning") is False
-    assert page_impact.property("visible") is False
     assert float(page_content.property("opacity")) == 1
     assert float(page_header.property("opacity")) == 1
     assert float(page_title.property("opacity")) == 1
@@ -2137,6 +2154,18 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     nav_cut = nav_button.findChild(QObject, "prismNavigationCut")
     assert nav_cut is not None
     assert nav_cut.property("visible") is True
+    nav_path = nav_cut.findChild(QObject, "prismNavigationDohnaPath")
+    assert nav_path.property("strokeWidth") == 0
+    assert QColor(nav_path.property("fillColor")) == QColor(theme.property("accent"))
+    assert nav_button.findChild(QObject, "prismButtonDohnaShadow").property("visible") is False
+
+    # Keyboard focus uses the same flat highlight as hovering, without a frame.
+    other_nav = _find_quick_item(window, "navigationButton2")
+    other_nav.forceActiveFocus()
+    app.processEvents()
+    other_path = other_nav.findChild(QObject, "prismNavigationDohnaPath")
+    assert other_path.property("strokeWidth") == 0
+    assert QColor(other_path.property("fillColor")) == QColor(theme.property("violet"))
     button_center = save_button.mapToScene(
         QPointF(save_button.width() / 2, save_button.height() / 2)
     ).toPoint()
@@ -2144,9 +2173,7 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     QTest.mousePress(window, Qt.MouseButton.LeftButton, pos=button_center)
     app.processEvents()
     assert save_button.property("down") is True
-    assert save_button.findChild(QObject, "prismButtonDohnaFocusSlash").property(
-        "visible"
-    ) is True
+    assert save_button.findChild(QObject, "prismButtonDohnaFocusSlash") is None
     assert float(save_button.property("dohnaImpact")) >= 0
     QTest.mouseRelease(window, Qt.MouseButton.LeftButton, pos=button_center)
     QTest.qWait(int(theme.property("popPressMotion")) + 50)

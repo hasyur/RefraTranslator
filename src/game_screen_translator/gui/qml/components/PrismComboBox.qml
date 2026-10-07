@@ -55,17 +55,6 @@ ComboBox {
                       : root.activeFocus ? root.theme.accent : root.theme.lineStrong
         border.width: root.theme.dohna ? 0 : root.activeFocus ? 2 : 1
 
-        Rectangle {
-            objectName: "prismComboBoxDohnaShadow"
-            visible: root.theme.dohna
-            x: 5
-            y: 5
-            width: parent.width
-            height: parent.height
-            color: root.theme.stageShadow
-            z: -1
-        }
-
         Shape {
             id: dohnaComboBody
             objectName: "prismComboBoxDohnaBody"
@@ -73,9 +62,12 @@ ComboBox {
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
-                strokeColor: root.theme.ink
-                strokeWidth: root.activeFocus ? 3 : 2
-                fillColor: root.theme.white
+                objectName: "prismComboBoxDohnaBodyPath"
+                strokeColor: "transparent"
+                strokeWidth: 0
+                fillColor: root.popup.visible ? root.theme.accent
+                           : root.hovered || root.activeFocus ? root.theme.violet
+                           : root.theme.white
                 startX: 0
                 startY: 0
                 PathLine { x: dohnaComboBody.width - 14; y: 0 }
@@ -85,31 +77,6 @@ ComboBox {
             }
         }
 
-        Shape {
-            id: dohnaComboArrowFace
-            objectName: "prismComboBoxDohnaArrowFace"
-            visible: root.theme.dohna
-            x: Math.max(0, parent.width - 45)
-            y: 3
-            width: Math.min(40, parent.width)
-            height: Math.max(0, parent.height - 6)
-            preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                strokeColor: root.theme.ink
-                strokeWidth: 2
-                fillColor: root.popup.visible
-                           ? root.theme.accent
-                           : root.hovered || root.activeFocus
-                             ? root.theme.violet
-                             : root.theme.white
-                startX: 0
-                startY: 0
-                PathLine { x: dohnaComboArrowFace.width - 8; y: 0 }
-                PathLine { x: dohnaComboArrowFace.width; y: dohnaComboArrowFace.height }
-                PathLine { x: 0; y: dohnaComboArrowFace.height }
-                PathLine { x: 0; y: 0 }
-            }
-        }
     }
 
     delegate: ItemDelegate {
@@ -145,9 +112,7 @@ ComboBox {
                 id: dohnaDelegateCut
                 objectName: "prismComboBoxDohnaDelegateCut"
                 visible: root.theme.dohna
-                // Keep each row inside the popup body.  The body owns the
-                // continuous outer cut; row highlights are inset so their
-                // slanted edge cannot punch a second triangle through it.
+                // Flat highlights stay inside the popup's slanted paper edge.
                 x: 4
                 y: 2
                 width: Math.max(0, parent.width - 18)
@@ -155,9 +120,8 @@ ComboBox {
                 preferredRendererType: Shape.CurveRenderer
                 ShapePath {
                     objectName: "prismComboBoxDohnaDelegatePath"
-                    strokeColor: comboDelegate.highlighted || comboDelegate.index === root.currentIndex
-                                 ? root.theme.ink : "transparent"
-                    strokeWidth: comboDelegate.highlighted || comboDelegate.index === root.currentIndex ? 2 : 0
+                    strokeColor: "transparent"
+                    strokeWidth: 0
                     fillColor: comboDelegate.index === root.currentIndex
                                ? root.theme.accent
                                : comboDelegate.highlighted
@@ -203,36 +167,15 @@ ComboBox {
             }
 
             Shape {
-                id: dohnaPopupShadow
-                objectName: "prismComboBoxDohnaPopupShadow"
-                visible: root.theme.dohna
-                x: 5
-                y: 5
-                width: parent.width
-                height: parent.height
-                z: -1
-                preferredRendererType: Shape.CurveRenderer
-                ShapePath {
-                    strokeColor: "transparent"
-                    fillColor: root.theme.stageShadow
-                    startX: 0
-                    startY: 0
-                    PathLine { x: dohnaPopupShadow.width - 14; y: 0 }
-                    PathLine { x: dohnaPopupShadow.width; y: dohnaPopupShadow.height }
-                    PathLine { x: 0; y: dohnaPopupShadow.height }
-                    PathLine { x: 0; y: 0 }
-                }
-            }
-
-            Shape {
                 id: dohnaPopupBody
                 objectName: "prismComboBoxDohnaPopupBody"
                 visible: root.theme.dohna
                 anchors.fill: parent
                 preferredRendererType: Shape.CurveRenderer
                 ShapePath {
-                    strokeColor: root.theme.ink
-                    strokeWidth: 3
+                    objectName: "prismComboBoxDohnaPopupPath"
+                    strokeColor: "transparent"
+                    strokeWidth: 0
                     fillColor: root.theme.white
                     startX: 0
                     startY: 0

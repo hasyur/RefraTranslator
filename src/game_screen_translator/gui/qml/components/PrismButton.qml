@@ -70,7 +70,7 @@ Button {
         color: !root.enabled ? root.theme.textDim
               : root.tone === "danger" ? root.theme.danger
               : root.theme.dohna && root.navigation
-                && (root.hovered || root.down || root.activeFocus) ? root.theme.ink
+                && (root.primary || root.hovered || root.down || root.activeFocus) ? root.theme.ink
               : root.theme.dohna && root.quiet ? root.theme.navigationText
               : root.primary ? (root.theme.dohna ? root.theme.ink : root.theme.text)
               : root.theme.text
@@ -130,6 +130,7 @@ Button {
             objectName: "prismButtonDohnaShadow"
             visible: root.theme.dohna
                      && root.enabled
+                     && !root.navigation
                      && !root.dohnaEmbedded
                      && !root.dohnaGroupFrame
             x: 5
@@ -146,12 +147,12 @@ Button {
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
-                strokeColor: root.primary || root.activeFocus ? root.theme.selectionEdge
-                            : root.hovered ? root.theme.ink : "transparent"
-                strokeWidth: root.primary || root.activeFocus || root.hovered ? 2 : 0
+                objectName: "prismNavigationDohnaPath"
+                strokeColor: "transparent"
+                strokeWidth: 0
                 fillColor: root.primary
                            ? root.theme.accent
-                           : root.hovered ? root.theme.violet
+                           : root.hovered || root.activeFocus ? root.theme.violet
                                           : "transparent"
                 startX: 0
                 startY: 0
@@ -258,31 +259,6 @@ Button {
             color: root.theme.ink
         }
 
-        Shape {
-            objectName: "prismButtonDohnaFocusSlash"
-            visible: root.theme.dohna
-                     && root.enabled
-                     && !root.dohnaEmbedded
-                     && !root.dohnaGroupFrame
-                     && (root.hovered || root.activeFocus || root.down)
-            x: Math.max(0, root.width - 24)
-            y: -4
-            width: 30
-            height: 13
-            rotation: -8
-            preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                strokeColor: root.theme.ink
-                strokeWidth: root.down ? 2 : 1
-                fillColor: root.down ? root.theme.accent : root.theme.violet
-                startX: 2
-                startY: 1
-                PathLine { x: 25; y: 0 }
-                PathLine { x: 30; y: 11 }
-                PathLine { x: 6; y: 12 }
-                PathLine { x: 2; y: 1 }
-            }
-        }
     }
 
     SettingHint {

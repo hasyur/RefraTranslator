@@ -13,7 +13,6 @@ Item {
     readonly property bool reducedMotion: theme.reducedMotion
     readonly property bool entryRunning: panelEntry.running
     readonly property real visualOffsetX: panelTranslate.x
-    property real dohnaStamp: 1
     default property alias contentData: contentItem.data
 
     implicitWidth: 320
@@ -25,7 +24,6 @@ Item {
         panelEntry.running = false
         panelTranslate.x = 0
         root.opacity = 1
-        dohnaStamp = 1
     }
 
     function playEntry() {
@@ -198,40 +196,6 @@ Item {
             color: root.theme.stageShadow
         }
 
-        Rectangle {
-            objectName: "prismPanelDohnaStampShadow"
-            visible: root.theme.dohna
-            x: parent.width - 91
-            y: -3
-            width: 88
-            height: 24
-            rotation: -6
-            color: root.theme.stageShadow
-            opacity: root.dohnaStamp
-        }
-
-        Shape {
-            objectName: "prismPanelDohnaStamp"
-            visible: root.theme.dohna
-            x: parent.width - 96
-            y: -8
-            width: 88
-            height: 24
-            rotation: -6 + root.dohnaStamp * 2
-            opacity: root.dohnaStamp
-            preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                strokeColor: root.theme.ink
-                strokeWidth: 2
-                fillColor: root.theme.violet
-                startX: 0
-                startY: 2
-                PathLine { x: 78; y: 0 }
-                PathLine { x: 88; y: 22 }
-                PathLine { x: 8; y: 24 }
-                PathLine { x: 0; y: 2 }
-            }
-        }
     }
 
     Item {

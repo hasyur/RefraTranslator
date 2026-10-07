@@ -3,7 +3,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Shapes
 import QtQuick.Window
 import "components"
 import "pages"
@@ -562,53 +561,6 @@ ApplicationWindow {
                         transform: Translate {
                             id: pageContentTranslate
                             objectName: "pageContentTranslate"
-                        }
-
-                        Shape {
-                            id: dohnaPageImpact
-                            objectName: "dohnaPageImpact"
-                            visible: prism.dohna && dohnaPageTransitionAnimation.running
-                            x: 0
-                            y: -7
-                            width: parent.width
-                            height: 18
-                            z: -1
-                            preferredRendererType: Shape.CurveRenderer
-                            ShapePath {
-                                strokeColor: prism.ink
-                                strokeWidth: 2
-                                fillColor: prism.violet
-                                startX: 0
-                                startY: 0
-                                PathLine { x: dohnaPageImpact.width - 28; y: 0 }
-                                PathLine { x: dohnaPageImpact.width; y: 10 }
-                                PathLine { x: dohnaPageImpact.width - 18; y: dohnaPageImpact.height }
-                                PathLine { x: 0; y: dohnaPageImpact.height }
-                                PathLine { x: 0; y: 0 }
-                            }
-                        }
-
-                        Shape {
-                            id: dohnaPageImpactShadow
-                            objectName: "dohnaPageImpactShadow"
-                            visible: dohnaPageImpact.visible
-                            x: 6
-                            y: -2
-                            width: parent.width
-                            height: dohnaPageImpact.height
-                            z: -2
-                            preferredRendererType: Shape.CurveRenderer
-                            ShapePath {
-                                strokeColor: "transparent"
-                                fillColor: prism.stageShadow
-                                startX: 0
-                                startY: 0
-                                PathLine { x: dohnaPageImpactShadow.width - 28; y: 0 }
-                                PathLine { x: dohnaPageImpactShadow.width; y: 10 }
-                                PathLine { x: dohnaPageImpactShadow.width - 18; y: dohnaPageImpactShadow.height }
-                                PathLine { x: 0; y: dohnaPageImpactShadow.height }
-                                PathLine { x: 0; y: 0 }
-                            }
                         }
 
                         StackLayout {
