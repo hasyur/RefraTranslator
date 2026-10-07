@@ -77,6 +77,7 @@ from game_screen_translator.translation.transport import (
 from game_screen_translator.translation.cache import CacheStats
 from game_screen_translator.live.snapshot import LastRunSnapshot, load_snapshot
 
+from .latency_diagnostics import read_latency_diagnostics
 from .theme import (
     GuiPreferences,
     GuiSettingsError,
@@ -1119,6 +1120,10 @@ class WorkbenchController(QObject):
     @Property(str, notify=stateChanged)
     def logTail(self) -> str:
         return _log_tail(self._live_log_path)
+
+    @Property("QVariantMap", notify=stateChanged)
+    def latencyDiagnostics(self) -> dict[str, str | bool]:
+        return read_latency_diagnostics(self._live_log_path)
 
     # ----- navigation, profiles and theme ----------------------------
 

@@ -35,6 +35,7 @@ from game_screen_translator.gui.theme import (
     load_gui_preferences,
 )
 from game_screen_translator.gui.workbench_controller import WorkbenchController
+from game_screen_translator.live.latency import LiveLatencyStats
 from game_screen_translator.live.snapshot import CacheHit, SnapshotEntry, new_snapshot, save_snapshot
 from game_screen_translator.live.runtime import LiveControlWindow
 from game_screen_translator.profiles import (
@@ -124,6 +125,44 @@ def test_controller_projects_real_profile_data_and_truthful_telemetry_empty_stat
     assert "测试游戏" in controller.infoText
 
     controller.shutdown()
+
+
+def test_controller_reads_shared_finished_latency_log_on_refresh_and_profile_switch(
+    tmp_path: Path,
+) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    try:
+        assert controller.latencyDiagnostics["available"] is False
+        assert controller.lastRunAvailable is False
+        stats = LiveLatencyStats()
+        stats.record_ocr(0.25)
+        stats.record_translation(
+            stability_seconds=0.1, queue_seconds=0.02,
+            llm_seconds=1.2, total_seconds=1.8, batch_size=2,
+        )
+        log_path = tmp_path / "output" / "live.log"
+        log_path.parent.mkdir(exist_ok=True)
+        log_path.write_text(
+            "延迟统计：" + stats.render().replace("\n", "；"), encoding="utf-8"
+        )
+        notifications = []
+        controller.stateChanged.connect(lambda: notifications.append(True))
+        controller.refreshStats()
+        first = controller.latencyDiagnostics
+        assert notifications
+        assert "最近总延迟：1.80s" in first["summary"]
+        assert "所有 Profile 共用" in first["scope"]
+        create_game_profile(config_path, load_config(config_path), "second", display_name="另一游戏")
+        controller.refreshProfiles()
+        controller.selectProfile(controller.profileIds.index("second"))
+        assert controller.latencyDiagnostics == first
+        assert "另一游戏" not in str(controller.latencyDiagnostics)
+        log_path.write_text("[RefraTranslator Live] ready\n", encoding="utf-8")
+        controller.refreshStats()
+        assert controller.latencyDiagnostics["available"] is False
+        assert controller.lastRunAvailable is False
+    finally:
+        controller.shutdown()
 
 
 def test_controller_exposes_selected_display_size_in_capture_pixels(

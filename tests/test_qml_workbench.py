@@ -24,7 +24,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QColor, QFontMetricsF
+from PySide6.QtGui import QColor, QFontMetricsF, QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine, QQmlProperty
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtTest import QTest
@@ -36,6 +36,7 @@ from game_screen_translator.gui import workbench_controller as controller_module
 from game_screen_translator.gui.qml_workbench import QmlWorkbenchHost
 from game_screen_translator.gui.theme import SKIN_DOHNA, SKIN_PRISM
 from game_screen_translator.gui.workbench_controller import WorkbenchController
+from game_screen_translator.live.latency import LiveLatencyStats
 from game_screen_translator.live.snapshot import CacheHit, SnapshotEntry, new_snapshot, save_snapshot
 from game_screen_translator.profiles import (
     ProfileCaptureSettings,
@@ -2054,6 +2055,12 @@ def test_native_dohna_toggle_smooths_edges_without_shrinking_or_clipping(
         QTest.qWait(100)
         toggle = _find_quick_item(window, "settingsCalibrationAction")
         assert toggle.property("checked") is checked
+        form = _find_quick_item(window, "settingsFormScroll")
+        assert form is not None
+        form.setProperty(
+            "contentY", max(0, form.property("contentHeight") - form.height())
+        )
+        app.processEvents()
         if checked:
             toggle.forceActiveFocus()
         artwork = toggle.findChild(QQuickItem, "prismToggleDohnaArtwork")
@@ -4811,6 +4818,241 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     assert controller.toggle_calls == pending_calls + 1
     assert window.property("startPreludePending") is False
     host.shutdown()
+
+
+@pytest.mark.parametrize("skin", [SKIN_PRISM, SKIN_DOHNA])
+@pytest.mark.parametrize("window_size", [(1280, 820), (980, 700)])
+@pytest.mark.parametrize("dynamic_roi", [True, False], ids=["dynamic_roi", "full_frame"])
+def test_settings_keeps_output_controls_left_and_diagnostics_scrollable(
+    tmp_path: Path,
+    skin: str,
+    window_size: tuple[int, int],
+    dynamic_roi: bool,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    profile = create_game_profile(
+        config_path,
+        load_config(config_path),
+        "settings-layout",
+        display_name="高级设置布局验证 " + "长名称用于验证真实 Profile 诊断换行。" * 12,
+    )
+    log_path = tmp_path / "output" / "live.log"
+    log_path.parent.mkdir()
+    stats = LiveLatencyStats()
+    for kind in ("roi", "full"):
+        stats.record_ocr_pipeline(
+            scan_kind=kind, scan_label="局部 ROI" if kind == "roi" else "整帧回退",
+            change_activity_seconds=0.1, scheduling_seconds=0.05,
+            preparation_seconds=0.01, worker_queue_seconds=0,
+            ocr_seconds=0.2, collection_seconds=0.01, processing_seconds=0.02,
+        )
+    stats.record_translation(
+        stability_seconds=0.1, queue_seconds=0.002,
+        llm_seconds=1.2, total_seconds=1.8, batch_size=2,
+    )
+    log_text = (
+        "诊断测试夹具：不代表真实翻译运行。\n实时统计：OCR 2 次\n"
+        + "延迟统计：" + stats.render().replace("\n", "；") + "\n"
+        + stats.render_ocr_summary() + "\n"
+    )
+    log_path.write_text(log_text, encoding="utf-8")
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(skin)
+    controller.setReducedMotion(True)
+    controller.setDynamicRoiEnabled(dynamic_roi)
+    assert controller.saveRuntimeSettings() is True
+    controller.setPage("SETTINGS")
+    host = QmlWorkbenchHost(controller, application=app)
+
+    try:
+        window = host.window
+        assert window is not None
+        window.resize(max(window_size[0], window.minimumWidth()), window_size[1])
+        host.show()
+        primary = _find_quick_item(window, "settingsPrimaryPanel")
+        secondary = _find_quick_item(window, "settingsSecondaryPanel")
+        assert primary is not None and secondary is not None
+        _wait_for_page_layout(window, primary, app)
+
+        def item(name: str) -> QQuickItem:
+            result = _find_quick_item(window, name)
+            assert result is not None, name
+            return result
+
+        form = item("settingsFormScroll")
+        debug = item("settingsDebugToggle")
+        browser = item("settingsCalibrationAction")
+        url = item("settingsBrowserOverlayUrl")
+        profile_scroll = item("settingsProfileScroll")
+        diagnostic = item("settingsProfileDiagnostic")
+        log_scroll = item("settingsLatencyScroll")
+        ocr = item("settingsOcrLatency")
+        translation = item("settingsTranslationLatency")
+        summary = item("settingsLatencySummary")
+        refresh = item("settingsRefreshDiagnostics")
+
+        def is_descendant(child: QQuickItem, ancestor: QQuickItem) -> bool:
+            current = child.parentItem()
+            while current is not None and current is not ancestor:
+                current = current.parentItem()
+            return current is ancestor
+
+        for control in (debug, browser, url):
+            assert is_descendant(control, primary)
+            assert not is_descendant(control, secondary)
+        for control in (profile_scroll, log_scroll, refresh):
+            assert is_descendant(control, secondary)
+        assert debug.property("settingKey") == "settings-debug-border"
+        assert browser.property("settingKey") == "settings-browser-overlay"
+        assert url.property("text") == controller.browserOverlayUrl
+        assert item("dynamicRoiSchedule").isVisible() is dynamic_roi
+        assert item("fullFrameSchedule").isVisible() is not dynamic_roi
+
+        def assert_contained(child: QQuickItem, viewport: QQuickItem) -> None:
+            point = child.mapToItem(viewport, QPointF(0, 0))
+            assert point.x() >= -0.5
+            assert point.y() >= -0.5
+            assert point.x() + child.width() <= viewport.width() + 0.5
+            assert point.y() + child.height() <= viewport.height() + 0.5
+
+        if dynamic_roi and window_size == (1280, 820):
+            assert float(form.property("contentY")) == 0
+            assert_contained(debug, form)
+        assert_contained(profile_scroll, secondary)
+        assert_contained(log_scroll, secondary)
+        assert_contained(refresh, secondary)
+        if window_size == (1280, 820):
+            assert log_scroll.height() > 142  # The former log viewport height.
+        else:
+            assert log_scroll.height() >= 100
+        assert log_scroll.mapToItem(secondary, QPointF(0, log_scroll.height())).y() < (
+            refresh.mapToItem(secondary, QPointF(0, 0)).y()
+        )
+
+        # Optional native screenshots capture this real QML host and the
+        # explicitly labelled diagnostic fixture, never a simulated live run.
+        screenshot_dir = os.environ.get("REFRA_SETTINGS_SCREENSHOT_DIR")
+        capture_name = (
+            f"settings-{skin}-{window.width()}x{window.height()}-"
+            f"{'dynamic' if dynamic_roi else 'full'}"
+        )
+
+        def capture(suffix: str) -> None:
+            if not screenshot_dir:
+                return
+            destination = Path(screenshot_dir)
+            destination.mkdir(parents=True, exist_ok=True)
+            window.update()
+            QTest.qWait(80)
+            frame = window.grabWindow()
+            assert not frame.isNull()
+            target = destination / f"{capture_name}-{suffix}.png"
+            assert frame.save(str(target))
+            print(f"NATIVE QML SCREENSHOT: {target.resolve()}")
+
+        capture("initial")
+
+        def saved_config():
+            machine = load_config(config_path)
+            return apply_profile_runtime_settings(
+                machine, load_game_profile(config_path, machine, profile.profile_id)
+            )
+
+        before = saved_config()
+        actions: list[str] = []
+        settings_page = item("settingsPage")
+        settings_page.visualAction.connect(actions.append)
+        for control, expected in (
+            (debug, controller.debugEnabled),
+            (browser, controller.browserOverlayEnabled),
+        ):
+            control.forceActiveFocus()
+            app.processEvents()
+            QTest.qWait(20)
+            app.processEvents()
+            assert_contained(control, form)
+            position = control.mapToScene(QPointF(control.width() / 2, control.height() / 2))
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=position.toPoint())
+            app.processEvents()
+            assert bool(control.property("checked")) is not expected
+        assert actions == ["calibrate", "calibrate"]
+        assert controller.settingsDirty is True
+        assert controller.running is False
+        unsaved = saved_config()
+        assert unsaved.live.debug_border == before.live.debug_border
+        assert unsaved.recording.browser_overlay_enabled == before.recording.browser_overlay_enabled
+        assert controller.saveRuntimeSettings() is True
+        saved = saved_config()
+        assert saved.live.debug_border == controller.debugEnabled
+        assert saved.recording.browser_overlay_enabled == controller.browserOverlayEnabled
+        capture("output")
+
+        for text_area, expected in (
+            (diagnostic, controller.infoText),
+            (ocr, controller.latencyDiagnostics["ocr"]),
+            (translation, controller.latencyDiagnostics["translation"]),
+            (summary, controller.latencyDiagnostics["summary"]),
+        ):
+            assert text_area.property("text") == expected
+            assert text_area.property("readOnly") is True
+            assert text_area.property("selectByMouse") is True
+            assert QMetaObject.invokeMethod(text_area, "selectAll") is True
+            assert text_area.property("selectedText") == expected
+        assert "P50" not in ocr.property("text")
+        assert "LLM 请求：1.20s" in translation.property("text")
+        assert "P95" in summary.property("text")
+        assert "所有 Profile 共用" in str(item("settingsPage").property("diagnostics"))
+
+        for scroll in (profile_scroll, log_scroll):
+            QTest.qWait(100)
+            app.processEvents()
+            assert scroll.property("clip") is True
+            flickable = scroll.property("contentItem")
+            assert isinstance(flickable, QQuickItem)
+            assert float(flickable.property("contentHeight")) > flickable.height()
+            position = scroll.mapToScene(QPointF(scroll.width() / 2, scroll.height() / 2))
+            QTest.mouseMove(window, position.toPoint())
+            maximum = float(flickable.property("contentHeight")) - flickable.height()
+            for _ in range(math.ceil(maximum / 16) + 10):
+                wheel = QWheelEvent(
+                    position,
+                    QPointF(window.mapToGlobal(position.toPoint())),
+                    QPoint(0, 0),
+                    QPoint(0, -120),
+                    Qt.MouseButton.NoButton,
+                    Qt.KeyboardModifier.NoModifier,
+                    Qt.ScrollPhase.NoScrollPhase,
+                    False,
+                )
+                QCoreApplication.sendEvent(window, wheel)
+                app.processEvents()
+                QTest.qWait(10)
+                if float(flickable.property("contentY")) >= maximum:
+                    break
+            QTest.qWait(450)  # Let the native Flickable finish its edge rebound.
+            app.processEvents()
+            maximum = float(flickable.property("contentHeight")) - flickable.height()
+            assert math.isclose(float(flickable.property("contentY")), maximum, abs_tol=1), (
+                scroll.objectName(), flickable.property("contentY"), maximum
+            )
+        capture("diagnostic-end")
+
+        log_path.write_text("[RefraTranslator Live] ready\n", encoding="utf-8")
+        assert ocr.property("text") != controller.latencyDiagnostics["ocr"]
+        position = refresh.mapToScene(QPointF(refresh.width() / 2, refresh.height() / 2))
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=position.toPoint())
+        app.processEvents()
+        assert ocr.property("text") == controller.latencyDiagnostics["ocr"]
+        assert translation.property("text") == controller.latencyDiagnostics["translation"]
+        assert summary.property("text") == controller.latencyDiagnostics["summary"]
+        assert "尚无" in item("settingsLatencyStatus").property("text")
+        assert actions[-1] == "calibrate"
+        assert_contained(refresh, secondary)
+        capture("empty")
+    finally:
+        host.shutdown()
 
 
 def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> None:

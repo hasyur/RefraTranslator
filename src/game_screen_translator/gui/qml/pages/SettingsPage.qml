@@ -10,6 +10,7 @@ Item {
     required property var workbench
     property int transitionSerial: 0
     property bool pageMotionEnabled: false
+    readonly property var diagnostics: root.workbench.latencyDiagnostics
     signal visualAction(string action)
 
     RowLayout {
@@ -28,6 +29,7 @@ Item {
 
             Flickable {
                 id: scheduleFormScroll
+                objectName: "settingsFormScroll"
                 anchors.fill: parent
                 contentWidth: width
                 contentHeight: scheduleForm.implicitHeight
@@ -214,12 +216,79 @@ Item {
                     }
 
                     Text {
-                        text: "调度参数只在保存后进入下一次真实运行；工作台不模拟运行效果。"
+                        text: "调度参数保存后在下一次运行生效。"
                         color: root.theme.textDim
                         font.family: root.theme.uiFontFor(text)
                         font.pixelSize: 11
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
+                    }
+
+                    ColumnLayout {
+                        objectName: "settingsOutputGroup"
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 8
+
+                        SectionHeader {
+                            theme: root.theme
+                            title: "输出与调试"
+                            meta: "OUTPUT CONFIG"
+                            Layout.fillWidth: true
+                        }
+
+                        PrismToggle {
+                            objectName: "settingsDebugToggle"
+                            theme: root.theme
+                            text: "下一次运行显示调试边框"
+                            settingDescription: "让下一次运行显示用于排查问题的边框。"
+                            settingKey: "settings-debug-border"
+                            checked: root.workbench.debugEnabled
+                            Layout.fillWidth: true
+                            onToggled: {
+                                root.workbench.setDebugEnabled(checked)
+                                root.visualAction("calibrate")
+                            }
+                        }
+                        Text {
+                            text: "调试边框设置保存后在下一次运行生效。"
+                            color: root.theme.textDim
+                            font.family: root.theme.uiFontFor(text)
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        SettingLabel {
+                            theme: root.theme
+                            title: "OBS 浏览器译文源"
+                            meta: "OPTIONAL OUTPUT"
+                            description: "启用后提供可被 OBS 使用的译文页面。"
+                            settingKey: "settings-browser-overlay"
+                            Layout.topMargin: 4
+                        }
+                        PrismToggle {
+                            objectName: "settingsCalibrationAction"
+                            theme: root.theme
+                            text: "启用浏览器覆盖层"
+                            settingDescription: "启用后提供可被 OBS 使用的译文页面。"
+                            settingKey: "settings-browser-overlay"
+                            checked: root.workbench.browserOverlayEnabled
+                            Layout.fillWidth: true
+                            onToggled: {
+                                root.workbench.setBrowserOverlayEnabled(checked)
+                                root.visualAction("calibrate")
+                            }
+                        }
+                        PrismTextField {
+                            objectName: "settingsBrowserOverlayUrl"
+                            theme: root.theme
+                            accessibleName: "OBS 浏览器译文源"
+                            text: root.workbench.browserOverlayUrl
+                            readOnly: true
+                            selectByMouse: true
+                            Layout.fillWidth: true
+                        }
                     }
                 }
             }
@@ -236,84 +305,38 @@ Item {
             Layout.minimumWidth: 370
             Layout.fillHeight: true
 
-            Flickable {
-                id: systemFormScroll
+            ColumnLayout {
                 anchors.fill: parent
-                contentWidth: width
-                contentHeight: systemForm.implicitHeight
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                spacing: 12
 
-                FocusScrollGuard { flickable: systemFormScroll }
+                SectionHeader {
+                    theme: root.theme
+                    title: "日志与诊断"
+                    meta: "DIAGNOSTICS"
+                    Layout.fillWidth: true
+                }
 
-                ColumnLayout {
-                    id: systemForm
-                    width: parent.width
-                    spacing: 12
-
-                    SectionHeader {
-                        theme: root.theme
-                        title: "输出与诊断"
-                        meta: "SYSTEM"
-                        Layout.fillWidth: true
+                SettingLabel { theme: root.theme; title: "Profile 诊断"; meta: "REAL CONFIG" }
+                ScrollView {
+                    id: profileScroll
+                    objectName: "settingsProfileScroll"
+                    contentWidth: availableWidth
+                    clip: true
+                    Layout.fillWidth: true
+                    Layout.minimumHeight: 110
+                    Layout.preferredHeight: 158
+                    Layout.maximumHeight: 158
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    background: Rectangle {
+                        color: "transparent"
+                        border.color: root.theme.line
                     }
 
-                    SettingLabel {
-                        theme: root.theme
-                        title: "OBS 浏览器译文源"
-                        meta: "OPTIONAL OUTPUT"
-                        description: "启用后提供可被 OBS 使用的译文页面。"
-                        settingKey: "settings-browser-overlay"
-                    }
-                    PrismToggle {
-                        objectName: "settingsCalibrationAction"
-                        theme: root.theme
-                        text: "启用浏览器覆盖层"
-                        settingDescription: "启用后提供可被 OBS 使用的译文页面。"
-                        settingKey: "settings-browser-overlay"
-                        checked: root.workbench.browserOverlayEnabled
-                        Layout.fillWidth: true
-                        onToggled: {
-                            root.workbench.setBrowserOverlayEnabled(checked)
-                            root.visualAction("calibrate")
-                        }
-                    }
-                    PrismTextField {
-                        theme: root.theme
-                        accessibleName: "OBS 浏览器译文源"
-                        text: root.workbench.browserOverlayUrl
-                        readOnly: true
-                        selectByMouse: true
-                        Layout.fillWidth: true
-                    }
-
-                    PrismToggle {
-                        theme: root.theme
-                        text: "下一次运行显示调试边框"
-                        settingDescription: "让下一次运行显示用于排查问题的边框。"
-                        settingKey: "settings-debug-border"
-                        checked: root.workbench.debugEnabled
-                        Layout.fillWidth: true
-                        onToggled: {
-                            root.workbench.setDebugEnabled(checked)
-                            root.visualAction("calibrate")
-                        }
-                    }
-                    Text {
-                        text: "调试边框是启动参数，不会伪装成当前运行状态。"
-                        color: root.theme.textDim
-                        font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 11
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.line }
-
-                    SettingLabel { theme: root.theme; title: "Profile 诊断"; meta: "REAL CONFIG" }
                     TextArea {
+                        objectName: "settingsProfileDiagnostic"
                         Accessible.name: "Profile 诊断"
+                        width: profileScroll.availableWidth
                         text: root.workbench.infoText
                         readOnly: true
                         selectByMouse: true
@@ -323,43 +346,122 @@ Item {
                         font.family: root.theme.monoFontFor(text)
                         font.pixelSize: 10
                         wrapMode: TextEdit.Wrap
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 158
-                        background: Rectangle {
-                            color: "transparent"
-                            border.color: root.theme.line
+                        background: null
+                    }
+                }
+
+                SettingLabel {
+                    theme: root.theme
+                    title: "最近运行延迟"
+                    meta: root.diagnostics.scope
+                }
+                ScrollView {
+                    id: logScroll
+                    objectName: "settingsLatencyScroll"
+                    contentWidth: availableWidth
+                    clip: true
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: 100
+                    Layout.preferredHeight: 260
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    background: Rectangle {
+                        color: "transparent"
+                        border.color: root.theme.line
+                    }
+
+                    // One wheel owner keeps all three selectable text blocks
+                    // on the same scroll range, including over a TextArea.
+                    WheelHandler {
+                        target: null
+                        onWheel: event => {
+                            const delta = event.pixelDelta.y !== 0
+                                          ? event.pixelDelta.y : event.angleDelta.y / 3
+                            if (delta === 0)
+                                return
+                            const flickable = logScroll.contentItem
+                            const maximum = Math.max(0, flickable.contentHeight - flickable.height)
+                            flickable.contentY = Math.max(0, Math.min(maximum, flickable.contentY - delta))
+                            event.accepted = true
                         }
                     }
 
-                    SettingLabel { theme: root.theme; title: "运行日志末尾"; meta: "READ ONLY" }
-                    TextArea {
-                        Accessible.name: "运行日志末尾"
-                        text: root.workbench.logTail
-                        readOnly: true
-                        selectByMouse: true
-                        color: root.theme.textSoft
-                        selectionColor: root.theme.accent
-                        selectedTextColor: root.theme.ink
-                        font.family: root.theme.monoFontFor(text)
-                        font.pixelSize: 10
-                        wrapMode: TextEdit.WrapAnywhere
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 142
-                        background: Rectangle {
-                            color: "transparent"
-                            border.color: root.theme.line
+                    ColumnLayout {
+                        width: logScroll.availableWidth
+                        spacing: 8
+
+                        Text {
+                            objectName: "settingsLatencyStatus"
+                            text: root.diagnostics.status
+                            color: root.theme.textDim
+                            font.family: root.theme.uiFontFor(text)
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        SettingLabel { theme: root.theme; title: "OCR 流程" }
+                        TextArea {
+                            objectName: "settingsOcrLatency"
+                            Accessible.name: "OCR 流程延迟"
+                            text: root.diagnostics.ocr
+                            readOnly: true
+                            selectByMouse: true
+                            color: root.theme.textSoft
+                            selectionColor: root.theme.accent
+                            selectedTextColor: root.theme.ink
+                            font.family: root.theme.monoFontFor(text)
+                            font.pixelSize: 11
+                            wrapMode: TextEdit.Wrap
+                            Layout.fillWidth: true
+                            background: null
+                        }
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.line }
+                        SettingLabel { theme: root.theme; title: "翻译流程" }
+                        TextArea {
+                            objectName: "settingsTranslationLatency"
+                            Accessible.name: "翻译流程延迟"
+                            text: root.diagnostics.translation
+                            readOnly: true
+                            selectByMouse: true
+                            color: root.theme.textSoft
+                            selectionColor: root.theme.accent
+                            selectedTextColor: root.theme.ink
+                            font.family: root.theme.monoFontFor(text)
+                            font.pixelSize: 11
+                            wrapMode: TextEdit.Wrap
+                            Layout.fillWidth: true
+                            background: null
+                        }
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.line }
+                        SettingLabel { theme: root.theme; title: "延迟汇总" }
+                        TextArea {
+                            objectName: "settingsLatencySummary"
+                            Accessible.name: "延迟汇总"
+                            text: root.diagnostics.summary
+                            readOnly: true
+                            selectByMouse: true
+                            color: root.theme.textSoft
+                            selectionColor: root.theme.accent
+                            selectedTextColor: root.theme.ink
+                            font.family: root.theme.monoFontFor(text)
+                            font.pixelSize: 11
+                            wrapMode: TextEdit.Wrap
+                            Layout.fillWidth: true
+                            background: null
                         }
                     }
+                }
 
-                    PrismButton {
-                        theme: root.theme
-                        text: "刷新诊断与统计"
-                        enabled: root.workbench.hasProfile
-                        Layout.alignment: Qt.AlignRight
-                        onClicked: {
-                            root.workbench.refreshStats()
-                            root.visualAction("calibrate")
-                        }
+                PrismButton {
+                    objectName: "settingsRefreshDiagnostics"
+                    theme: root.theme
+                    text: "刷新诊断与统计"
+                    enabled: root.workbench.hasProfile
+                    Layout.alignment: Qt.AlignRight
+                    onClicked: {
+                        root.workbench.refreshStats()
+                        root.visualAction("calibrate")
                     }
                 }
             }
