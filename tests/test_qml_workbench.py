@@ -1862,6 +1862,7 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     assert stage is not None
     assert backdrop is not None
     assert skin_selector.property("currentIndex") == 0
+    assert skin_selector.property("currentText") == "Prism"
     assert theme.property("dohna") is False
     assert stage.property("visible") is True
 
@@ -1883,6 +1884,7 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     assert controller.themePreference == "dark"
     assert controller.effectiveTheme == "light"
     assert skin_selector.property("currentIndex") == 1
+    assert skin_selector.property("currentText") == "Dohna"
     assert theme.property("dohna") is True
     assert theme.property("dark") is False
     for index in range(7):
@@ -2259,6 +2261,8 @@ def test_real_dohna_uses_local_control_feedback_and_settles_on_switch_or_hide(
         if time.monotonic() >= sample_deadline:
             raise AssertionError("Dohna page transition did not settle")
         QTest.qWait(40)
+    # The transition can finish during qWait; include its settled frame.
+    sampled_content_x.append(float(content_translate.property("x")))
     assert len(sampled_content_x) >= 3
     assert sampled_content_x[0] > 0
     assert sampled_content_x[-1] == pytest.approx(0.0)

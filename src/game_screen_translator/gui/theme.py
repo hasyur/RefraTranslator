@@ -25,8 +25,8 @@ _VALID_THEMES = frozenset(value for value, _label in THEME_OPTIONS)
 SKIN_PRISM = "prism"
 SKIN_DOHNA = "dohna"
 SKIN_OPTIONS = (
-    (SKIN_PRISM, "Prism（原版）"),
-    (SKIN_DOHNA, "Dohna（波普）"),
+    (SKIN_PRISM, "Prism"),
+    (SKIN_DOHNA, "Dohna"),
 )
 _VALID_SKINS = frozenset(value for value, _label in SKIN_OPTIONS)
 GUI_SETTINGS_FILENAME = ".gui-settings.toml"

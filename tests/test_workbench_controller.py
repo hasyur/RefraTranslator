@@ -792,6 +792,7 @@ def test_skin_preference_persists_independently_and_dohna_uses_light_canvas(
     controller.setTheme(THEME_DARK)
     controller.setSkin(SKIN_DOHNA)
 
+    assert controller.statusText == "界面皮肤已切换为“Dohna”并保存"
     assert controller.themePreference == THEME_DARK
     assert controller.skinPreference == SKIN_DOHNA
     assert controller.effectiveTheme == THEME_LIGHT
@@ -813,6 +814,7 @@ def test_skin_preference_persists_independently_and_dohna_uses_light_canvas(
 
     controller.setSkin(SKIN_PRISM)
 
+    assert controller.statusText == "界面皮肤已切换为“Prism”并保存"
     assert controller.skinPreference == SKIN_PRISM
     assert controller.themePreference == THEME_DARK
     assert controller.effectiveTheme == THEME_DARK

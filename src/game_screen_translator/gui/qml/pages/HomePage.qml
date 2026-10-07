@@ -433,7 +433,7 @@ Item {
                     accessibleName: "界面皮肤"
                     settingDescription: "选择工作台的视觉皮肤；Dohna 使用固定的明亮配色。"
                     settingKey: "home-skin"
-                    model: ["Prism（原版）", "Dohna（波普）"]
+                    model: ["Prism", "Dohna"]
                     currentIndex: Math.max(0, root.skinValues.indexOf(root.workbench.skinPreference))
                     Layout.fillWidth: true
                     onActivated: index => {
