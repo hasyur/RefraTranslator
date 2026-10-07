@@ -1150,19 +1150,34 @@ def test_real_skin_dropdown_highlight_uses_skin_specific_surface(
         assert cuts
         assert any(
             item.property("visible") is True
-            and item.property("width") == selector.width()
+            and item.property("x") >= 4
+            and item.property("x") + item.property("width") <= selector.width() - 13
             and item.property("height") > 0
             for item in cuts
         )
+        colors = [
+            QColor(item.findChild(QObject, "prismComboBoxDohnaDelegatePath").property("fillColor"))
+            for item in cuts
+            if item.property("visible") is True
+        ]
+        assert QColor(theme.property("accent")) in colors
         QTest.keyClick(window, Qt.Key.Key_Up)
         cuts = wait_for_delegates("prismComboBoxDohnaDelegateCut")
         assert selector.property("highlightedIndex") == 0
         assert any(
             item.property("visible") is True
-            and item.property("width") == selector.width()
+            and item.property("x") >= 4
+            and item.property("x") + item.property("width") <= selector.width() - 13
             and item.property("height") > 0
             for item in cuts
         )
+        colors = [
+            QColor(item.findChild(QObject, "prismComboBoxDohnaDelegatePath").property("fillColor"))
+            for item in cuts
+            if item.property("visible") is True
+        ]
+        assert QColor(theme.property("violet")) in colors
+        assert QColor(theme.property("accent")) in colors
 
     QTest.keyClick(window, Qt.Key.Key_Escape)
     app.processEvents()
@@ -1860,6 +1875,17 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     assert backdrop.property("visible") is True
     assert window.findChild(QObject, "homeDohnaThemeHint").property("visible") is True
     assert window.findChild(QObject, "pageDisplayTitleLight").property("text") == "翻译控制台"
+    skin_body = skin_selector.findChild(QObject, "prismComboBoxDohnaBody")
+    skin_arrow = skin_selector.findChild(QObject, "prismComboBoxDohnaArrowFace")
+    skin_shadow = skin_selector.findChild(QObject, "prismComboBoxDohnaShadow")
+    assert skin_body is not None
+    assert skin_arrow is not None
+    assert skin_shadow is not None
+    assert skin_body.property("visible") is True
+    assert skin_arrow.property("visible") is True
+    assert skin_selector.findChild(QObject, "prismComboBoxDohnaCorner") is None
+    assert skin_shadow.property("x") == 5
+    assert skin_shadow.property("y") == 5
 
     secondary_scroll = window.findChild(QObject, "homeSecondaryScroll")
     assert secondary_scroll is not None
@@ -1942,6 +1968,11 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     feedback = window.findChild(QObject, "dohnaFeedbackLayer")
     sweep = window.findChild(QObject, "pageTransitionSweep")
     page_impact = window.findChild(QObject, "dohnaPageImpact")
+    page_impact_shadow = window.findChild(QObject, "dohnaPageImpactShadow")
+    page_content = window.findChild(QObject, "pageContentMotion")
+    content_translate = window.findChild(QObject, "pageContentTranslate")
+    page_header = window.findChild(QObject, "pageHeaderSlice")
+    page_title = window.findChild(QObject, "pageDisplayTitle")
     panel_body = window.findChild(QObject, "prismPanelDohnaBody")
     toggle_cut = window.findChild(QObject, "prismToggleDohnaCut")
     save_button = window.findChild(QObject, "saveAllButton")
@@ -1952,6 +1983,11 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
         "feedback": feedback,
         "sweep": sweep,
         "page_impact": page_impact,
+        "page_impact_shadow": page_impact_shadow,
+        "page_content": page_content,
+        "content_translate": content_translate,
+        "page_header": page_header,
+        "page_title": page_title,
         "panel_body": panel_body,
         "toggle_cut": toggle_cut,
         "save_button": save_button,
@@ -1966,6 +2002,10 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     assert panel_body.property("visible") is True
     assert panel_body.property("width") > 0
     assert panel_body.property("height") > 0
+    assert float(page_content.property("opacity")) == 1
+    assert float(page_header.property("opacity")) == 1
+    assert float(panel_body.property("opacity")) == 1
+    assert float(page_title.property("opacity")) == 1
     assert toggle_cut.property("width") == 34
     assert toggle_cut.property("height") == 18
     for path_name in (
@@ -1987,14 +2027,22 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
         QPointF(skin_selector.width() / 2, skin_selector.height() / 2)
     ).toPoint()
     QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=selector_center)
+    QTest.qWait(30)
     app.processEvents()
+    popup_bodies = window.findChildren(QObject, "prismComboBoxDohnaPopupBody")
+    popup_shadows = window.findChildren(QObject, "prismComboBoxDohnaPopupShadow")
+    assert popup_bodies
+    assert popup_shadows
+    assert any(item.property("visible") is True for item in popup_bodies)
+    assert any(item.property("visible") is True for item in popup_shadows)
     delegate_cuts = _find_quick_items(
         window, "prismComboBoxDohnaDelegateCut"
     )
     assert delegate_cuts
     assert any(
         item.property("visible") is True
-        and item.property("width") == skin_selector.width()
+        and item.property("x") >= 4
+        and item.property("x") + item.property("width") <= skin_selector.width() - 13
         and item.property("height") > 0
         for item in delegate_cuts
     )
@@ -2005,13 +2053,83 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     app.processEvents()
     assert window.property("pageContentReady") is True
     assert window.property("pageTransitioning") is True
-    assert feedback.property("pagePulseRunning") is True
+    capture_panels = [
+        window.findChild(QObject, "capturePrimaryPanel"),
+        window.findChild(QObject, "captureSecondaryPanel"),
+    ]
+    assert all(panel is not None for panel in capture_panels)
+    visible_capture_panels = [panel for panel in capture_panels if panel.isVisible()]
+    assert visible_capture_panels
+
+    def find_visible_text(item: QQuickItem) -> QQuickItem | None:
+        pending = list(item.childItems())
+        while pending:
+            candidate = pending.pop()
+            if candidate.isVisible() and candidate.metaObject().indexOfProperty("text") >= 0:
+                value = candidate.property("text")
+                if isinstance(value, str) and value:
+                    return candidate
+            pending.extend(candidate.childItems())
+        return None
+
+    capture_text = find_visible_text(visible_capture_panels[0])
+    assert capture_text is not None
+
+    def opacity_chain(item: QQuickItem) -> list[QQuickItem]:
+        chain = []
+        current = item
+        while current is not None:
+            chain.append(current)
+            if current is page_content:
+                break
+            current = current.parentItem()
+        assert chain[-1] is page_content
+        return chain
+
+    capture_chains = [
+        opacity_chain(panel) for panel in visible_capture_panels
+    ] + [opacity_chain(capture_text)]
+
+    def assert_opaque_capture_tree() -> None:
+        for chain in capture_chains:
+            for item in chain:
+                assert float(item.property("opacity")) == pytest.approx(1.0), (
+                    item.objectName(),
+                    float(item.property("opacity")),
+                )
+
+    assert_opaque_capture_tree()
     assert page_impact.property("visible") is True
-    QTest.qWait(int(theme.property("popPageMotion")) + 80)
+    assert page_impact_shadow.property("visible") is True
+    assert float(page_content.property("opacity")) == 1
+    assert float(page_header.property("opacity")) == 1
+    assert float(page_title.property("opacity")) == 1
+    assert float(content_translate.property("x")) > 40
+    sampled_content_x = []
+    sample_deadline = time.monotonic() + 1.2
+    while window.property("pageTransitioning"):
+        app.processEvents()
+        assert_opaque_capture_tree()
+        sampled_content_x.append(float(content_translate.property("x")))
+        if time.monotonic() >= sample_deadline:
+            raise AssertionError("Dohna page transition did not settle")
+        QTest.qWait(40)
+    assert len(sampled_content_x) >= 3
+    assert sampled_content_x[0] > 0
+    assert sampled_content_x[-1] == pytest.approx(0.0)
+    assert_opaque_capture_tree()
+    assert float(content_translate.property("x")) == pytest.approx(0.0)
+    QTest.qWait(
+        int(theme.property("dohnaTitleDelay"))
+        + int(theme.property("dohnaTitleMotion"))
+        + 80
+    )
     app.processEvents()
-    assert feedback.property("pagePulseRunning") is False
     assert window.property("pageTransitioning") is False
     assert page_impact.property("visible") is False
+    assert float(page_content.property("opacity")) == 1
+    assert float(page_header.property("opacity")) == 1
+    assert float(page_title.property("opacity")) == 1
 
     # The selected navigation face and ordinary action face are both slanted;
     # pressing an ordinary real button gives a local offset without rotating
@@ -2066,7 +2184,6 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     app.processEvents()
     assert feedback.property("reducedMotion") is True
     assert feedback.property("startPulseRunning") is False
-    assert feedback.property("pagePulseRunning") is False
     controller.setReducedMotion(False)
     controller.setPage("HOME")
     app.processEvents()
@@ -2080,13 +2197,28 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
 
     controller.setPage("OCR")
     app.processEvents()
-    assert feedback.property("pagePulseRunning") is True
+    assert window.property("pageTransitioning") is True
+    controller.setPage("OVERLAY")
+    app.processEvents()
+    assert window.property("pageTransitioning") is True
+    assert float(content_translate.property("x")) > 0
+    assert float(page_content.property("opacity")) == 1
+    assert float(page_header.property("opacity")) == 1
+    QTest.qWait(
+        int(theme.property("dohnaTitleDelay"))
+        + int(theme.property("dohnaTitleMotion"))
+        + 80
+    )
+    app.processEvents()
+    assert window.property("pageTransitioning") is False
+    assert float(content_translate.property("x")) == 0
+    assert float(page_content.property("opacity")) == 1
+    assert float(page_header.property("opacity")) == 1
     controller.setSkin(SKIN_PRISM)
     app.processEvents()
     assert stage.property("motionEnabled") is True
     assert sweep.property("visible") is True
     assert feedback.property("visible") is False
-    assert feedback.property("pagePulseRunning") is False
     assert window.property("pageTransitioning") is False
     assert window.property("pageContentReady") is True
     host.shutdown()
@@ -2397,6 +2529,117 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
                 assert_stepper_geometry(panel, stepper)
                 checked_names.add(str(stepper.property("accessibleName")))
         assert checked_names == expected_names
+    host.shutdown()
+
+
+def test_real_dohna_number_stepper_uses_one_frame_at_bounds_and_input(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_DOHNA)
+    controller.setReducedMotion(True)
+    controller.setCaptureRegion(10, 20, 640, 180)
+    controller.setPage("CAPTURE")
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+
+    window = host.window
+    assert window is not None
+    theme = window.findChild(QObject, "prismTheme")
+    capture_panel = _find_quick_item(window, "captureSecondaryPanel")
+    assert capture_panel is not None
+    assert theme is not None
+    _wait_for_page_layout(window, capture_panel, app)
+    stepper = next(
+        item
+        for item in capture_panel.findChildren(QObject)
+        if item.metaObject().indexOfProperty("compactWidth") >= 0
+        and item.property("settingKey") == "capture-left"
+    )
+    assert stepper is not None
+    decrease = stepper.findChild(QObject, "numberStepperDecrease")
+    increase = stepper.findChild(QObject, "numberStepperIncrease")
+    editor = stepper.findChild(QObject, "numberStepperEditor")
+    suffix = stepper.findChild(QObject, "numberStepperSuffix")
+    group_surface = stepper.findChild(QObject, "prismButtonDohnaGroupSurface")
+    group_shadow = stepper.findChild(QObject, "prismButtonDohnaGroupShadow")
+    group_cut = stepper.findChild(QObject, "prismButtonDohnaCut")
+    assert decrease is not None
+    assert increase is not None
+    assert editor is not None
+    assert suffix is not None
+    assert group_surface is not None
+    assert group_shadow is not None
+    assert group_cut is not None
+    assert stepper.property("compact") is True
+    assert stepper.property("width") == 144
+    assert suffix.property("visible") is False
+    assert group_surface.property("visible") is True
+    assert group_shadow.property("visible") is True
+    assert group_surface.property("width") == stepper.property("width")
+    assert group_surface.property("height") == stepper.property("height")
+    assert group_cut.property("visible") is False
+    group_path = group_surface.findChild(QObject, "prismButtonDohnaGroupPath")
+    assert group_path is not None
+    increase.forceActiveFocus()
+    app.processEvents()
+    assert increase.property("activeFocus") is True
+    assert QColor(group_path.property("fillColor")) == QColor(theme.property("violet"))
+
+    controller.setCaptureRegion(0, 20, 640, 180)
+    app.processEvents()
+    assert stepper.property("value") == 0
+    assert decrease.property("enabled") is False
+    assert group_surface.property("visible") is True
+
+    editor.forceActiveFocus()
+    editor.setProperty("text", "32768")
+    QTest.keyClick(window, Qt.Key.Key_Return)
+    app.processEvents()
+    assert controller.captureLeft == 32768
+    assert stepper.property("value") == 32768
+    assert increase.property("enabled") is False
+    assert group_surface.property("visible") is True
+
+    maximum_point = increase.mapToScene(
+        QPointF(increase.width() / 2, increase.height() / 2)
+    ).toPoint()
+    QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=maximum_point)
+    app.processEvents()
+    assert controller.captureLeft == 32768
+
+    controller.setPage("SETTINGS")
+    app.processEvents()
+    normal_stepper = window.findChild(QObject, "settingsCalibrationStepper")
+    assert normal_stepper is not None
+    assert normal_stepper.property("compact") is False
+    assert normal_stepper.property("width") == 200
+    normal_suffix = normal_stepper.findChild(QObject, "numberStepperSuffix")
+    normal_surface = normal_stepper.findChild(
+        QObject,
+        "prismButtonDohnaGroupSurface",
+    )
+    assert normal_suffix is not None
+    assert normal_suffix.property("visible") is True
+    assert normal_surface is not None
+    assert normal_surface.property("visible") is True
+
+    controller.useFullScreen()
+    controller.setPage("CAPTURE")
+    app.processEvents()
+    assert stepper.property("enabled") is False
+    assert group_surface.property("visible") is True
+    assert float(group_surface.property("opacity")) < 1
     host.shutdown()
 
 

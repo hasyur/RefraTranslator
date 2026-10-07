@@ -13,6 +13,18 @@ Button {
     property bool navigation: false
     property string tone: "neutral"
     property real dohnaImpact: 0
+    // NumberStepper embeds its two actions in one shared Dohna surface.  The
+    // defaults keep every existing Prism and standalone Dohna button intact.
+    property bool dohnaEmbedded: false
+    property bool dohnaGroupFrame: false
+    property bool dohnaGroupVisible: dohnaGroupFrame
+    property bool dohnaGroupEnabled: true
+    property real dohnaGroupWidth: width
+    property real dohnaGroupHeight: height
+    property bool dohnaGroupHovered: hovered
+    property bool dohnaGroupPressed: down
+    property real dohnaGroupDivider1X: -1
+    property real dohnaGroupDivider2X: -1
 
     implicitWidth: Math.max(112, contentItem.implicitWidth + 30)
     implicitHeight: root.theme.dohna && root.navigation ? 50 : 42
@@ -94,7 +106,9 @@ Button {
                     : root.primary ? root.theme.accent
                     : root.theme.lineStrong
         border.width: root.theme.dohna ? 0 : (root.activeFocus ? 2 : root.primary ? 1.5 : 1)
-        opacity: root.enabled ? 1 : 0.55
+        opacity: root.dohnaGroupFrame
+                 ? (root.dohnaGroupEnabled ? 1 : 0.55)
+                 : root.enabled ? 1 : 0.55
 
         Behavior on color { ColorAnimation { duration: root.theme.ui } }
         Behavior on border.color { ColorAnimation { duration: root.theme.ui } }
@@ -114,7 +128,10 @@ Button {
 
         Rectangle {
             objectName: "prismButtonDohnaShadow"
-            visible: root.theme.dohna && root.enabled
+            visible: root.theme.dohna
+                     && root.enabled
+                     && !root.dohnaEmbedded
+                     && !root.dohnaGroupFrame
             x: 5
             y: 5
             width: parent.width
@@ -134,7 +151,7 @@ Button {
                 strokeWidth: root.primary || root.activeFocus || root.hovered ? 2 : 0
                 fillColor: root.primary
                            ? root.theme.accent
-                           : root.hovered ? root.theme.spectrum
+                           : root.hovered ? root.theme.violet
                                           : "transparent"
                 startX: 0
                 startY: 0
@@ -147,15 +164,19 @@ Button {
 
         Shape {
             objectName: "prismButtonDohnaCut"
-            visible: root.theme.dohna && root.enabled && !root.navigation
+            visible: root.theme.dohna
+                     && root.enabled
+                     && !root.navigation
+                     && !root.dohnaEmbedded
+                     && !root.dohnaGroupFrame
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 strokeColor: root.activeFocus || root.down ? root.theme.selectionEdge : root.theme.ink
                 strokeWidth: root.activeFocus || root.down ? 3 : 2
                 fillColor: root.primary ? root.theme.accent
-                           : root.down ? root.theme.violet
-                           : root.hovered ? root.theme.spectrum
+                           : root.down ? root.theme.accent
+                           : root.hovered ? root.theme.violet
                            : root.theme.white
                 startX: 0
                 startY: 0
@@ -167,8 +188,83 @@ Button {
         }
 
         Shape {
+            objectName: "prismButtonDohnaGroupShadow"
+            visible: root.theme.dohna && root.dohnaGroupVisible
+            x: 5
+            y: 5
+            width: root.dohnaGroupWidth
+            height: root.dohnaGroupHeight
+            z: -2
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: "transparent"
+                fillColor: root.theme.stageShadow
+                startX: 0
+                startY: 0
+                PathLine { x: root.dohnaGroupWidth - 14; y: 0 }
+                PathLine { x: root.dohnaGroupWidth; y: root.dohnaGroupHeight }
+                PathLine { x: 0; y: root.dohnaGroupHeight }
+                PathLine { x: 0; y: 0 }
+            }
+        }
+
+        Shape {
+            objectName: "prismButtonDohnaGroupSurface"
+            visible: root.theme.dohna && root.dohnaGroupVisible
+            width: root.dohnaGroupWidth
+            height: root.dohnaGroupHeight
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                objectName: "prismButtonDohnaGroupPath"
+                strokeColor: root.dohnaGroupPressed || root.activeFocus
+                             ? root.theme.selectionEdge : root.theme.ink
+                strokeWidth: root.dohnaGroupPressed || root.activeFocus ? 3 : 2
+                fillColor: root.dohnaGroupPressed
+                           ? root.theme.accent
+                           : root.dohnaGroupHovered
+                             ? root.theme.violet
+                             : root.theme.white
+                startX: 0
+                startY: 0
+                PathLine { x: root.dohnaGroupWidth - 14; y: 0 }
+                PathLine { x: root.dohnaGroupWidth; y: root.dohnaGroupHeight }
+                PathLine { x: 0; y: root.dohnaGroupHeight }
+                PathLine { x: 0; y: 0 }
+            }
+            opacity: root.dohnaGroupEnabled ? 1 : 0.55
+        }
+
+        Rectangle {
+            objectName: "prismButtonDohnaGroupDivider1"
+            visible: root.theme.dohna
+                     && root.dohnaGroupVisible
+                     && root.dohnaGroupDivider1X >= 0
+            x: root.dohnaGroupDivider1X
+            y: 4
+            width: 2
+            height: Math.max(0, root.dohnaGroupHeight - 8)
+            color: root.theme.ink
+        }
+
+        Rectangle {
+            objectName: "prismButtonDohnaGroupDivider2"
+            visible: root.theme.dohna
+                     && root.dohnaGroupVisible
+                     && root.dohnaGroupDivider2X >= 0
+            x: root.dohnaGroupDivider2X
+            y: 4
+            width: 2
+            height: Math.max(0, root.dohnaGroupHeight - 8)
+            color: root.theme.ink
+        }
+
+        Shape {
             objectName: "prismButtonDohnaFocusSlash"
-            visible: root.theme.dohna && root.enabled && (root.hovered || root.activeFocus || root.down)
+            visible: root.theme.dohna
+                     && root.enabled
+                     && !root.dohnaEmbedded
+                     && !root.dohnaGroupFrame
+                     && (root.hovered || root.activeFocus || root.down)
             x: Math.max(0, root.width - 24)
             y: -4
             width: 30
@@ -178,7 +274,7 @@ Button {
             ShapePath {
                 strokeColor: root.theme.ink
                 strokeWidth: root.down ? 2 : 1
-                fillColor: root.down ? root.theme.violet : root.theme.spectrum
+                fillColor: root.down ? root.theme.accent : root.theme.violet
                 startX: 2
                 startY: 1
                 PathLine { x: 25; y: 0 }

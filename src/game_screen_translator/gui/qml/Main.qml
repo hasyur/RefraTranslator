@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Shapes
 import QtQuick.Window
 import "components"
 import "pages"
@@ -32,7 +33,6 @@ ApplicationWindow {
     property string lastAnimatedPage: ""
     readonly property bool pageTransitioning: pageTransitionAnimation.running
                                               || dohnaPageTransitionAnimation.running
-                                              || dohnaFeedback.pagePulseRunning
     property int pageTransitionSequence: 0
     property bool startPreludePending: false
 
@@ -152,7 +152,6 @@ ApplicationWindow {
             return
         lastAnimatedPage = visualPage
         pageTransitionSequence += 1
-        dohnaFeedback.pulsePage()
         if (reduceMotion || !visible) {
             pageTransitionAnimation.stop()
             dohnaPageTransitionAnimation.stop()
@@ -164,9 +163,9 @@ ApplicationWindow {
             pageTransitionAnimation.stop()
             pageContentReady = true
             pageContentMotion.opacity = 1
-            pageContentTranslate.x = 18
+            pageContentTranslate.x = Math.max(54, Math.min(132, root.width * 0.12))
             pageHeaderSlice.opacity = 1
-            pageHeaderTranslate.x = 18
+            pageHeaderTranslate.x = Math.max(28, Math.min(72, root.width * 0.055))
             dohnaPageTransitionAnimation.restart()
             return
         }
@@ -505,7 +504,7 @@ ApplicationWindow {
                                     height: prism.dohna ? 5 : 1
                                     anchors.left: parent.left
                                     anchors.bottom: parent.bottom
-                                    color: prism.accent
+                                    color: prism.dohna ? prism.violet : prism.accent
                                     opacity: prism.dohna ? 1 : 0.46
                                     rotation: prism.dohna ? -1.8 : -1.2
                                     antialiasing: true
@@ -564,6 +563,54 @@ ApplicationWindow {
                             id: pageContentTranslate
                             objectName: "pageContentTranslate"
                         }
+
+                        Shape {
+                            id: dohnaPageImpact
+                            objectName: "dohnaPageImpact"
+                            visible: prism.dohna && dohnaPageTransitionAnimation.running
+                            x: 0
+                            y: -7
+                            width: parent.width
+                            height: 18
+                            z: -1
+                            preferredRendererType: Shape.CurveRenderer
+                            ShapePath {
+                                strokeColor: prism.ink
+                                strokeWidth: 2
+                                fillColor: prism.violet
+                                startX: 0
+                                startY: 0
+                                PathLine { x: dohnaPageImpact.width - 28; y: 0 }
+                                PathLine { x: dohnaPageImpact.width; y: 10 }
+                                PathLine { x: dohnaPageImpact.width - 18; y: dohnaPageImpact.height }
+                                PathLine { x: 0; y: dohnaPageImpact.height }
+                                PathLine { x: 0; y: 0 }
+                            }
+                        }
+
+                        Shape {
+                            id: dohnaPageImpactShadow
+                            objectName: "dohnaPageImpactShadow"
+                            visible: dohnaPageImpact.visible
+                            x: 6
+                            y: -2
+                            width: parent.width
+                            height: dohnaPageImpact.height
+                            z: -2
+                            preferredRendererType: Shape.CurveRenderer
+                            ShapePath {
+                                strokeColor: "transparent"
+                                fillColor: prism.stageShadow
+                                startX: 0
+                                startY: 0
+                                PathLine { x: dohnaPageImpactShadow.width - 28; y: 0 }
+                                PathLine { x: dohnaPageImpactShadow.width; y: 10 }
+                                PathLine { x: dohnaPageImpactShadow.width - 18; y: dohnaPageImpactShadow.height }
+                                PathLine { x: 0; y: dohnaPageImpactShadow.height }
+                                PathLine { x: 0; y: 0 }
+                            }
+                        }
+
                         StackLayout {
                             objectName: "pageStack"
                             anchors.fill: parent
@@ -735,15 +782,18 @@ ApplicationWindow {
                 target: pageContentTranslate
                 property: "x"
                 to: 0
-                duration: prism.popPageMotion
-                easing.type: Easing.OutBack
-            }
-            NumberAnimation {
-                target: pageHeaderTranslate
-                property: "x"
-                to: 0
-                duration: prism.popActionMotion
+                duration: prism.dohnaPageMotion
                 easing.type: Easing.OutCubic
+            }
+            SequentialAnimation {
+                PauseAnimation { duration: prism.dohnaTitleDelay }
+                NumberAnimation {
+                    target: pageHeaderTranslate
+                    property: "x"
+                    to: 0
+                    duration: prism.dohnaTitleMotion
+                    easing.type: Easing.OutCubic
+                }
             }
         }
         ScriptAction { script: root.settlePageTransition() }

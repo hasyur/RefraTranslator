@@ -5,6 +5,7 @@ import tempfile
 from argparse import ArgumentParser
 from io import BytesIO
 from pathlib import Path
+from time import monotonic
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -44,6 +45,7 @@ def main() -> int:
     minimum_output_path = output_dir / "launcher_preview_minimum.png"
     dohna_home_output_path = output_dir / "launcher_preview_dohna_home.png"
     dohna_home_minimum_output_path = output_dir / "launcher_preview_dohna_home_minimum.png"
+    dohna_home_popup_output_path = output_dir / "launcher_preview_dohna_home_popup.png"
     dohna_capture_output_path = output_dir / "launcher_preview_dohna_capture.png"
     dohna_minimum_output_path = output_dir / "launcher_preview_dohna_minimum.png"
     dohna_motion_output_path = output_dir / "launcher_preview_dohna_motion.gif"
@@ -127,6 +129,68 @@ target_language = "简体中文"
             host.shutdown()
             app.processEvents()
 
+        def render_dohna_home_popup(output_path: Path) -> None:
+            controller = WorkbenchController(config_path, probe_ocr_devices=False)
+            controller.setTheme(THEME_DARK)
+            controller.setSkin(SKIN_DOHNA)
+            controller.setReducedMotion(True)
+            controller.setPage("HOME")
+            host = QmlWorkbenchHost(controller, application=app)
+            window = host.window
+            if window is None:
+                raise RuntimeError("QML 工作台没有创建窗口")
+            window.resize(1280, 820)
+            host.show()
+            app.processEvents()
+            def find_quick_item(item: QQuickItem, object_name: str):
+                if item.objectName() == object_name:
+                    return item
+                for child in item.childItems():
+                    match = find_quick_item(child, object_name)
+                    if match is not None:
+                        return match
+                return None
+
+            def find_quick_items(item: QQuickItem, object_name: str):
+                matches = []
+                if item.objectName() == object_name:
+                    matches.append(item)
+                for child in item.childItems():
+                    matches.extend(find_quick_items(child, object_name))
+                return matches
+
+            selector = find_quick_item(window.contentItem(), "homeSkinSelector")
+            if selector is None:
+                raise RuntimeError("无法找到 Dohna 皮肤下拉框")
+            selector_point = selector.mapToScene(
+                QPointF(selector.width() / 2, selector.height() / 2)
+            ).toPoint()
+            QTest.mouseClick(
+                window,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                selector_point,
+            )
+            popup_ready = False
+            for _ in range(100):
+                app.processEvents()
+                popup_ready = any(
+                    item.isVisible()
+                    for item in find_quick_items(
+                        window.contentItem(), "prismComboBoxDohnaDelegateCut"
+                    )
+                )
+                if popup_ready:
+                    break
+                QTest.qWait(20)
+            if not popup_ready:
+                raise RuntimeError("Dohna 皮肤下拉框未展开")
+            if not window.grabWindow().save(str(output_path)):
+                raise RuntimeError(f"无法保存下拉框预览：{output_path}")
+            window.close()
+            host.shutdown()
+            app.processEvents()
+
         def render_motion(output_path: Path) -> None:
             controller = WorkbenchController(config_path, probe_ocr_devices=False)
             controller.setTheme(THEME_DARK)
@@ -157,22 +221,25 @@ target_language = "简体中文"
                 image = window.grabWindow()
                 if image.isNull():
                     raise RuntimeError("无法抓取 QML 动效帧")
-                buffer = QBuffer()
-                buffer.open(QIODevice.WriteOnly)
-                image.save(buffer, "PNG")
-                frames.append(
-                    Image.open(BytesIO(bytes(buffer.data()))).convert("RGB")
-                )
+                # Keep the native QImage until the interaction is complete;
+                # PNG/Pillow conversion in the sampling loop shifts the real
+                # animation timestamps and collapses the short middle states.
+                frames.append(image.copy())
 
-            def capture_frames(count: int, *, delay_ms: int = 45) -> None:
-                for _ in range(count):
+            def capture_for(duration_ms: int, *, interval_ms: int = 40) -> None:
+                deadline = monotonic() + duration_ms / 1000
+                while monotonic() < deadline or not frames:
                     capture_frame()
-                    QTest.qWait(delay_ms)
+                    wait_until = monotonic() + interval_ms / 1000
+                    while True:
+                        remaining = int((wait_until - monotonic()) * 1000)
+                        if remaining <= 0:
+                            break
+                        QTest.qWait(min(remaining, 8))
 
             # Let HOME settle, then drive the same navigation hit target a
             # user sees: hover, press, release, and observe the short page pop.
-            QTest.qWait(360)
-            capture_frames(10)
+            capture_for(480)
             navigation_button = find_quick_item(window.contentItem(), "navigationButton1")
             if navigation_button is None:
                 raise RuntimeError("无法找到 Dohna 导航命中区")
@@ -180,30 +247,39 @@ target_language = "简体中文"
                 QPointF(navigation_button.width() / 2, navigation_button.height() / 2)
             ).toPoint()
             QTest.mouseMove(window, navigation_point)
-            capture_frames(3)
+            capture_for(120)
             QTest.mousePress(
                 window,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
                 navigation_point,
             )
-            capture_frames(3)
+            capture_for(80)
             QTest.mouseRelease(
                 window,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
                 navigation_point,
             )
-            capture_frames(14)
-            capture_frames(10)
+            capture_for(520)
+            capture_for(360)
 
-            frames[0].save(
+            def to_pillow(image) -> Image.Image:
+                buffer = QBuffer()
+                buffer.open(QIODevice.WriteOnly)
+                image.save(buffer, "PNG")
+                return Image.open(BytesIO(bytes(buffer.data()))).convert("RGB")
+
+            pillow_frames = [to_pillow(image) for image in frames]
+
+            pillow_frames[0].save(
                 output_path,
                 save_all=True,
-                append_images=frames[1:],
-                duration=45,
+                append_images=pillow_frames[1:],
+                duration=40,
                 loop=0,
                 disposal=2,
+                optimize=False,
             )
             window.close()
             host.shutdown()
@@ -234,6 +310,7 @@ target_language = "简体中文"
             size=(980, 700),
             skin=SKIN_DOHNA,
         )
+        render_dohna_home_popup(dohna_home_popup_output_path)
         render(
             THEME_DARK,
             "CAPTURE",
@@ -254,6 +331,7 @@ target_language = "简体中文"
     print(minimum_output_path)
     print(dohna_home_output_path)
     print(dohna_home_minimum_output_path)
+    print(dohna_home_popup_output_path)
     print(dohna_capture_output_path)
     print(dohna_minimum_output_path)
     if args.motion:

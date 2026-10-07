@@ -32,12 +32,27 @@ RowLayout {
     }
 
     PrismButton {
+        id: decreaseButton
         objectName: "numberStepperDecrease"
         theme: root.theme
         text: "−"
         implicitWidth: root.compact ? 32 : 42
         Layout.preferredWidth: implicitWidth
         enabled: root.enabled && root.value > root.minimum
+        dohnaEmbedded: root.theme.dohna
+        dohnaGroupFrame: root.theme.dohna
+        dohnaGroupVisible: root.theme.dohna
+        dohnaGroupEnabled: root.enabled
+        dohnaGroupWidth: root.width
+        dohnaGroupHeight: root.height
+        dohnaGroupHovered: decreaseButton.hovered
+                                || increaseButton.hovered
+                                || decreaseButton.activeFocus
+                                || increaseButton.activeFocus
+                                || editor.activeFocus
+        dohnaGroupPressed: decreaseButton.down || increaseButton.down
+        dohnaGroupDivider1X: decreaseButton.width
+        dohnaGroupDivider2X: root.width - increaseButton.width
         onClicked: root.submit(root.value - root.stepSize)
     }
 
@@ -62,9 +77,9 @@ RowLayout {
         Accessible.name: root.accessibleName
         onEditingFinished: root.submit(text)
         background: Rectangle {
-            color: root.theme.inputSurface
+            color: root.theme.dohna ? "transparent" : root.theme.inputSurface
             border.color: editor.activeFocus ? root.theme.accent : root.theme.lineStrong
-            border.width: editor.activeFocus ? 2 : 1
+            border.width: root.theme.dohna ? 0 : editor.activeFocus ? 2 : 1
         }
 
         Text {
@@ -87,12 +102,14 @@ RowLayout {
     }
 
     PrismButton {
+        id: increaseButton
         objectName: "numberStepperIncrease"
         theme: root.theme
         text: "+"
         implicitWidth: root.compact ? 32 : 42
         Layout.preferredWidth: implicitWidth
         enabled: root.enabled && root.value < root.maximum
+        dohnaEmbedded: root.theme.dohna
         onClicked: root.submit(root.value + root.stepSize)
     }
 

@@ -127,4 +127,9 @@ QtObject {
     readonly property int popStartMotion: reducedMotion ? 0 : 240
     readonly property int popWarningMotion: reducedMotion ? 0 : 260
     readonly property int popPressMotion: reducedMotion ? 0 : 120
+    // Dohna pages arrive as one opaque group; the title settles just after
+    // the card bodies instead of replaying Prism's fade-in sequence.
+    readonly property int dohnaPageMotion: reducedMotion ? 0 : 320
+    readonly property int dohnaTitleDelay: reducedMotion ? 0 : 48
+    readonly property int dohnaTitleMotion: reducedMotion ? 0 : 300
 }

@@ -26,17 +26,17 @@ Item {
         panelTranslate.x = 0
         root.opacity = 1
         dohnaStamp = 1
-        dohnaStickerEntry.stop()
     }
 
     function playEntry() {
-        if (!motionEnabled || reducedMotion) {
+        // Dohna enters as one opaque page group from Main.qml.  Starting the
+        // Prism panel fade here would make each card透底 independently and
+        // leave text visibly floating behind the page movement.
+        if (theme.dohna || !motionEnabled || reducedMotion) {
             settleEntry()
             return
         }
         panelEntry.restart()
-        if (theme.dohna)
-            dohnaStickerEntry.restart()
     }
 
     onTransitionSerialChanged: Qt.callLater(root.playEntry)
@@ -286,15 +286,4 @@ Item {
         }
     }
 
-    SequentialAnimation {
-        id: dohnaStickerEntry
-        PropertyAction { target: root; property: "dohnaStamp"; value: 0 }
-        NumberAnimation {
-            target: root
-            property: "dohnaStamp"
-            to: 1
-            duration: root.theme.popActionMotion
-            easing.type: Easing.OutBack
-        }
-    }
 }
