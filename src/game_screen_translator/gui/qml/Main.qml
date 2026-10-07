@@ -14,7 +14,7 @@ ApplicationWindow {
     visible: false
     width: 1280
     height: 820
-    minimumWidth: 980
+    minimumWidth: prism.dohna ? navigationRail.implicitWidth + 802 : 980
     minimumHeight: 700
     title: "RefraTranslator · Prism Workbench"
 
@@ -30,8 +30,9 @@ ApplicationWindow {
     readonly property string visualPage: boundWorkbench.currentPage
     readonly property bool reduceMotion: boundWorkbench.reducedMotion
     property string lastAnimatedPage: ""
-    readonly property bool pageTransitioning: pageTransitionAnimation.running
-                                              || dohnaPageTransitionAnimation.running
+    readonly property bool pageTransitioning: animationsRunning
+                                              && (pageTransitionAnimation.running
+                                                  || dohnaPageTransitionAnimation.running)
     property int pageTransitionSequence: 0
     property bool startPreludePending: false
 
@@ -164,7 +165,7 @@ ApplicationWindow {
             pageContentMotion.opacity = 1
             pageContentTranslate.x = Math.max(54, Math.min(132, root.width * 0.12))
             pageHeaderSlice.opacity = 1
-            pageHeaderTranslate.x = Math.max(28, Math.min(72, root.width * 0.055))
+            pageHeaderTranslate.x = -Math.max(28, Math.min(72, root.width * 0.055))
             dohnaPageTransitionAnimation.restart()
             return
         }
@@ -311,11 +312,22 @@ ApplicationWindow {
 
         Rectangle {
             id: navigationRail
-            Layout.preferredWidth: root.width < 1100 ? 178 : 222
+            implicitWidth: prism.dohna ? Math.ceil(dohnaNavigationText.width + 40)
+                                      : root.width < 1100 ? 178 : 222
+            Layout.preferredWidth: implicitWidth
             Layout.fillHeight: true
             color: prism.navigationSurface
             border.color: prism.line
             clip: prism.dohna
+
+            TextMetrics {
+                id: dohnaNavigationText
+                text: "TRANSLATION  " + root.navigationLabel("TRANSLATION")
+                font.family: prism.monoFontFor(text)
+                font.pixelSize: 24
+                font.weight: Font.Bold
+                font.letterSpacing: 0.4
+            }
 
             ColumnLayout {
                 id: navigationLayout
@@ -460,6 +472,7 @@ ApplicationWindow {
 
                 Rectangle {
                     objectName: "pageHeaderBar"
+                    clip: prism.dohna
                     Layout.fillWidth: true
                     Layout.preferredHeight: Math.max(
                         root.height <= 820 ? 116 : 142,

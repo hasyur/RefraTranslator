@@ -1957,6 +1957,61 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     host.shutdown()
 
 
+def test_real_dohna_titles_enter_opposite_content_on_every_page(tmp_path: Path) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_DOHNA)
+    controller.setReducedMotion(False)
+    controller.setPage("SETTINGS")
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        window = host.window
+        assert window is not None
+        host.show()
+        header = window.findChild(QObject, "pageHeaderTranslate")
+        content = window.findChild(QObject, "pageContentTranslate")
+        title = window.findChild(QQuickItem, "pageDisplayTitleLight")
+        header_bar = window.findChild(QObject, "pageHeaderBar")
+        assert header_bar.property("clip") is True
+        for page in ("HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS"):
+            controller.setPage(page)
+            QTest.qWait(10)
+            assert window.property("pageTransitioning") is True
+            samples = [(float(header.property("x")), float(content.property("x")))]
+            title_positions = [title.mapToScene(QPointF(0, 0)).x()]
+            assert samples[0][0] < 0 < samples[0][1], page
+            deadline = time.monotonic() + 1.2
+            while window.property("pageTransitioning"):
+                QTest.qWait(20)
+                app.processEvents()
+                samples.append((float(header.property("x")), float(content.property("x"))))
+                title_positions.append(title.mapToScene(QPointF(0, 0)).x())
+                assert time.monotonic() < deadline, page
+            # The title travels right and the controls travel left throughout
+            # the animation; both finish at their normal layout positions.
+            assert all(h <= 0 <= c for h, c in samples), page
+            assert all(h1 <= h2 and c1 >= c2
+                       for (h1, c1), (h2, c2) in zip(samples, samples[1:])), page
+            assert samples[-1] == pytest.approx((0, 0)), page
+            assert all(x1 <= x2 for x1, x2 in zip(title_positions, title_positions[1:])), page
+
+        controller.setPage("HOME")
+        controller.setReducedMotion(True)
+        QTest.qWait(20)
+        assert window.property("pageTransitioning") is False
+        assert header.property("x") == content.property("x") == 0
+        controller.setPage("CAPTURE")
+        app.processEvents()
+        assert header.property("x") == content.property("x") == 0
+        controller.setSkin(SKIN_PRISM)
+        app.processEvents()
+        assert header_bar.property("clip") is False
+    finally:
+        host.shutdown()
+
+
 def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     tmp_path: Path,
 ) -> None:
@@ -2574,7 +2629,7 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
     try:
         window = host.window
         assert window is not None
-        window.resize(*window_size)
+        window.resize(max(window_size[0], window.minimumWidth()), window_size[1])
         host.show()
         QTest.qWait(80)
         theme = window.findChild(QObject, "prismTheme")
@@ -2597,8 +2652,8 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
             # Measure visible glyphs, not the font's extra line spacing.  The
             # thin strips must not vertically shrink their existing lettering.
             assert 0.79 <= glyph_bounds.height() / button.height() <= 0.86
-            assert fitted_font.pixelSize() >= 10
-            assert button.height() < 20
+            assert fitted_font.pixelSize() == 24
+            assert 24 <= button.height() < 40
             baseline = label.y() + label.property("baselineOffset")
             assert baseline + glyph_bounds.top() >= -1
             assert baseline + glyph_bounds.bottom() <= button.height() + 1
@@ -2609,6 +2664,8 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
             assert rail.property("clip") is True
             rail_left = rail.mapToScene(QPointF(0, 0)).x()
             rail_right = rail_left + rail.width()
+            assert rail.width() >= 300
+            assert window.width() - rail.width() >= 802
             middle_x = (rail_left + rail_right) / 2
             slope = math.tan(math.radians(button.property("rotation")))
             top = button.mapToScene(QPointF(0, 0))

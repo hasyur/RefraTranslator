@@ -70,9 +70,7 @@ Button {
 
     TextMetrics {
         id: navigationTextMetrics
-        font.family: buttonLabel.font.family
-        font.pixelSize: buttonLabel.fontInfo.pixelSize
-        font.weight: buttonLabel.font.weight
+        font: buttonLabel.font
         text: buttonLabel.text
     }
 
@@ -88,11 +86,10 @@ Button {
               : root.primary ? (root.theme.dohna ? root.theme.ink : root.theme.text)
               : root.theme.text
         font.family: root.theme.monoFontFor(text)
-        font.pixelSize: root.theme.dohna && root.navigation ? 12 : 11
+        font.pixelSize: root.theme.dohna && root.navigation ? 24 : 11
         font.weight: root.theme.dohna && root.navigation ? Font.Bold : Font.DemiBold
-        font.letterSpacing: root.theme.dohna && root.navigation ? 0.2 : 0.9
-        fontSizeMode: root.theme.dohna && root.navigation ? Text.HorizontalFit : Text.FixedSize
-        minimumPixelSize: 10
+        font.letterSpacing: root.theme.dohna && root.navigation ? 0.4 : 0.9
+        fontSizeMode: Text.FixedSize
         leftPadding: root.theme.dohna && root.navigation ? 10 : 0
         rightPadding: leftPadding
         horizontalAlignment: Text.AlignHCenter

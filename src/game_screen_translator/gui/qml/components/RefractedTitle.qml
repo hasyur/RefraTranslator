@@ -71,7 +71,7 @@ Item {
         renderType: Text.CurveRendering
         renderTypeQuality: Text.VeryHighRenderTypeQuality
         transform: Translate {
-            x: root.theme.dohna ? root.refractionEnergy * 10 : 0
+            x: root.theme.dohna ? -root.refractionEnergy * 10 : 0
             y: root.theme.dohna ? -root.refractionEnergy * 2 : 0
         }
     }
