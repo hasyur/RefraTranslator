@@ -459,7 +459,9 @@ Item {
                     settingDescription: "选择工作台使用的颜色主题。"
                     settingKey: "home-theme"
                     model: ["跟随系统", "深色", "浅色"]
-                    currentIndex: Math.max(0, root.themeValues.indexOf(root.workbench.themePreference))
+                    currentIndex: Math.max(0, root.themeValues.indexOf(
+                        root.theme.dohna ? "light" : root.workbench.themePreference
+                    ))
                     enabled: !root.theme.dohna
                     Layout.fillWidth: true
                     onActivated: index => {

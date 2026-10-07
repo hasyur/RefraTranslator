@@ -1863,6 +1863,9 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     assert backdrop is not None
     assert skin_selector.property("currentIndex") == 0
     assert skin_selector.property("currentText") == "Prism"
+    assert theme_selector is not None
+    assert theme_selector.property("currentText") == "深色"
+    assert theme_selector.property("enabled") is True
     assert theme.property("dohna") is False
     assert stage.property("visible") is True
 
@@ -1893,6 +1896,8 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
         assert navigation_button.property("visible") is True
     assert theme_selector is not None
     assert theme_selector.property("enabled") is False
+    assert theme_selector.property("currentIndex") == 2
+    assert theme_selector.property("currentText") == "浅色"
     assert stage.property("visible") is False
     assert backdrop.property("visible") is True
     assert window.findChild(QObject, "homeDohnaThemeHint").property("visible") is True
@@ -1953,9 +1958,22 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     controller.setSkin(SKIN_PRISM)
     app.processEvents()
     assert controller.themePreference == "dark"
+    assert theme_selector.property("currentText") == "深色"
+    assert theme_selector.property("enabled") is True
     assert theme.property("dohna") is False
     assert theme.property("dark") is True
     assert stage.property("visible") is True
+    for saved_theme, label in (("system", "跟随系统"), ("light", "浅色")):
+        controller.setTheme(saved_theme)
+        controller.setSkin(SKIN_DOHNA)
+        app.processEvents()
+        assert theme_selector.property("currentText") == "浅色"
+        assert theme_selector.property("enabled") is False
+        assert controller.themePreference == saved_theme
+        controller.setSkin(SKIN_PRISM)
+        app.processEvents()
+        assert theme_selector.property("currentText") == label
+        assert theme_selector.property("enabled") is True
     host.shutdown()
 
 
