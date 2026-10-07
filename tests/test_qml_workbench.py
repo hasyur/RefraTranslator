@@ -2156,7 +2156,7 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     assert nav_cut.property("visible") is True
     nav_path = nav_cut.findChild(QObject, "prismNavigationDohnaPath")
     assert nav_path.property("strokeWidth") == 0
-    assert QColor(nav_path.property("fillColor")) == QColor(theme.property("accent"))
+    assert QColor(nav_path.property("fillColor")) == QColor(theme.property("violet"))
     assert nav_button.findChild(QObject, "prismButtonDohnaShadow").property("visible") is False
 
     # Keyboard focus uses the same flat highlight as hovering, without a frame.
@@ -2557,6 +2557,95 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
                 checked_names.add(str(stepper.property("accessibleName")))
         assert checked_names == expected_names
     host.shutdown()
+
+
+@pytest.mark.parametrize("window_size", [(980, 700), (1280, 820)])
+def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
+    tmp_path: Path, window_size: tuple[int, int],
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(config_path, load_config(config_path), "game", display_name="测试游戏")
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_DOHNA)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        window = host.window
+        assert window is not None
+        window.resize(*window_size)
+        host.show()
+        QTest.qWait(80)
+        theme = window.findChild(QObject, "prismTheme")
+        pages = ("HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS")
+        for index, page in enumerate(pages):
+            button = _find_quick_item(window, f"navigationButton{index}")
+            assert button is not None
+            label = button.findChild(QQuickItem, "prismButtonLabel")
+            label_left = label.mapToScene(QPointF(0, 0))
+            label_right = label.mapToScene(QPointF(label.width(), 0))
+            assert label_right.y() > label_left.y() + 10
+            for x, y in ((0, 0), (button.width(), 0), (0, button.height()),
+                         (button.width(), button.height())):
+                corner = button.mapToScene(QPointF(x, y))
+                assert 0 <= corner.x() <= button.parentItem().parentItem().width()
+                assert 0 <= corner.y() <= window.height()
+            # Both ends of the slanted strip still route to this page, including
+            # where neighboring rows' rectangular bounding boxes overlap.
+            for fraction in (0.15, 0.85):
+                point = button.mapToScene(QPointF(button.width() * fraction, button.height() / 2))
+                QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=point.toPoint())
+                app.processEvents()
+                assert controller.currentPage == page
+            path = button.findChild(QObject, "prismNavigationDohnaPath")
+            assert path.property("strokeWidth") == 0
+            assert QColor(path.property("fillColor")) == QColor(theme.property("violet"))
+            assert QColor(label.property("color")) == QColor(theme.property("ink"))
+
+        capture_button = _find_quick_item(window, "navigationButton1")
+        capture_button.forceActiveFocus()
+        QTest.keyClick(window, Qt.Key.Key_Space)
+        app.processEvents()
+        assert controller.currentPage == "CAPTURE"
+
+        def assert_parallel_sides(path: QObject) -> list[tuple[float, float]]:
+            assert path is not None
+            top_left = (float(path.property("startX")), float(path.property("startY")))
+            points = [
+                (float(line.property("x")), float(line.property("y")))
+                for line in path.children()
+                if line.metaObject().className().startswith("QQuickPathLine")
+            ]
+            assert len(points) == 4
+            top_right, bottom_right, bottom_left, close = points
+            assert close == pytest.approx(top_left)
+            assert bottom_left[0] > top_left[0]
+            assert bottom_right[0] - top_right[0] == pytest.approx(bottom_left[0] - top_left[0])
+            assert bottom_right[1] - top_right[1] == pytest.approx(bottom_left[1] - top_left[1])
+            assert top_right[0] - top_left[0] == pytest.approx(bottom_right[0] - bottom_left[0])
+            return points
+
+        for name in ("saveAllButton", "startLiveButton", "captureScanAction", "captureCustomAction"):
+            button = window.findChild(QQuickItem, name)
+            assert button is not None
+            assert button.property("rotation") == 0
+            face = assert_parallel_sides(button.findChild(QObject, "prismButtonDohnaPath"))
+            shadow = assert_parallel_sides(button.findChild(QObject, "prismButtonDohnaShadowPath"))
+            assert face == shadow
+
+        panel = window.findChild(QObject, "captureSecondaryPanel")
+        for path in panel.findChildren(QObject, "prismButtonDohnaGroupPath"):
+            assert_parallel_sides(path)
+        for path in panel.findChildren(QObject, "prismButtonDohnaGroupShadowPath"):
+            assert_parallel_sides(path)
+
+        controller.setSkin(SKIN_PRISM)
+        app.processEvents()
+        assert all(_find_quick_item(window, f"navigationButton{i}").property("rotation") == 0
+                   for i in range(len(pages)))
+    finally:
+        host.shutdown()
 
 
 def test_real_dohna_number_stepper_uses_one_frame_at_bounds_and_input(

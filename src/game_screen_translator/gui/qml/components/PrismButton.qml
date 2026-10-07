@@ -30,6 +30,8 @@ Button {
     implicitHeight: root.theme.dohna && root.navigation ? 50 : 42
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
+    // Rotate the menu control itself so its label and hit target follow the bar.
+    rotation: root.theme.dohna && root.navigation ? 12 : 0
     scale: root.theme.dohna ? 1 : (root.down ? 0.994 : root.hovered && root.enabled ? 1.004 : 1)
 
     Behavior on scale {
@@ -126,7 +128,7 @@ Button {
             Behavior on opacity { NumberAnimation { duration: root.theme.ui } }
         }
 
-        Rectangle {
+        Shape {
             objectName: "prismButtonDohnaShadow"
             visible: root.theme.dohna
                      && root.enabled
@@ -137,8 +139,19 @@ Button {
             y: 5
             width: parent.width
             height: parent.height
-            color: root.theme.stageShadow
             z: -1
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                objectName: "prismButtonDohnaShadowPath"
+                strokeColor: "transparent"
+                fillColor: root.theme.stageShadow
+                startX: 0
+                startY: 0
+                PathLine { x: root.width - 14; y: 0 }
+                PathLine { x: root.width; y: root.height }
+                PathLine { x: 14; y: root.height }
+                PathLine { x: 0; y: 0 }
+            }
         }
 
         Shape {
@@ -150,13 +163,11 @@ Button {
                 objectName: "prismNavigationDohnaPath"
                 strokeColor: "transparent"
                 strokeWidth: 0
-                fillColor: root.primary
-                           ? root.theme.accent
-                           : root.hovered || root.activeFocus ? root.theme.violet
-                                          : "transparent"
+                fillColor: root.primary || root.hovered || root.activeFocus
+                           ? root.theme.violet : Qt.darker(root.theme.ink, 1.8)
                 startX: 0
                 startY: 0
-                PathLine { x: root.width - 13; y: 0 }
+                PathLine { x: root.width; y: 0 }
                 PathLine { x: root.width; y: root.height }
                 PathLine { x: 0; y: root.height }
                 PathLine { x: 0; y: 0 }
@@ -173,6 +184,7 @@ Button {
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
+                objectName: "prismButtonDohnaPath"
                 strokeColor: root.activeFocus || root.down ? root.theme.selectionEdge : root.theme.ink
                 strokeWidth: root.activeFocus || root.down ? 3 : 2
                 fillColor: root.primary ? root.theme.accent
@@ -183,7 +195,7 @@ Button {
                 startY: 0
                 PathLine { x: root.width - 14; y: 0 }
                 PathLine { x: root.width; y: root.height }
-                PathLine { x: 0; y: root.height }
+                PathLine { x: 14; y: root.height }
                 PathLine { x: 0; y: 0 }
             }
         }
@@ -198,13 +210,14 @@ Button {
             z: -2
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
+                objectName: "prismButtonDohnaGroupShadowPath"
                 strokeColor: "transparent"
                 fillColor: root.theme.stageShadow
                 startX: 0
                 startY: 0
                 PathLine { x: root.dohnaGroupWidth - 14; y: 0 }
                 PathLine { x: root.dohnaGroupWidth; y: root.dohnaGroupHeight }
-                PathLine { x: 0; y: root.dohnaGroupHeight }
+                PathLine { x: 14; y: root.dohnaGroupHeight }
                 PathLine { x: 0; y: 0 }
             }
         }
@@ -229,7 +242,7 @@ Button {
                 startY: 0
                 PathLine { x: root.dohnaGroupWidth - 14; y: 0 }
                 PathLine { x: root.dohnaGroupWidth; y: root.dohnaGroupHeight }
-                PathLine { x: 0; y: root.dohnaGroupHeight }
+                PathLine { x: 14; y: root.dohnaGroupHeight }
                 PathLine { x: 0; y: 0 }
             }
             opacity: root.dohnaGroupEnabled ? 1 : 0.55

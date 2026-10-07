@@ -364,6 +364,8 @@ ApplicationWindow {
                         quiet: root.boundWorkbench.currentPage !== modelData
                         implicitWidth: 150
                         Layout.fillWidth: true
+                        Layout.minimumWidth: prism.dohna ? 0 : -1
+                        Layout.maximumWidth: prism.dohna ? parent.width : Number.POSITIVE_INFINITY
                         onClicked: root.boundWorkbench.setPage(String(modelData))
                     }
                 }
