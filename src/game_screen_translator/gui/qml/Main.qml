@@ -373,6 +373,10 @@ ApplicationWindow {
                         Layout.leftMargin: prism.dohna ? -navigationLayout.anchors.margins - 16 : 0
                         Layout.rightMargin: Layout.leftMargin
                         Layout.maximumWidth: prism.dohna ? navigationRail.width + 32 : Number.POSITIVE_INFINITY
+                        // Preserve the visible gap of the original 50 px strips
+                        // when their thickness changes under the same rotation.
+                        Layout.bottomMargin: prism.dohna
+                                             ? Math.round((implicitHeight - 50) * (1 / Math.cos(rotation * Math.PI / 180) - 1)) : 0
                         onClicked: root.boundWorkbench.setPage(String(modelData))
                     }
                 }

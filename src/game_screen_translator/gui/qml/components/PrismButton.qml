@@ -27,7 +27,9 @@ Button {
     property real dohnaGroupDivider2X: -1
 
     implicitWidth: Math.max(112, contentItem.implicitWidth + 30)
-    implicitHeight: root.theme.dohna && root.navigation ? 50 : 42
+    implicitHeight: root.theme.dohna && root.navigation
+                    ? Math.ceil(navigationTextMetrics.tightBoundingRect.height / 0.85) : 42
+    verticalPadding: root.theme.dohna && root.navigation ? 0 : padding
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
     // Rotate the menu control itself so its label and hit target follow the bar.
@@ -66,7 +68,16 @@ Button {
         }
     }
 
+    TextMetrics {
+        id: navigationTextMetrics
+        font.family: buttonLabel.font.family
+        font.pixelSize: buttonLabel.fontInfo.pixelSize
+        font.weight: buttonLabel.font.weight
+        text: buttonLabel.text
+    }
+
     contentItem: Text {
+        id: buttonLabel
         objectName: "prismButtonLabel"
         text: root.text
         color: !root.enabled ? root.theme.textDim
@@ -80,7 +91,7 @@ Button {
         font.pixelSize: root.theme.dohna && root.navigation ? 12 : 11
         font.weight: root.theme.dohna && root.navigation ? Font.Bold : Font.DemiBold
         font.letterSpacing: root.theme.dohna && root.navigation ? 0.2 : 0.9
-        fontSizeMode: root.theme.dohna && root.navigation ? Text.Fit : Text.FixedSize
+        fontSizeMode: root.theme.dohna && root.navigation ? Text.HorizontalFit : Text.FixedSize
         minimumPixelSize: 10
         leftPadding: root.theme.dohna && root.navigation ? 10 : 0
         rightPadding: leftPadding

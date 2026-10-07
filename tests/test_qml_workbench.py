@@ -24,7 +24,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFontMetricsF
 from PySide6.QtQml import QQmlApplicationEngine, QQmlProperty
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtTest import QTest
@@ -2579,6 +2579,7 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
         QTest.qWait(80)
         theme = window.findChild(QObject, "prismTheme")
         pages = ("HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS")
+        menu_edges = []
         for index, page in enumerate(pages):
             button = _find_quick_item(window, f"navigationButton{index}")
             assert button is not None
@@ -2590,6 +2591,17 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
             assert label.property("truncated") is False, text
             available_text_width = label.width() - label.property("leftPadding") - label.property("rightPadding")
             assert label.property("contentWidth") <= available_text_width + 1
+            fitted_font = label.property("font")
+            fitted_font.setPixelSize(label.property("fontInfo").property("pixelSize").toInt())
+            glyph_bounds = QFontMetricsF(fitted_font).tightBoundingRect(text)
+            # Measure visible glyphs, not the font's extra line spacing.  The
+            # thin strips must not vertically shrink their existing lettering.
+            assert 0.79 <= glyph_bounds.height() / button.height() <= 0.86
+            assert fitted_font.pixelSize() >= 10
+            assert button.height() < 20
+            baseline = label.y() + label.property("baselineOffset")
+            assert baseline + glyph_bounds.top() >= -1
+            assert baseline + glyph_bounds.bottom() <= button.height() + 1
             label_left = label.mapToScene(QPointF(0, 0))
             label_right = label.mapToScene(QPointF(label.width(), 0))
             assert label_right.y() > label_left.y() + 10
@@ -2597,6 +2609,12 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
             assert rail.property("clip") is True
             rail_left = rail.mapToScene(QPointF(0, 0)).x()
             rail_right = rail_left + rail.width()
+            middle_x = (rail_left + rail_right) / 2
+            slope = math.tan(math.radians(button.property("rotation")))
+            top = button.mapToScene(QPointF(0, 0))
+            bottom = button.mapToScene(QPointF(0, button.height()))
+            menu_edges.append((top.y() + (middle_x - top.x()) * slope,
+                               bottom.y() + (middle_x - bottom.x()) * slope))
             # Both sloping edges span past the sidebar, so clipping leaves
             # straight, flush ends rather than exposed corners or side gaps.
             for y in (0, button.height()):
@@ -2619,6 +2637,12 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
             assert path.property("strokeWidth") == 0
             assert QColor(path.property("fillColor")) == QColor(theme.property("violet"))
             assert QColor(label.property("color")) == QColor(theme.property("ink"))
+
+        # Preserve the actual space between slanted edges, including layout
+        # rounding, rather than retaining only the unrotated layout spacing.
+        gaps = [current[0] - previous[1] for previous, current in zip(menu_edges, menu_edges[1:])]
+        original_gap = 60 - 50 / math.cos(math.radians(12))
+        assert all(abs(gap - original_gap) <= 0.5 for gap in gaps)
 
         capture_button = _find_quick_item(window, "navigationButton1")
         capture_button.forceActiveFocus()
@@ -2661,6 +2685,8 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
         app.processEvents()
         assert rail.property("clip") is False
         assert all(_find_quick_item(window, f"navigationButton{i}").property("rotation") == 0
+                   for i in range(len(pages)))
+        assert all(_find_quick_item(window, f"navigationButton{i}").height() == 42
                    for i in range(len(pages)))
     finally:
         host.shutdown()
