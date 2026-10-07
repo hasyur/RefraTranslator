@@ -2583,18 +2583,35 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
             button = _find_quick_item(window, f"navigationButton{index}")
             assert button is not None
             label = button.findChild(QQuickItem, "prismButtonLabel")
+            text = label.property("text")
+            assert page in text and re.search(r"[\u4e00-\u9fff]", text)
+            assert "\n" not in text
+            assert label.property("lineCount") == 1
+            assert label.property("truncated") is False, text
+            available_text_width = label.width() - label.property("leftPadding") - label.property("rightPadding")
+            assert label.property("contentWidth") <= available_text_width + 1
             label_left = label.mapToScene(QPointF(0, 0))
             label_right = label.mapToScene(QPointF(label.width(), 0))
             assert label_right.y() > label_left.y() + 10
-            for x, y in ((0, 0), (button.width(), 0), (0, button.height()),
-                         (button.width(), button.height())):
-                corner = button.mapToScene(QPointF(x, y))
-                assert 0 <= corner.x() <= button.parentItem().parentItem().width()
-                assert 0 <= corner.y() <= window.height()
-            # Both ends of the slanted strip still route to this page, including
-            # where neighboring rows' rectangular bounding boxes overlap.
-            for fraction in (0.15, 0.85):
-                point = button.mapToScene(QPointF(button.width() * fraction, button.height() / 2))
+            rail = button.parentItem().parentItem()
+            assert rail.property("clip") is True
+            rail_left = rail.mapToScene(QPointF(0, 0)).x()
+            rail_right = rail_left + rail.width()
+            # Both sloping edges span past the sidebar, so clipping leaves
+            # straight, flush ends rather than exposed corners or side gaps.
+            for y in (0, button.height()):
+                left = button.mapToScene(QPointF(0, y))
+                right = button.mapToScene(QPointF(button.width(), y))
+                assert left.x() < rail_left
+                assert right.x() > rail_right
+                assert 0 <= left.y() <= window.height()
+                assert 0 <= right.y() <= window.height()
+            # The extended strips respond even at the visible sidebar edges.
+            start = button.mapToScene(QPointF(0, button.height() / 2))
+            end = button.mapToScene(QPointF(button.width(), button.height() / 2))
+            for x in (rail_left + 1, rail_right - 1):
+                y = start.y() + (x - start.x()) * (end.y() - start.y()) / (end.x() - start.x())
+                point = QPointF(x, y)
                 QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=point.toPoint())
                 app.processEvents()
                 assert controller.currentPage == page
@@ -2642,6 +2659,7 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
 
         controller.setSkin(SKIN_PRISM)
         app.processEvents()
+        assert rail.property("clip") is False
         assert all(_find_quick_item(window, f"navigationButton{i}").property("rotation") == 0
                    for i in range(len(pages)))
     finally:

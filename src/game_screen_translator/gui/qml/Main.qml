@@ -310,12 +310,15 @@ ApplicationWindow {
         spacing: 0
 
         Rectangle {
+            id: navigationRail
             Layout.preferredWidth: root.width < 1100 ? 178 : 222
             Layout.fillHeight: true
             color: prism.navigationSurface
             border.color: prism.line
+            clip: prism.dohna
 
             ColumnLayout {
+                id: navigationLayout
                 anchors.fill: parent
                 anchors.margins: root.width < 1100 ? 14 : 20
                 spacing: 10
@@ -358,14 +361,18 @@ ApplicationWindow {
                         theme: prism
                         navigation: true
                         text: prism.dohna
-                              ? String(modelData) + "\n" + root.navigationLabel(String(modelData))
+                              ? String(modelData) + "  " + root.navigationLabel(String(modelData))
                               : String(index + 1).padStart(2, "0") + "   " + root.navigationLabel(String(modelData))
                         primary: root.boundWorkbench.currentPage === modelData
                         quiet: root.boundWorkbench.currentPage !== modelData
                         implicitWidth: 150
                         Layout.fillWidth: true
                         Layout.minimumWidth: prism.dohna ? 0 : -1
-                        Layout.maximumWidth: prism.dohna ? parent.width : Number.POSITIVE_INFINITY
+                        // Overscan the rotated bar; the sidebar clips both ends
+                        // flush, while the enlarged control remains clickable.
+                        Layout.leftMargin: prism.dohna ? -navigationLayout.anchors.margins - 16 : 0
+                        Layout.rightMargin: Layout.leftMargin
+                        Layout.maximumWidth: prism.dohna ? navigationRail.width + 32 : Number.POSITIVE_INFINITY
                         onClicked: root.boundWorkbench.setPage(String(modelData))
                     }
                 }

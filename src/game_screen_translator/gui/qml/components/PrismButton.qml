@@ -79,11 +79,14 @@ Button {
         font.family: root.theme.monoFontFor(text)
         font.pixelSize: root.theme.dohna && root.navigation ? 12 : 11
         font.weight: root.theme.dohna && root.navigation ? Font.Bold : Font.DemiBold
-        font.letterSpacing: 0.9
+        font.letterSpacing: root.theme.dohna && root.navigation ? 0.2 : 0.9
+        fontSizeMode: root.theme.dohna && root.navigation ? Text.Fit : Text.FixedSize
+        minimumPixelSize: 10
+        leftPadding: root.theme.dohna && root.navigation ? 10 : 0
+        rightPadding: leftPadding
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
-        wrapMode: root.theme.dohna && root.navigation ? Text.WordWrap : Text.NoWrap
-        lineHeight: root.theme.dohna && root.navigation ? 0.82 : 1
+        wrapMode: Text.NoWrap
         elide: Text.ElideRight
     }
 
