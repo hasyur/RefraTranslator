@@ -14,6 +14,7 @@ CheckBox {
     focusPolicy: Qt.StrongFocus
 
     indicator: Item {
+        id: toggleIndicator
         implicitWidth: 34
         implicitHeight: 18
         x: 0
@@ -30,37 +31,6 @@ CheckBox {
             border.width: root.activeFocus ? 2 : 1
         }
 
-        Shape {
-            id: dohnaToggleCut
-            objectName: "prismToggleDohnaCut"
-            visible: root.theme.dohna
-            anchors.fill: parent
-            preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                strokeColor: root.activeFocus || root.checked ? root.theme.selectionEdge : root.theme.ink
-                strokeWidth: root.activeFocus ? 3 : 2
-                fillColor: root.checked ? root.theme.accent : root.theme.paper
-                startX: 2
-                startY: 2
-                PathLine {
-                    objectName: "prismToggleDohnaPathTopRight"
-                    x: dohnaToggleCut.width - 5
-                    y: 0
-                }
-                PathLine {
-                    objectName: "prismToggleDohnaPathBottomRight"
-                    x: dohnaToggleCut.width
-                    y: dohnaToggleCut.height - 3
-                }
-                PathLine {
-                    objectName: "prismToggleDohnaPathBottomLeft"
-                    x: 4
-                    y: dohnaToggleCut.height
-                }
-                PathLine { x: 2; y: 2 }
-            }
-        }
-
         Rectangle {
             objectName: "prismToggleKnob"
             visible: !root.theme.dohna
@@ -72,18 +42,66 @@ CheckBox {
             Behavior on x { NumberAnimation { duration: root.theme.fast } }
         }
 
-        Rectangle {
-            objectName: "prismToggleDohnaKnob"
+        Item {
+            objectName: "prismToggleDohnaArtwork"
             visible: root.theme.dohna
-            width: 9
-            height: 9
-            x: root.checked ? parent.width - width - 5 : 5
-            y: (parent.height - height) / 2
-            rotation: root.checked ? -7 : 5
-            color: root.checked ? root.theme.violet : root.theme.ink
-            border.color: root.theme.ink
-            border.width: 1
-            Behavior on x { NumberAnimation { duration: root.theme.popPressMotion } }
+            x: -3
+            y: -3
+            width: toggleIndicator.width + 6
+            height: toggleIndicator.height + 6
+            // Supersample just the small artwork, preserving its display size
+            // and leaving room for the outer stroke and antialiased fringe.
+            layer.enabled: root.theme.dohna
+            layer.smooth: true
+            layer.textureSize: Qt.size(Math.ceil(width * 4), Math.ceil(height * 4))
+
+            Shape {
+                id: dohnaToggleCut
+                objectName: "prismToggleDohnaCut"
+                x: 3
+                y: 3
+                width: toggleIndicator.width
+                height: toggleIndicator.height
+                antialiasing: true
+                preferredRendererType: Shape.CurveRenderer
+                ShapePath {
+                    strokeColor: root.activeFocus || root.checked ? root.theme.selectionEdge : root.theme.ink
+                    strokeWidth: root.activeFocus ? 3 : 2
+                    fillColor: root.checked ? root.theme.accent : root.theme.paper
+                    startX: 2
+                    startY: 2
+                    PathLine {
+                        objectName: "prismToggleDohnaPathTopRight"
+                        x: dohnaToggleCut.width - 5
+                        y: 0
+                    }
+                    PathLine {
+                        objectName: "prismToggleDohnaPathBottomRight"
+                        x: dohnaToggleCut.width
+                        y: dohnaToggleCut.height - 3
+                    }
+                    PathLine {
+                        objectName: "prismToggleDohnaPathBottomLeft"
+                        x: 4
+                        y: dohnaToggleCut.height
+                    }
+                    PathLine { x: 2; y: 2 }
+                }
+            }
+
+            Rectangle {
+                objectName: "prismToggleDohnaKnob"
+                antialiasing: true
+                width: 9
+                height: 9
+                x: 3 + (root.checked ? toggleIndicator.width - width - 5 : 5)
+                y: 3 + (toggleIndicator.height - height) / 2
+                rotation: root.checked ? -7 : 5
+                color: root.checked ? root.theme.violet : root.theme.ink
+                border.color: root.theme.ink
+                border.width: 1
+                Behavior on x { NumberAnimation { duration: root.theme.popPressMotion } }
+            }
         }
     }
 

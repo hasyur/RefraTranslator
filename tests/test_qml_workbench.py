@@ -2012,6 +2012,73 @@ def test_real_dohna_titles_enter_opposite_content_on_every_page(tmp_path: Path) 
         host.shutdown()
 
 
+@pytest.mark.parametrize("checked", [False, True])
+def test_native_dohna_toggle_smooths_edges_without_shrinking_or_clipping(
+    tmp_path: Path, checked: bool,
+) -> None:
+    app = _application()
+    if app.platformName() != "windows":
+        pytest.skip("requires native Windows rendering for pixel coverage checks")
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_DOHNA)
+    controller.setReducedMotion(True)
+    controller.setPage("SETTINGS")
+    controller.setBrowserOverlayEnabled(checked)
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        window = host.window
+        assert window is not None
+        host.show()
+        QTest.qWait(100)
+        toggle = _find_quick_item(window, "settingsCalibrationAction")
+        assert toggle.property("checked") is checked
+        if checked:
+            toggle.forceActiveFocus()
+        artwork = toggle.findChild(QQuickItem, "prismToggleDohnaArtwork")
+        surface = toggle.findChild(QQuickItem, "prismToggleDohnaCut")
+        knob = toggle.findChild(QQuickItem, "prismToggleDohnaKnob")
+        theme = window.findChild(QObject, "prismTheme")
+        background = QColor(theme.property("white")).rgb()
+        palette = {QColor(theme.property(name)).rgb()
+                   for name in ("white", "paper", "ink", "accent", "violet")}
+
+        def coverage() -> tuple[int, tuple[int, int, int, int]]:
+            window.update()
+            QTest.qWait(60)
+            frame = window.grabWindow()
+            assert not frame.isNull()
+            origin = artwork.mapToScene(QPointF(0, 0))
+            dpr = window.devicePixelRatio()
+            left, top = round(origin.x() * dpr), round(origin.y() * dpr)
+            width, height = round(artwork.width() * dpr), round(artwork.height() * dpr)
+            pixels = {(x, y): frame.pixel(left + x, top + y)
+                      for y in range(height) for x in range(width)}
+            # The antialiased outline remains fully inside its transparent
+            # margin, including both the rightmost tip and the lower edge.
+            assert all(color == background for (x, y), color in pixels.items()
+                       if x in (0, width - 1) or y in (0, height - 1))
+            foreground = [(x, y) for (x, y), color in pixels.items() if color != background]
+            assert foreground
+            bounds = (min(x for x, _ in foreground), min(y for _, y in foreground),
+                      max(x for x, _ in foreground), max(y for _, y in foreground))
+            return sum(color not in palette for color in pixels.values()), bounds
+
+        smoothed_edges, smoothed_bounds = coverage()
+        # Compare with the previous unfiltered drawing in the same window,
+        # at the same DPI, to catch an ineffective antialiasing declaration.
+        assert QQmlProperty.write(artwork, "layer.enabled", False)
+        surface.setProperty("antialiasing", False)
+        knob.setProperty("antialiasing", False)
+        aliased_edges, aliased_bounds = coverage()
+        assert smoothed_edges > aliased_edges
+        assert all(abs(actual - original) <= 2
+                   for actual, original in zip(smoothed_bounds, aliased_bounds))
+    finally:
+        host.shutdown()
+
+
 def test_real_dohna_uses_local_control_feedback_and_settles_on_switch_or_hide(
     tmp_path: Path,
 ) -> None:
