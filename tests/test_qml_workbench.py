@@ -2012,7 +2012,7 @@ def test_real_dohna_titles_enter_opposite_content_on_every_page(tmp_path: Path) 
         host.shutdown()
 
 
-def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
+def test_real_dohna_uses_local_control_feedback_and_settles_on_switch_or_hide(
     tmp_path: Path,
 ) -> None:
     app = _application()
@@ -2070,6 +2070,11 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
         "prismPanelDohnaStamp",
         "prismPanelDohnaStampShadow",
         "prismButtonDohnaFocusSlash",
+        "dohnaActionImpact",
+        "dohnaActionImpactShadow",
+        "dohnaActionImpactTag",
+        "dohnaStartImpact",
+        "dohnaStartImpactTag",
     ):
         assert not window.findChildren(QObject, decoration)
     backdrop = window.findChild(QObject, "dohnaBackdrop")
@@ -2235,18 +2240,30 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     app.processEvents()
     assert float(save_button.property("dohnaImpact")) == 0
 
-    # Save and error signals use the real controller boundary and each create
-    # one short visual pulse.
+    # Switches keep their feedback inside the control. The knob moves and
+    # changes color without creating a page-wide action strip.
     controller.setPage("SETTINGS")
     QTest.qWait(int(theme.property("popPageMotion")) + 40)
     app.processEvents()
-    _click_quick_item(window, "saveAllButton")
-    assert feedback.property("actionPulseRunning") is True
-    action_sequence = int(feedback.property("actionSequence"))
-    QTest.qWait(int(theme.property("popActionMotion")) + 60)
+    settings_toggle = _find_quick_item(window, "settingsCalibrationAction")
+    assert settings_toggle is not None
+    toggle_knob = settings_toggle.findChild(QQuickItem, "prismToggleDohnaKnob")
+    assert toggle_knob is not None
+    original_checked = bool(settings_toggle.property("checked"))
+    original_knob_x = float(toggle_knob.property("x"))
+    _click_quick_item(window, "settingsCalibrationAction")
+    QTest.qWait(int(theme.property("popPressMotion")) + 30)
     app.processEvents()
-    assert feedback.property("actionPulseRunning") is False
-    assert int(feedback.property("actionSequence")) == action_sequence
+    assert bool(settings_toggle.property("checked")) is not original_checked
+    assert float(toggle_knob.property("x")) != original_knob_x
+    expected_knob_color = theme.property("violet") if settings_toggle.property("checked") else theme.property("ink")
+    assert QColor(toggle_knob.property("color")) == QColor(expected_knob_color)
+    for decoration in (
+        "dohnaActionImpact",
+        "dohnaActionImpactShadow",
+        "dohnaActionImpactTag",
+    ):
+        assert not window.findChildren(QObject, decoration)
 
     controller.reportHostError("测试错误", "反馈动画")
     app.processEvents()
@@ -2258,22 +2275,20 @@ def test_real_dohna_uses_short_pop_feedback_and_settles_on_switch_or_hide(
     app.processEvents()
     assert feedback.property("warningPulseRunning") is False
 
-    # Reduced motion and hiding the window immediately stop every Dohna pulse.
-    assert QMetaObject.invokeMethod(feedback, "pulseStart") is True
+    # Reduced motion and hiding the window immediately stop warning feedback.
+    controller.reportHostError("测试错误", "立即停止反馈")
     app.processEvents()
-    assert feedback.property("startPulseRunning") is True
+    assert feedback.property("warningPulseRunning") is True
     controller.setReducedMotion(True)
     app.processEvents()
     assert feedback.property("reducedMotion") is True
-    assert feedback.property("startPulseRunning") is False
+    assert feedback.property("warningPulseRunning") is False
     controller.setReducedMotion(False)
     controller.setPage("HOME")
     app.processEvents()
-    assert QMetaObject.invokeMethod(feedback, "pulseStart") is True
     window.hide()
     app.processEvents()
     assert feedback.property("motionEnabled") is False
-    assert feedback.property("startPulseRunning") is False
     window.show()
     app.processEvents()
 
@@ -4659,7 +4674,8 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     assert controller.toggle_calls == 0
     if skin == SKIN_DOHNA:
         assert stage.property("startPreludeRunning") is False
-        assert dohna_feedback.property("startPulseRunning") is True
+        assert not window.findChildren(QObject, "dohnaStartImpact")
+        assert not window.findChildren(QObject, "dohnaStartImpactTag")
     else:
         assert stage.property("startPreludeRunning") is True
     assert stage.property("startPreludeSequence") == 1
@@ -4680,7 +4696,8 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     assert controller.toggle_calls == 2
     assert window.property("startPreludePending") is False
     assert start_feedback.property("visible") is False
-    assert dohna_feedback.property("startPulseRunning") is False
+    assert not window.findChildren(QObject, "dohnaStartImpact")
+    assert not window.findChildren(QObject, "dohnaStartImpactTag")
     QTest.qWait(16)
     app.processEvents()
     assert stage.property("startPreludeRunning") is False
