@@ -37,7 +37,6 @@ QML_SOURCE_FILES = tuple(
 PUBLIC_ENDPOINT_FILES = (
     PROJECT_ROOT / "README.md",
     PROJECT_ROOT / "config.example.toml",
-    PROJECT_ROOT / "scripts" / "render_launcher_preview.py",
     PROJECT_ROOT / "src" / "game_screen_translator" / "gui" / "launcher.py",
     PROJECT_ROOT / "src" / "game_screen_translator" / "gui" / "qml_workbench.py",
     PROJECT_ROOT / "src" / "game_screen_translator" / "gui" / "workbench_controller.py",
@@ -167,16 +166,6 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
         name.endswith("game_screen_translator/gui_entry.py")
         for name in sdist_names
     )
-
-
-def test_launcher_preview_uses_the_production_qml_workbench() -> None:
-    preview = (
-        PROJECT_ROOT / "scripts" / "render_launcher_preview.py"
-    ).read_text(encoding="utf-8")
-
-    assert "WorkbenchController" in preview
-    assert "QmlWorkbenchHost" in preview
-    assert "LauncherWindow" not in preview
 
 
 def test_source_release_manifest_includes_first_run_files() -> None:

@@ -14,6 +14,7 @@ config.toml
 .gui-settings.toml
 profiles/
 output/
+.local-tools/
 
 # IDE / OS files
 .idea/
