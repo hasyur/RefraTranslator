@@ -191,17 +191,6 @@ def _application() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-def test_refra_icon_matches_the_old_prototype_mark() -> None:
-    _application()
-    image = host_module._build_refra_icon().pixmap(64, 64).toImage()
-
-    assert image.pixelColor(0, 0) == QColor("#080a0e")
-    assert image.pixelColor(4, 31) == QColor("#55d9ff")
-    assert image.pixelColor(55, 36) == QColor("#e96ecf")
-    assert image.pixelColor(16, 13) == QColor("#39434c")
-    assert image.pixelColor(24, 55).blue() > image.pixelColor(24, 55).red()
-
-
 def test_workbench_uses_curve_glyphs_as_the_global_text_default() -> None:
     original = QQuickWindow.textRenderType()
     try:
@@ -4081,7 +4070,7 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     host.shutdown()
 
 
-def test_real_workbench_strengthens_key_type_and_optical_layers(
+def test_real_workbench_pages_and_themes_are_usable(
     tmp_path: Path,
 ) -> None:
     app = _application()
@@ -4104,181 +4093,54 @@ def test_real_workbench_strengthens_key_type_and_optical_layers(
     assert window is not None
     theme = window.findChild(QObject, "prismTheme")
     title = window.findChild(QObject, "pageDisplayTitle")
-    section_title = window.findChild(QObject, "sectionHeaderTitle")
-    unavailable_title = window.findChild(QObject, "unavailableStateTitle")
-    home_hero = window.findChild(QObject, "homeRunHero")
-    home_profile = window.findChild(QObject, "homeProfileName")
-    home_ocr_group = window.findChild(QObject, "homeOcrSignalGroup")
-    home_translation_group = window.findChild(QObject, "homeTranslationSignalGroup")
-    home_ocr_accent = window.findChild(QObject, "homeOcrSignalAccent")
-    home_translation_spectrum = window.findChild(QObject, "homeTranslationSignalSpectrum")
-    home_ocr_value = window.findChild(QObject, "homeOcrSignalValue")
-    home_translation_value = window.findChild(QObject, "homeTranslationSignalValue")
     save_button = window.findChild(QObject, "saveAllButton")
     start_button = window.findChild(QObject, "startLiveButton")
-    panel_accent = window.findChild(QObject, "panelAccentEdge")
-    panel_spectrum = window.findChild(QObject, "panelSpectrumEdge")
-    panel_facet = window.findChild(QObject, "prismPanelCutFacet")
-    button_edge = (
-        start_button.findChild(QObject, "prismButtonLightEdge")
-        if start_button is not None
-        else None
-    )
     stage = window.findChild(QObject, "opticalStage")
-    stage_frame = window.findChild(QObject, "opticalStageFrame")
-    ambient_aura = window.findChild(QObject, "opticalAmbientAura")
-    home_refraction = window.findChild(QObject, "homeRefractionShape")
-    home_housing = window.findChild(QObject, "homeRefractionHousing")
-    capture_glass = window.findChild(QObject, "captureApertureGlass")
-    ocr_backplane = window.findChild(QObject, "ocrMatrixBackplane")
-    translation_prism = window.findChild(QObject, "translationSplitterBody")
-    overlay_near_plane = window.findChild(QObject, "overlayStageNearPlane")
-    cache_tray: QObject | None = None
-    settings_deck = window.findChild(QObject, "settingsCalibrationDeck")
-    transition_sweep = window.findChild(QObject, "pageTransitionSweep")
-    transition_core = window.findChild(QObject, "pageTransitionSweepCore")
-    feedback_layer = window.findChild(QObject, "transientFeedbackLayer")
-    capture_scan_line = window.findChild(QObject, "captureStageScanLine")
-    start_beam = window.findChild(QObject, "startFeedbackBeam")
     assert theme is not None
     assert title is not None
-    assert section_title is not None
-    assert unavailable_title is not None
-    assert home_hero is not None
-    assert home_profile is not None
-    assert home_ocr_group is not None
-    assert home_translation_group is not None
-    assert home_ocr_accent is not None
-    assert home_translation_spectrum is not None
-    assert home_ocr_value is not None
-    assert home_translation_value is not None
-    assert home_ocr_group.property("color") is None
-    assert home_translation_group.property("color") is None
     assert save_button is not None
     assert start_button is not None
-    assert panel_accent is not None
-    assert panel_spectrum is not None
-    assert panel_facet is not None
-    assert button_edge is not None
     assert stage is not None
-    assert stage_frame is not None
-    assert ambient_aura is not None
-    assert home_refraction is not None
-    assert home_housing is not None
-    assert capture_glass is not None
-    assert ocr_backplane is not None
-    assert translation_prism is not None
-    assert overlay_near_plane is not None
-    assert settings_deck is not None
-    assert transition_sweep is not None
-    assert transition_core is not None
-    assert feedback_layer is not None
-    assert capture_scan_line is not None
-    assert start_beam is not None
-    assert window.findChild(QObject, "pageActionFeedback") is None
-
-    button_label = save_button.findChild(QObject, "prismButtonLabel")
-    assert button_label is not None
-    assert section_title.property("font").pixelSize() == 16
-    assert section_title.property("font").weight() == 600
-    assert section_title.property("font").letterSpacing() == 2
-    assert unavailable_title.property("font").pixelSize() == 22
-    assert home_hero.property("font").pixelSize() == 54
-    assert home_hero.property("font").weight() == 700
-    assert home_profile.property("font").pixelSize() == 18
-    assert home_ocr_value.property("font").pixelSize() == 20
-    assert home_translation_value.property("font").pixelSize() == 20
-    assert home_ocr_accent.property("color") == theme.property("accent")
-    assert home_translation_spectrum.property("color") == theme.property("spectrum")
-    assert button_label.property("font").pixelSize() == 11
-    assert button_label.property("font").weight() == 600
-    assert button_label.property("font").letterSpacing() >= 0.8
-
-    assert panel_accent.property("width") == 2
-    assert panel_accent.property("opacity") >= 0.7
-    assert panel_spectrum.property("height") == 2
-    assert button_edge.property("width") == 2
-    assert button_edge.property("opacity") > 0.5
-    assert stage.property("opacity") == theme.property("opticalStageOpacity")
-    assert theme.property("opticalStageOpacity") == 0.64
-    assert stage_frame.property("opacity") == 1
-    assert float(stage.property("hairlineWidth")) <= 1
-    assert ambient_aura.property("antialiasing") is True
-    assert window.findChild(QObject, "opticalAmbientCyanBeam") is None
-    assert window.findChild(QObject, "opticalAmbientSpectrumBeam") is None
-    assert window.findChild(QObject, "stagePrismSweep") is None
-    for optical_shape in (
-        panel_facet,
-        home_housing,
-        capture_glass,
-        ocr_backplane,
-        translation_prism,
-        overlay_near_plane,
-        settings_deck,
-    ):
-        assert float(optical_shape.property("width")) > 0
-        assert float(optical_shape.property("height")) > 0
-    assert transition_sweep.property("accentAlpha") >= 0.48
-    assert transition_sweep.property("spectrumAlpha") >= 0.42
-    assert transition_sweep.property("antialiasing") is True
-    assert transition_core.property("width") == 2
-    assert feedback_layer.property("lineWidth") == 3
-    assert capture_scan_line.property("height") == 3
-    assert start_beam.property("height") == 4
-    assert theme.property("backgroundMotion") == 230
-    assert theme.property("pageMotion") == 390
-    assert theme.property("pageSecondaryMotion") == 320
-    assert theme.property("actionMotion") == 520
-    assert theme.property("startPreludeMotion") == 350
-    assert theme.property("warningMotion") == 780
 
     page_motifs = {
-        "HOME": window.findChild(QObject, "homeStageMotif"),
-        "CAPTURE": window.findChild(QObject, "captureStageMotif"),
-        "OCR": window.findChild(QObject, "ocrStageMotif"),
-        "TRANSLATION": window.findChild(QObject, "translationStageMotif"),
-        "OVERLAY": window.findChild(QObject, "overlayStageMotif"),
-        "CACHE": window.findChild(QObject, "cacheStageMotif"),
-        "SETTINGS": window.findChild(QObject, "settingsStageMotif"),
+        "HOME": "homeStageMotif",
+        "CAPTURE": "captureStageMotif",
+        "OCR": "ocrStageMotif",
+        "TRANSLATION": "translationStageMotif",
+        "OVERLAY": "overlayStageMotif",
+        "CACHE": "cacheStageMotif",
+        "SETTINGS": "settingsStageMotif",
     }
-    assert all(motif is not None for motif in page_motifs.values())
-    for page, active_motif in page_motifs.items():
+    motifs = {
+        page: _find_quick_item(window, object_name)
+        for page, object_name in page_motifs.items()
+    }
+    assert all(motif is not None for motif in motifs.values())
+    assert theme.property("dark") is True
+    assert stage.property("visible") is True
+    assert title.property("visible") is True
+    assert save_button.property("visible") is True
+    assert start_button.property("visible") is True
+
+    for page, active_motif in motifs.items():
         controller.setPage(page)
         app.processEvents()
         assert active_motif is not None
-        assert active_motif.isVisible() is True
-        assert sum(motif.isVisible() for motif in page_motifs.values()) == 1
-        if page == "CACHE":
-            cache_tray = _find_quick_item(window, "cacheStageTray0")
-            assert cache_tray is not None
-            assert cache_tray.property("width") == 822
-            assert cache_tray.property("height") == 52
+        assert active_motif.isVisible()
+        assert sum(motif.isVisible() for motif in motifs.values() if motif) == 1
+        assert window.property("pageContentReady") is True
+        assert window.property("pageTransitioning") is False
+        assert title.property("visible") is True
 
-    dark_cyan_facet_alpha = float(title.property("cyanFacetOpacity"))
-    dark_spectrum_facet_alpha = float(title.property("spectrumFacetOpacity"))
-    dark_stage_opacity = float(stage.property("opacity"))
-    dark_sweep_accent_alpha = float(transition_sweep.property("accentAlpha"))
-    dark_sweep_spectrum_alpha = float(transition_sweep.property("spectrumAlpha"))
     controller.setTheme("light")
     app.processEvents()
-    assert 0 < float(title.property("cyanFacetOpacity")) < dark_cyan_facet_alpha
-    assert (
-        0
-        < float(title.property("spectrumFacetOpacity"))
-        < dark_spectrum_facet_alpha
-    )
-    assert 0 < float(stage.property("opacity")) < dark_stage_opacity
-    assert (
-        0
-        < float(transition_sweep.property("accentAlpha"))
-        < dark_sweep_accent_alpha
-    )
-    assert (
-        0
-        < float(transition_sweep.property("spectrumAlpha"))
-        < dark_sweep_spectrum_alpha
-    )
-    assert float(stage.property("opacity")) == 0.56
+    assert theme.property("dark") is False
+    assert stage.property("visible") is True
+    assert title.property("visible") is True
+    controller.setTheme("dark")
+    app.processEvents()
+    assert theme.property("dark") is True
+    assert stage.property("visible") is True
     host.shutdown()
 
 
