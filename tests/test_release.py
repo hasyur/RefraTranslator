@@ -292,6 +292,52 @@ def test_source_release_manifest_includes_first_run_files() -> None:
     assert "prune .local-tools" in manifest
 
 
+def test_public_staging_ignores_a_nested_private_tools_checkout(
+    tmp_path: Path,
+) -> None:
+    git_executable = shutil.which("git")
+    assert git_executable is not None
+    checkout = tmp_path / "public-checkout"
+    checkout.mkdir()
+    shutil.copy2(PROJECT_ROOT / ".gitignore", checkout / ".gitignore")
+    public_test = checkout / "tests" / "test_public_marker.py"
+    public_test.parent.mkdir()
+    public_test.write_text("def test_public_marker(): pass\n", encoding="utf-8")
+
+    private_checkout = checkout / ".local-tools"
+    private_test = private_checkout / "tests" / "test_private_marker.py"
+    private_test.parent.mkdir(parents=True)
+    private_test.write_text("def test_private_marker(): pass\n", encoding="utf-8")
+
+    def run_git(root: Path, *arguments: str) -> str:
+        completed = subprocess.run(
+            [git_executable, *arguments],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        return completed.stdout
+
+    run_git(checkout, "init", "--quiet")
+    run_git(private_checkout, "init", "--quiet")
+    run_git(checkout, "add", "-A")
+
+    tracked = set(run_git(checkout, "ls-files").splitlines())
+    assert tracked == {".gitignore", "tests/test_public_marker.py"}
+    staged = run_git(checkout, "diff", "--cached", "--name-status").splitlines()
+    assert all(".local-tools" not in entry for entry in staged)
+    staged_modes = {
+        entry.split(maxsplit=1)[0]
+        for entry in run_git(checkout, "ls-files", "--stage").splitlines()
+    }
+    assert all(
+        mode != "160000"
+        for mode in staged_modes
+    )
+
+
 def test_bootstrap_script_is_ascii_for_windows_powershell_51() -> None:
     script = (PROJECT_ROOT / "bootstrap.ps1").read_bytes()
 
