@@ -7,7 +7,10 @@ include install.bat
 include start_gui.bat
 include start_gui(debug).bat
 include start_test_scenes.bat
-recursive-include scripts *.py
+include tests/test_*.py
+include tests/integration/test_*.py
+include tests/manual/animated_ocr_scenes.py
+include tests/manual/README.md
 recursive-include src/game_screen_translator/gui/qml *.qml
-recursive-include tests *.py
-recursive-include tests/manual *.md
+prune scripts
+prune .local-tools
