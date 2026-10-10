@@ -441,3 +441,30 @@ def test_install_batch_runs_gui_bootstrap_and_preserves_exit_code() -> None:
     assert 'set "install_exit=%ERRORLEVEL%"' in script
     assert 'exit /b %install_exit%' in script
     assert "start_gui.bat" in script
+
+
+def test_readme_installation_guide_matches_supported_environment() -> None:
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
+        requires_python = tomllib.load(handle)["project"]["requires-python"]
+
+    assert requires_python == ">=3.11,<3.14"
+    assert "64 位 Windows 10 或 Windows 11" in readme
+    assert "64 位 Python 3.11、3.12 或 3.13" in readme
+    assert "nvidia-smi" in readme
+    assert "C:\\RefraTranslator" in readme
+    assert readme.index("`install.bat`") < readme.index("`start_gui.bat`")
+
+
+def test_readme_installation_guide_documents_installer_contract() -> None:
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "`.venv` 虚拟环境" in readme
+    assert "再次安装时保留已有配置" in readme
+    assert "安装成功后清理 `.cache\\pip`" in readme
+    assert "只删除项目根目录中的 `.venv`" in readme
+    assert "`output\\launcher.log`" in readme
+    assert "`output\\live.log`" in readme
+    assert "-WithGui -WithDev" in readme
+    assert "WindowsApps\\python.exe" in readme
+    assert "where.exe python" in readme
