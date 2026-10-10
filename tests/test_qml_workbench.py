@@ -538,10 +538,10 @@ def test_login_tray_start_keeps_native_target_for_second_instance_activation(
         def _post_message(self, hwnd, message, _wparam, _lparam):
             posted.append((hwnd, message))
             native_message = Message(hwnd, message, 0, 0, 0, 0, 0)
-            activation_window.nativeEvent(
+            assert activation_window.nativeEvent(
                 b"windows_generic_MSG",
                 ctypes.addressof(native_message),
-            )
+            ) == (True, 0)
             return True
 
     monkeypatch.setattr(runtime_module.sys, "platform", "win32")
@@ -554,6 +554,95 @@ def test_login_tray_start_keeps_native_target_for_second_instance_activation(
     assert host.window.isVisible()
     assert tray.visible is False
     host.shutdown()
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="requires the native Windows Qt message dispatcher",
+)
+def test_activation_message_is_dispatched_once_by_real_windows_qt() -> None:
+    app = _application()
+    if app.platformName().lower() != "windows":
+        pytest.skip("requires the native Windows Qt message dispatcher")
+    callbacks: list[bool] = []
+    activation_window = host_module._ActivationWindow(
+        lambda: callbacks.append(True),
+    )
+    try:
+        app.processEvents()
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        post_message = user32.PostMessageW
+        post_message.argtypes = (
+            ctypes.c_void_p,
+            ctypes.c_uint,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+        )
+        post_message.restype = ctypes.c_bool
+        assert post_message(
+            ctypes.c_void_p(int(activation_window.winId())),
+            runtime_module.ACTIVATION_MESSAGE,
+            0,
+            0,
+        )
+        deadline = time.monotonic() + 2.0
+        while not callbacks and time.monotonic() < deadline:
+            app.processEvents()
+        app.processEvents()
+        assert callbacks == [True]
+    finally:
+        activation_window.close()
+        activation_window.deleteLater()
+        app.processEvents()
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="requires the native Windows Qt message dispatcher",
+)
+def test_hotkey_message_is_dispatched_once_by_real_windows_qt() -> None:
+    app = _application()
+    if app.platformName().lower() != "windows":
+        pytest.skip("requires the native Windows Qt message dispatcher")
+    callbacks: list[bool] = []
+    hotkey = runtime_module.WindowsGlobalHotkey(
+        app,
+        lambda: callbacks.append(True),
+        lambda _message: None,
+    )
+    hotkey._registered = True
+    app.installNativeEventFilter(hotkey)
+    hotkey._native_filter_installed = True
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        get_thread_id = kernel32.GetCurrentThreadId
+        get_thread_id.argtypes = ()
+        get_thread_id.restype = ctypes.c_uint32
+        post_thread_message = ctypes.WinDLL(
+            "user32",
+            use_last_error=True,
+        ).PostThreadMessageW
+        post_thread_message.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+        )
+        post_thread_message.restype = ctypes.c_bool
+        assert post_thread_message(
+            get_thread_id(),
+            runtime_module._WM_HOTKEY,
+            hotkey._hotkey_id,
+            0,
+        )
+        deadline = time.monotonic() + 2.0
+        while not callbacks and time.monotonic() < deadline:
+            app.processEvents()
+        app.processEvents()
+        assert callbacks == [True]
+    finally:
+        hotkey._registered = False
+        hotkey.unregister()
 
 
 def test_real_workbench_close_while_running_hides_to_tray(tmp_path: Path) -> None:

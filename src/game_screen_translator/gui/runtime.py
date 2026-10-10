@@ -465,11 +465,11 @@ class WindowsGlobalHotkey(QAbstractNativeEventFilter):
 
     def nativeEventFilter(self, _event_type, message):  # noqa: N802
         if not self._registered or sys.platform != "win32":
-            return False
+            return False, 0
         try:
             pointer = int(message)
             if pointer == 0:
-                return False
+                return False, 0
             # MSG is ABI-stable on Windows for the fields used here.
             class _Message(ctypes.Structure):
                 _fields_ = (
@@ -484,11 +484,11 @@ class WindowsGlobalHotkey(QAbstractNativeEventFilter):
 
             native = ctypes.cast(pointer, ctypes.POINTER(_Message)).contents
             if native.message != _WM_HOTKEY or native.wParam != self._hotkey_id:
-                return False
+                return False, 0
             self._callback()
-            return True
+            return True, 0
         except (TypeError, ValueError, OSError):
-            return False
+            return False, 0
 
     def close(self) -> None:
         self.unregister()

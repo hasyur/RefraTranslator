@@ -186,3 +186,16 @@ def test_hotkey_registration_reports_windows_conflict_without_external_io(
         runtime.ctypes.c_uint,
         runtime.ctypes.c_uint,
     )
+
+
+def test_hotkey_native_filter_returns_qt_tuple_when_unbound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Application:
+        def platformName(self):  # noqa: N802
+            return "windows"
+
+    monkeypatch.setattr(runtime.sys, "platform", "win32")
+    hotkey = runtime.WindowsGlobalHotkey(Application(), lambda: None, lambda _: None)
+
+    assert hotkey.nativeEventFilter(b"windows_dispatcher_MSG", 0) == (False, 0)

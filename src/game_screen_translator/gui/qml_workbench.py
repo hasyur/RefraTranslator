@@ -217,7 +217,7 @@ class _ActivationWindow(QWidget):
         try:
             pointer = int(message)
             if pointer == 0:
-                return False, b""
+                return False, 0
 
             class _Message(ctypes.Structure):
                 _fields_ = (
@@ -233,7 +233,7 @@ class _ActivationWindow(QWidget):
             native = ctypes.cast(pointer, ctypes.POINTER(_Message)).contents
             if native.message == ACTIVATION_MESSAGE:
                 self._callback()
-                return True, b""
+                return True, 0
         except (TypeError, ValueError, OSError):
             pass
         return super().nativeEvent(_event_type, message)
