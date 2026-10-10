@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
 from game_screen_translator.branding import GUI_PROCESS_NAME, PRODUCT_NAME
 
 from .region_selector import RegionSelector
+from .runtime import GuiRuntimeError, WindowsGlobalHotkey
 from .workbench_controller import WorkbenchController
 
 
@@ -228,6 +229,7 @@ class QmlWorkbenchHost(QObject):
         self._was_maximized = False
         self._last_theme_signature: tuple[int, str, str, str] | None = None
         self._tray_icon: QSystemTrayIcon | None = None
+        self._global_hotkey: WindowsGlobalHotkey | None = None
 
         set_window_icon = getattr(self._application, "setWindowIcon", None)
         if callable(set_window_icon):
@@ -259,6 +261,15 @@ class QmlWorkbenchHost(QObject):
             self._tray_icon.hide()
 
         self._create_workbench()
+        self._global_hotkey = WindowsGlobalHotkey(
+            self._application,
+            self._start_live_from_hotkey,
+            self._report_hotkey_error,
+        )
+        hotkey_changed = getattr(controller, "hotkeyChanged", None)
+        if hotkey_changed is not None and hasattr(hotkey_changed, "connect"):
+            hotkey_changed.connect(self._configure_hotkey)
+        self._configure_hotkey(getattr(controller, "hotkeyPreference", "Ctrl+Alt+T"))
 
     @property
     def tray_icon(self) -> QSystemTrayIcon | None:
@@ -354,6 +365,31 @@ class QmlWorkbenchHost(QObject):
         if self._window is shown_window and shown_window.isVisible():
             self._sync_window_theme(force=True)
 
+    def _report_hotkey_error(self, message: str) -> None:
+        reporter = getattr(self._controller, "reportHostError", None)
+        if callable(reporter):
+            reporter("全局快捷键不可用", message)
+
+    def _configure_hotkey(self, value: str) -> None:
+        hotkey = self._global_hotkey
+        if hotkey is None:
+            return
+        try:
+            hotkey.register(value)
+        except (GuiRuntimeError, ValueError, TypeError) as exc:
+            self._report_hotkey_error(str(exc))
+
+    def _start_live_from_hotkey(self) -> None:
+        if self._shutdown_called:
+            return
+        # A repeated native WM_HOTKEY while the live child is running is a
+        # deliberate no-op; it must not create a second translation process.
+        if bool(getattr(self._controller, "running", False)):
+            return
+        start_live = getattr(self._controller, "startLive", None)
+        if callable(start_live):
+            start_live()
+
     def _set_quit_on_last_window_closed(self, enabled: bool) -> None:
         setter = getattr(self._application, "setQuitOnLastWindowClosed", None)
         if callable(setter):
@@ -380,6 +416,11 @@ class QmlWorkbenchHost(QObject):
         self._hidden_for_live = True
         self._show_live_tray()
         self._dispose_workbench()
+
+    def hide_to_tray(self) -> None:
+        """Enter background residency for a Windows logon-started GUI."""
+
+        self._hide_to_tray()
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason != QSystemTrayIcon.ActivationReason.DoubleClick:
@@ -462,6 +503,8 @@ class QmlWorkbenchHost(QObject):
         self._shutdown_called = True
         self._set_quit_on_last_window_closed(True)
         self._hide_live_tray()
+        if self._global_hotkey is not None:
+            self._global_hotkey.close()
         self._dispose_workbench()
         self._controller.shutdown()
 
@@ -471,6 +514,7 @@ def run(
     *,
     duration_seconds: float | None = None,
     probe_ocr_devices: bool = True,
+    startup: bool = False,
 ) -> int:
     """Run the native QML workbench with bounded test/probe controls."""
 
@@ -510,12 +554,18 @@ def run(
                 available.top() + (available.height() - window.height()) // 2,
             ),
         )
-    _startup_message("showing native QML workbench")
-    host.show()
+    if startup:
+        _startup_message("starting in the system tray")
+        host.hide_to_tray()
+    else:
+        _startup_message("showing native QML workbench")
+        host.show()
 
     def announce_ready() -> None:
         current_window = host.window
         if current_window is None:
+            if startup:
+                _startup_message("event loop ready; visible=false tray=true")
             return
         if app.platformName() == "windows":
             current_window.raise_()

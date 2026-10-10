@@ -40,6 +40,11 @@ def _parser() -> argparse.ArgumentParser:
 
     gui = commands.add_parser("gui", help="打开图形化 Profile、区域和启动管理器")
     gui.add_argument("--duration", type=float, help="指定秒数后自动关闭（用于测试）")
+    gui.add_argument(
+        "--startup",
+        action="store_true",
+        help="由 Windows 登录启动时静默进入托盘",
+    )
 
     translate = commands.add_parser("translate", help="直接翻译一段文本")
     translate.add_argument("text", help="待翻译文本")
@@ -415,7 +420,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "gui":
             from game_screen_translator.gui.launcher import run_launcher
 
-            return run_launcher(args.config, duration_seconds=args.duration)
+            return run_launcher(
+                args.config,
+                duration_seconds=args.duration,
+                startup=args.startup,
+            )
         if args.command == "live":
             from game_screen_translator.live.runtime import run_live
             from game_screen_translator.profiles import apply_profile_runtime_settings

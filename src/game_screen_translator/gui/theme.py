@@ -11,6 +11,7 @@ from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
 from game_screen_translator.branding import PRODUCT_NAME
+from .runtime import DEFAULT_HOTKEY, GuiRuntimeError, parse_hotkey
 
 
 THEME_SYSTEM = "system"
@@ -40,6 +41,8 @@ class GuiSettingsError(ValueError):
 class GuiPreferences:
     theme: str = THEME_SYSTEM
     skin: str = SKIN_PRISM
+    start_with_windows: bool = False
+    hotkey: str = DEFAULT_HOTKEY
 
     def __post_init__(self) -> None:
         if not isinstance(self.theme, str) or self.theme not in _VALID_THEMES:
@@ -48,6 +51,13 @@ class GuiPreferences:
         if not isinstance(self.skin, str) or self.skin not in _VALID_SKINS:
             choices = ", ".join(sorted(_VALID_SKINS))
             raise GuiSettingsError(f"界面皮肤必须是以下值之一：{choices}")
+        if not isinstance(self.start_with_windows, bool):
+            raise GuiSettingsError("behavior.start_with_windows 必须是布尔值")
+        try:
+            canonical_hotkey = parse_hotkey(self.hotkey)
+        except (GuiRuntimeError, TypeError, ValueError) as exc:
+            raise GuiSettingsError(f"behavior.hotkey 无效：{exc}") from exc
+        object.__setattr__(self, "hotkey", canonical_hotkey.display)
 
 
 def gui_settings_path(config_path: Path) -> Path:
@@ -78,7 +88,26 @@ def load_gui_preferences(config_path: Path) -> GuiPreferences:
     skin = appearance.get("skin", SKIN_PRISM)
     if not isinstance(skin, str):
         raise GuiSettingsError("appearance.skin 必须是字符串")
-    return GuiPreferences(theme=theme, skin=skin)
+    behavior = data.get("behavior", {})
+    if not isinstance(behavior, dict):
+        raise GuiSettingsError("[behavior] 必须是 TOML 表")
+    unknown_behavior = set(behavior) - {"start_with_windows", "hotkey"}
+    if unknown_behavior:
+        raise GuiSettingsError(
+            f"[behavior] 含有未知字段：{', '.join(sorted(map(str, unknown_behavior)))}"
+        )
+    start_with_windows = behavior.get("start_with_windows", False)
+    if not isinstance(start_with_windows, bool):
+        raise GuiSettingsError("behavior.start_with_windows 必须是布尔值")
+    hotkey = behavior.get("hotkey", DEFAULT_HOTKEY)
+    if not isinstance(hotkey, str):
+        raise GuiSettingsError("behavior.hotkey 必须是字符串")
+    return GuiPreferences(
+        theme=theme,
+        skin=skin,
+        start_with_windows=start_with_windows,
+        hotkey=hotkey,
+    )
 
 
 def save_gui_preferences(config_path: Path, preferences: GuiPreferences) -> Path:
@@ -89,6 +118,10 @@ def save_gui_preferences(config_path: Path, preferences: GuiPreferences) -> Path
         "[appearance]\n"
         f'theme = "{preferences.theme}"\n'
         f'skin = "{preferences.skin}"\n'
+        "\n"
+        "[behavior]\n"
+        f"start_with_windows = {'true' if preferences.start_with_windows else 'false'}\n"
+        f'hotkey = "{preferences.hotkey}"\n'
     )
     try:
         temporary.write_text(content, encoding="utf-8")

@@ -489,6 +489,37 @@ Item {
                     onToggled: root.workbench.setReducedMotion(checked)
                 }
 
+                PrismToggle {
+                    objectName: "homeStartupToggle"
+                    theme: root.theme
+                    text: "登录后自动进入托盘"
+                    settingDescription: "Windows 登录后静默启动 RefraTranslator，并在系统托盘驻留。"
+                    settingKey: "home-startup"
+                    checked: root.workbench.startWithWindows
+                    Layout.fillWidth: true
+                    onToggled: root.workbench.setStartWithWindows(checked)
+                }
+
+                SettingLabel {
+                    theme: root.theme
+                    title: "全局快捷键"
+                    meta: "START TRANSLATION"
+                    description: "软件运行或驻留托盘时，使用此快捷键启动一次实时翻译。翻译已运行时不会重复启动。"
+                    settingKey: "home-hotkey"
+                    Layout.topMargin: 4
+                }
+                PrismTextField {
+                    objectName: "homeHotkeyField"
+                    theme: root.theme
+                    accessibleName: "全局翻译快捷键"
+                    settingDescription: "例如 Ctrl+Alt+T；需要包含修饰键。"
+                    settingKey: "home-hotkey"
+                    text: root.workbench.hotkeyPreference
+                    placeholderText: "Ctrl+Alt+T"
+                    Layout.fillWidth: true
+                    onEditingFinished: root.workbench.setHotkey(text)
+                }
+
                 Item { Layout.fillHeight: true }
 
                 Text {

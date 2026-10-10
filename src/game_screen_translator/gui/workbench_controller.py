@@ -89,6 +89,7 @@ from .theme import (
     load_gui_preferences,
     save_gui_preferences,
 )
+from .runtime import GuiRuntimeError, set_startup_enabled
 
 
 _BLUR_MODE_DARK = "dark_blur"
@@ -343,6 +344,7 @@ class WorkbenchController(QObject):
     liveFinished = Signal()
     liveFailed = Signal()
     workbenchHideRequested = Signal()
+    hotkeyChanged = Signal(str)
 
     def __init__(self, config_path: Path, *, probe_ocr_devices: bool = True) -> None:
         super().__init__()
@@ -359,6 +361,8 @@ class WorkbenchController(QObject):
 
         self._theme_preference = preferences.theme
         self._skin_preference = preferences.skin
+        self._start_with_windows = preferences.start_with_windows
+        self._hotkey = preferences.hotkey
         app = QApplication.instance()
         self._effective_theme = effective_theme(
             self._theme_preference,
@@ -551,6 +555,14 @@ class WorkbenchController(QObject):
     @Property(list, notify=stateChanged)
     def skinOptions(self) -> list[str]:
         return [value for value, _label in SKIN_OPTIONS]
+
+    @Property(bool, notify=stateChanged)
+    def startWithWindows(self) -> bool:
+        return self._start_with_windows
+
+    @Property(str, notify=stateChanged)
+    def hotkeyPreference(self) -> str:
+        return self._hotkey
 
     @Property(bool, notify=stateChanged)
     def reducedMotion(self) -> bool:
@@ -1365,7 +1377,12 @@ class WorkbenchController(QObject):
         try:
             save_gui_preferences(
                 self._config_path,
-                GuiPreferences(theme=value, skin=self._skin_preference),
+                GuiPreferences(
+                    theme=value,
+                    skin=self._skin_preference,
+                    start_with_windows=self._start_with_windows,
+                    hotkey=self._hotkey,
+                ),
             )
         except (GuiSettingsError, OSError) as exc:
             self._show_error("保存界面主题失败", exc)
@@ -1391,7 +1408,12 @@ class WorkbenchController(QObject):
         try:
             save_gui_preferences(
                 self._config_path,
-                GuiPreferences(theme=self._theme_preference, skin=value),
+                GuiPreferences(
+                    theme=self._theme_preference,
+                    skin=value,
+                    start_with_windows=self._start_with_windows,
+                    hotkey=self._hotkey,
+                ),
             )
         except (GuiSettingsError, OSError) as exc:
             self._show_error("保存界面皮肤失败", exc)
@@ -1407,6 +1429,47 @@ class WorkbenchController(QObject):
             f"界面皮肤已切换为“{dict(SKIN_OPTIONS).get(value, value)}”并保存",
             "success",
         )
+
+    @Slot(bool)
+    def setStartWithWindows(self, value: bool) -> None:
+        value = bool(value)
+        if value == self._start_with_windows:
+            return
+        try:
+            set_startup_enabled(self._config_path.parent, value)
+            save_gui_preferences(
+                self._config_path,
+                GuiPreferences(
+                    theme=self._theme_preference,
+                    skin=self._skin_preference,
+                    start_with_windows=value,
+                    hotkey=self._hotkey,
+                ),
+            )
+        except (GuiRuntimeError, GuiSettingsError, OSError) as exc:
+            self._show_error("保存开机启动设置失败", exc)
+            return
+        self._start_with_windows = value
+        self._notice("已开启登录后进入托盘" if value else "已关闭开机启动", "success")
+
+    @Slot(str)
+    def setHotkey(self, value: str) -> None:
+        try:
+            preferences = GuiPreferences(
+                theme=self._theme_preference,
+                skin=self._skin_preference,
+                start_with_windows=self._start_with_windows,
+                hotkey=value,
+            )
+            save_gui_preferences(self._config_path, preferences)
+        except (GuiSettingsError, OSError) as exc:
+            self._show_error("保存全局快捷键失败", exc)
+            return
+        if preferences.hotkey == self._hotkey:
+            return
+        self._hotkey = preferences.hotkey
+        self.hotkeyChanged.emit(self._hotkey)
+        self._notice(f"全局快捷键已设为 {self._hotkey}", "success")
 
     @Slot(bool)
     def setReducedMotion(self, value: bool) -> None:

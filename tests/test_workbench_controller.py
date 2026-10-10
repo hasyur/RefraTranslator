@@ -127,6 +127,30 @@ def test_controller_projects_real_profile_data_and_truthful_telemetry_empty_stat
     controller.shutdown()
 
 
+def test_controller_persists_windows_startup_and_hotkey_preferences(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    startup_calls: list[tuple[Path, bool]] = []
+    monkeypatch.setattr(
+        controller_module,
+        "set_startup_enabled",
+        lambda root, enabled: startup_calls.append((root, enabled)),
+    )
+
+    controller.setStartWithWindows(True)
+    controller.setHotkey("Shift+Ctrl+T")
+
+    preferences = load_gui_preferences(config_path)
+    assert startup_calls == [(tmp_path, True)]
+    assert controller.startWithWindows is True
+    assert controller.hotkeyPreference == "Ctrl+Shift+T"
+    assert preferences.start_with_windows is True
+    assert preferences.hotkey == "Ctrl+Shift+T"
+    controller.shutdown()
+
+
 def test_controller_reads_shared_finished_latency_log_on_refresh_and_profile_switch(
     tmp_path: Path,
 ) -> None:

@@ -32,3 +32,22 @@ def test_production_launcher_delegates_to_the_native_qml_workbench(
     config_path = tmp_path / "config.toml"
     assert launcher_module.run_launcher(config_path, duration_seconds=0.25) == 23
     assert calls == [(config_path, 0.25)]
+
+
+def test_launcher_forwards_windows_logon_startup_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        qml_workbench_module,
+        "run",
+        lambda config_path, **kwargs: calls.append(
+            {"config_path": config_path, **kwargs}
+        )
+        or 0,
+    )
+
+    config_path = tmp_path / "config.toml"
+    assert launcher_module.run_launcher(config_path, startup=True) == 0
+    assert calls == [{"config_path": config_path, "duration_seconds": None, "startup": True}]

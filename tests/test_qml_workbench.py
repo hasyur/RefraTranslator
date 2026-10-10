@@ -427,6 +427,28 @@ def test_host_configures_smooth_rendering_before_loading_qml(monkeypatch) -> Non
     host.shutdown()
 
 
+def test_host_hotkey_starts_once_and_ignores_an_already_running_live_process() -> None:
+    class HotkeyController(_ControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.running = False
+            self.start_count = 0
+            self.hotkeyPreference = "Ctrl+Alt+T"
+
+        def startLive(self) -> None:  # noqa: N802
+            self.start_count += 1
+
+    controller = HotkeyController()
+    host, _engine = _host(controller)
+
+    host._start_live_from_hotkey()
+    assert controller.start_count == 1
+    controller.running = True
+    host._start_live_from_hotkey()
+    assert controller.start_count == 1
+    host.shutdown()
+
+
 def test_host_tray_recalls_workbench_and_running_close_returns_to_tray() -> None:
     controller = _ControllerStub()
     tray = _TrayRecorder()
@@ -1324,6 +1346,8 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         "home-skin": {"label", "control"},
         "home-theme": {"label", "control"},
         "home-motion": {"control"},
+            "home-startup": {"control"},
+            "home-hotkey": {"label", "control"},
         "capture-monitor": {"label", "control"},
         "capture-fullscreen": {"control"},
         "capture-custom": {"control"},

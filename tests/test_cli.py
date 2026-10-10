@@ -70,6 +70,12 @@ def test_cli_uses_refra_translator_name() -> None:
     assert "RefraTranslator" in parser.description
 
 
+def test_gui_parser_accepts_windows_logon_startup_mode() -> None:
+    args = _parser().parse_args(["gui", "--startup"])
+
+    assert args.startup is True
+
+
 @pytest.mark.parametrize(
     "arguments",
     (

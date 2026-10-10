@@ -11,6 +11,11 @@ import traceback
 from pathlib import Path
 from typing import Sequence, TextIO
 
+from game_screen_translator.gui.runtime import (
+    SingleInstanceGuard,
+    activate_existing_window,
+)
+
 
 _GUI_DEPENDENCY_PROBE = (
     "import sys; "
@@ -126,7 +131,7 @@ def _default_mirror() -> TextIO | None:
     return sys.stdout
 
 
-def run(
+def _run_owned(
     arguments: Sequence[str] | None = None,
     *,
     project_root: Path | None = None,
@@ -210,6 +215,28 @@ def run(
             f"(exit code {exit_code}).\n\nDiagnostic log:\n{log_path}"
         )
     return exit_code
+
+
+def run(
+    arguments: Sequence[str] | None = None,
+    *,
+    project_root: Path | None = None,
+    mirror: TextIO | None = None,
+) -> int:
+    """Run one launcher, foregrounding the existing GUI on a second start."""
+
+    guard = SingleInstanceGuard()
+    try:
+        if not guard.acquire():
+            activate_existing_window()
+            return 0
+        return _run_owned(
+            arguments,
+            project_root=project_root,
+            mirror=mirror,
+        )
+    finally:
+        guard.release()
 
 
 def main() -> int:
