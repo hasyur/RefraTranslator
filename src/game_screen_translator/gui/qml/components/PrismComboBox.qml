@@ -161,7 +161,10 @@ ComboBox {
                 objectName: "prismComboBoxPopupPrismBackground"
                 visible: !root.theme.dohna
                 anchors.fill: parent
-                color: root.theme.inputSurface
+                color: Qt.rgba(root.theme.inputSurface.r,
+                               root.theme.inputSurface.g,
+                               root.theme.inputSurface.b,
+                               1)
                 border.color: root.theme.lineStrong
                 border.width: 1
             }

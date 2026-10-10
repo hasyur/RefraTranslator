@@ -1173,6 +1173,30 @@ def test_stop_live_requests_graceful_close_then_allows_explicit_force_stop(
     controller.shutdown()
 
 
+def test_builtin_backend_cannot_start_until_local_model_is_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, _config_path = _controller_with_profile(tmp_path)
+    assert controller.canStart is True
+
+    controller.setBackend("builtin")
+    monkeypatch.setattr(
+        controller,
+        "_local_model_capabilities",
+        lambda: (False, False),
+    )
+    assert controller.canStart is False
+
+    monkeypatch.setattr(
+        controller,
+        "_local_model_capabilities",
+        lambda: (True, True),
+    )
+    assert controller.canStart is True
+    controller.shutdown()
+
+
 def test_stop_live_helper_failure_keeps_process_running_and_can_retry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

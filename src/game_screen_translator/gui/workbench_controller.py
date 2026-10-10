@@ -580,7 +580,11 @@ class WorkbenchController(QObject):
 
     @Property(bool, notify=stateChanged)
     def canStart(self) -> bool:
-        return self._profile is not None and not self._live_stop_requested
+        return (
+            self._profile is not None
+            and not self._live_stop_requested
+            and (self._backend != "builtin" or self.localModelReady)
+        )
 
     @Property(str, notify=stateChanged)
     def runPhase(self) -> str:

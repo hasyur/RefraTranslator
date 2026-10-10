@@ -1121,6 +1121,15 @@ def test_real_skin_dropdown_highlight_uses_skin_specific_surface(
             assert len({color.name(QColor.HexArgb) for color in colors}) >= 2
 
     if skin == SKIN_PRISM:
+        popup_backgrounds = window.findChildren(
+            QObject, "prismComboBoxPopupPrismBackground"
+        )
+        assert popup_backgrounds
+        assert any(
+            background.property("visible") is True
+            and QColor(background.property("color")).alpha() == 255
+            for background in popup_backgrounds
+        )
         rows = wait_for_delegates(
             "prismComboBoxDelegatePrismBackground",
             minimum=2,
