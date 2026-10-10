@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -117,11 +116,36 @@ def test_second_launcher_activates_existing_window_and_skips_worker(
 def test_hotkey_registration_reports_windows_conflict_without_external_io(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class User32:
-        def RegisterHotKey(self, *_args):  # noqa: N802
-            return False
+    class NativeFunction:
+        def __init__(self, callback):
+            self._callback = callback
+            self.argtypes = None
+            self.restype = None
 
-        def UnregisterHotKey(self, *_args):  # noqa: N802
+        def __call__(self, *args):
+            return self._callback(*args)
+
+    class User32:
+        def __init__(self) -> None:
+            self.registered: set[tuple[int, int]] = set()
+            self.RegisterHotKey = NativeFunction(self._register)  # noqa: N802
+            self.UnregisterHotKey = NativeFunction(self._unregister)  # noqa: N802
+
+        def _register(self, _hwnd, hotkey_id, _modifiers, virtual_key):
+            if virtual_key == ord("G"):
+                # This exercises ctypes' real thread-local last-error API;
+                # the production code must not rely on a patched reader.
+                runtime.ctypes.set_last_error(1409)
+                return False
+            self.registered.add((hotkey_id, virtual_key))
+            return True
+
+        def _unregister(self, _hwnd, hotkey_id):
+            self.registered = {
+                registration
+                for registration in self.registered
+                if registration[0] != hotkey_id
+            }
             return True
 
     class Application:
@@ -135,10 +159,30 @@ def test_hotkey_registration_reports_windows_conflict_without_external_io(
             return None
 
     monkeypatch.setattr(runtime.sys, "platform", "win32")
-    monkeypatch.setattr(runtime.ctypes, "windll", SimpleNamespace(user32=User32()))
-    monkeypatch.setattr(runtime.ctypes, "get_last_error", lambda: 1409)
+    user32 = User32()
+    monkeypatch.setattr(
+        runtime.WindowsGlobalHotkey,
+        "_user32_api",
+        staticmethod(lambda: user32),
+    )
     errors: list[str] = []
     hotkey = runtime.WindowsGlobalHotkey(Application(), lambda: None, errors.append)
 
+    assert hotkey.register("Ctrl+Alt+T")
+    assert hotkey.spec is not None
+    assert hotkey.spec.display == "Ctrl+Alt+T"
+    assert (hotkey._hotkey_id, ord("T")) in user32.registered
+
     with pytest.raises(runtime.GuiRuntimeError, match="已被其他程序占用"):
-        hotkey.register("Ctrl+Alt+T")
+        hotkey.register("Ctrl+Alt+G")
+
+    assert hotkey.spec is not None
+    assert hotkey.spec.display == "Ctrl+Alt+T"
+    assert (hotkey._hotkey_id, ord("T")) in user32.registered
+    assert (hotkey._hotkey_id, ord("G")) not in user32.registered
+    assert user32.RegisterHotKey.argtypes == (
+        runtime.ctypes.c_void_p,
+        runtime.ctypes.c_int,
+        runtime.ctypes.c_uint,
+        runtime.ctypes.c_uint,
+    )

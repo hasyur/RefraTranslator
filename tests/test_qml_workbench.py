@@ -32,6 +32,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
 
 from game_screen_translator.config import load_config
 from game_screen_translator.gui import qml_workbench as host_module
+from game_screen_translator.gui import runtime as runtime_module
 from game_screen_translator.gui import workbench_controller as controller_module
 from game_screen_translator.gui.qml_workbench import QmlWorkbenchHost
 from game_screen_translator.gui.theme import SKIN_DOHNA, SKIN_PRISM
@@ -481,6 +482,77 @@ def test_host_tray_recalls_workbench_and_running_close_returns_to_tray() -> None
     assert restored_window.isVisible()
     assert tray.visible is False
     assert app.quitOnLastWindowClosed() is True
+    host.shutdown()
+
+
+def test_login_tray_start_keeps_native_target_for_second_instance_activation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _ControllerStub()
+    tray = _TrayRecorder()
+    host, _engine = _host(controller, tray_factory=lambda _app: tray)
+
+    host.hide_to_tray()
+    assert host.window is None
+    assert tray.visible is True
+    activation_window = host._activation_window
+    assert activation_window is not None
+    target_hwnd = int(activation_window.winId())
+
+    class NativeFunction:
+        def __init__(self, callback):
+            self._callback = callback
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            return self._callback(*args)
+
+    class Message(ctypes.Structure):
+        _fields_ = (
+            ("hwnd", ctypes.c_void_p),
+            ("message", ctypes.c_uint32),
+            ("wParam", ctypes.c_size_t),
+            ("lParam", ctypes.c_ssize_t),
+            ("time", ctypes.c_uint32),
+            ("pt_x", ctypes.c_long),
+            ("pt_y", ctypes.c_long),
+        )
+
+    posted: list[tuple[int, int]] = []
+
+    class User32:
+        def __init__(self) -> None:
+            self.FindWindowW = NativeFunction(self._find_window)  # noqa: N802
+            self.PostMessageW = NativeFunction(self._post_message)  # noqa: N802
+            self.ShowWindow = NativeFunction(lambda *_args: True)  # noqa: N802
+            self.SetForegroundWindow = NativeFunction(  # noqa: N802
+                lambda *_args: True,
+            )
+
+        def _find_window(self, _class_name, title):
+            if title == runtime_module.ACTIVATION_WINDOW_TITLE:
+                return target_hwnd
+            return 0
+
+        def _post_message(self, hwnd, message, _wparam, _lparam):
+            posted.append((hwnd, message))
+            native_message = Message(hwnd, message, 0, 0, 0, 0, 0)
+            activation_window.nativeEvent(
+                b"windows_generic_MSG",
+                ctypes.addressof(native_message),
+            )
+            return True
+
+    monkeypatch.setattr(runtime_module.sys, "platform", "win32")
+    user32 = User32()
+    monkeypatch.setattr(runtime_module.ctypes, "windll", SimpleNamespace(user32=user32))
+
+    assert runtime_module.activate_existing_window()
+    assert posted == [(target_hwnd, runtime_module.ACTIVATION_MESSAGE)]
+    assert host.window is not None
+    assert host.window.isVisible()
+    assert tray.visible is False
     host.shutdown()
 
 

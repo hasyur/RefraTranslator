@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -9,12 +10,17 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QScreen, QWind
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtQuickControls2 import QQuickStyle
-from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon, QWidget
 
 from game_screen_translator.branding import GUI_PROCESS_NAME, PRODUCT_NAME
 
 from .region_selector import RegionSelector
-from .runtime import GuiRuntimeError, WindowsGlobalHotkey
+from .runtime import (
+    ACTIVATION_MESSAGE,
+    ACTIVATION_WINDOW_TITLE,
+    GuiRuntimeError,
+    WindowsGlobalHotkey,
+)
 from .workbench_controller import WorkbenchController
 
 
@@ -188,6 +194,51 @@ def _apply_workbench_window_theme(
         pass
 
 
+class _ActivationWindow(QWidget):
+    """A hidden native target that survives QML resource disposal."""
+
+    def __init__(self, callback: Callable[[], None]) -> None:
+        super().__init__(
+            None,
+            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint,
+        )
+        self._callback = callback
+        self.setWindowTitle(ACTIVATION_WINDOW_TITLE)
+        self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        self.setFixedSize(1, 1)
+        # Creating the native handle makes FindWindowW/PostMessageW usable
+        # while the QML workbench is intentionally disposed in the tray.
+        self.winId()
+        self.hide()
+
+    def nativeEvent(self, _event_type, message):  # noqa: N802
+        try:
+            pointer = int(message)
+            if pointer == 0:
+                return False, b""
+
+            class _Message(ctypes.Structure):
+                _fields_ = (
+                    ("hwnd", ctypes.c_void_p),
+                    ("message", ctypes.c_uint32),
+                    ("wParam", ctypes.c_size_t),
+                    ("lParam", ctypes.c_ssize_t),
+                    ("time", ctypes.c_uint32),
+                    ("pt_x", ctypes.c_long),
+                    ("pt_y", ctypes.c_long),
+                )
+
+            native = ctypes.cast(pointer, ctypes.POINTER(_Message)).contents
+            if native.message == ACTIVATION_MESSAGE:
+                self._callback()
+                return True, b""
+        except (TypeError, ValueError, OSError):
+            pass
+        return super().nativeEvent(_event_type, message)
+
+
 class QmlWorkbenchHost(QObject):
     """Own the native QML workbench and its QWidget-only helper window."""
 
@@ -230,6 +281,7 @@ class QmlWorkbenchHost(QObject):
         self._last_theme_signature: tuple[int, str, str, str] | None = None
         self._tray_icon: QSystemTrayIcon | None = None
         self._global_hotkey: WindowsGlobalHotkey | None = None
+        self._activation_window: _ActivationWindow | None = None
 
         set_window_icon = getattr(self._application, "setWindowIcon", None)
         if callable(set_window_icon):
@@ -261,14 +313,17 @@ class QmlWorkbenchHost(QObject):
             self._tray_icon.hide()
 
         self._create_workbench()
+        self._activation_window = _ActivationWindow(
+            self._activate_from_second_instance,
+        )
         self._global_hotkey = WindowsGlobalHotkey(
             self._application,
             self._start_live_from_hotkey,
             self._report_hotkey_error,
         )
-        hotkey_changed = getattr(controller, "hotkeyChanged", None)
-        if hotkey_changed is not None and hasattr(hotkey_changed, "connect"):
-            hotkey_changed.connect(self._configure_hotkey)
+        set_hotkey_registrar = getattr(controller, "set_hotkey_registrar", None)
+        if callable(set_hotkey_registrar):
+            set_hotkey_registrar(self._register_hotkey_for_controller)
         self._configure_hotkey(getattr(controller, "hotkeyPreference", "Ctrl+Alt+T"))
 
     @property
@@ -375,9 +430,15 @@ class QmlWorkbenchHost(QObject):
         if hotkey is None:
             return
         try:
-            hotkey.register(value)
+            self._register_hotkey_for_controller(value)
         except (GuiRuntimeError, ValueError, TypeError) as exc:
             self._report_hotkey_error(str(exc))
+
+    def _register_hotkey_for_controller(self, value: str) -> None:
+        hotkey = self._global_hotkey
+        if hotkey is None:
+            return
+        hotkey.register(value)
 
     def _start_live_from_hotkey(self) -> None:
         if self._shutdown_called:
@@ -417,6 +478,19 @@ class QmlWorkbenchHost(QObject):
         self._show_live_tray()
         self._dispose_workbench()
 
+    def _activate_from_second_instance(self) -> None:
+        if self._shutdown_called:
+            return
+        running = bool(getattr(self._controller, "running", False))
+        self._hidden_for_live = False
+        self._set_quit_on_last_window_closed(not running)
+        self._hide_live_tray()
+        self.show()
+        window = self._window
+        if window is not None:
+            window.raise_()
+            window.requestActivate()
+
     def hide_to_tray(self) -> None:
         """Enter background residency for a Windows logon-started GUI."""
 
@@ -427,8 +501,7 @@ class QmlWorkbenchHost(QObject):
             return
         if self._shutdown_called:
             return
-        self._hidden_for_live = False
-        self.show()
+        self._activate_from_second_instance()
 
     def _restore_after_live(self) -> None:
         if self._shutdown_called:
@@ -505,6 +578,10 @@ class QmlWorkbenchHost(QObject):
         self._hide_live_tray()
         if self._global_hotkey is not None:
             self._global_hotkey.close()
+        if self._activation_window is not None:
+            self._activation_window.close()
+            self._activation_window.deleteLater()
+            self._activation_window = None
         self._dispose_workbench()
         self._controller.shutdown()
 

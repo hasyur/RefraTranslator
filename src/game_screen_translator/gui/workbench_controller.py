@@ -11,7 +11,7 @@ import time
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from PySide6.QtCore import (
     Property,
@@ -89,7 +89,12 @@ from .theme import (
     load_gui_preferences,
     save_gui_preferences,
 )
-from .runtime import GuiRuntimeError, set_startup_enabled
+from .runtime import (
+    GuiRuntimeError,
+    restore_startup_entry,
+    set_startup_enabled,
+    startup_entry,
+)
 
 
 _BLUR_MODE_DARK = "dark_blur"
@@ -363,6 +368,7 @@ class WorkbenchController(QObject):
         self._skin_preference = preferences.skin
         self._start_with_windows = preferences.start_with_windows
         self._hotkey = preferences.hotkey
+        self._hotkey_registrar: Callable[[str], None] | None = None
         app = QApplication.instance()
         self._effective_theme = effective_theme(
             self._theme_preference,
@@ -1436,16 +1442,24 @@ class WorkbenchController(QObject):
         if value == self._start_with_windows:
             return
         try:
+            previous_entry = startup_entry()
+            registry_changed = False
             set_startup_enabled(self._config_path.parent, value)
-            save_gui_preferences(
-                self._config_path,
-                GuiPreferences(
-                    theme=self._theme_preference,
-                    skin=self._skin_preference,
-                    start_with_windows=value,
-                    hotkey=self._hotkey,
-                ),
-            )
+            registry_changed = True
+            try:
+                save_gui_preferences(
+                    self._config_path,
+                    GuiPreferences(
+                        theme=self._theme_preference,
+                        skin=self._skin_preference,
+                        start_with_windows=value,
+                        hotkey=self._hotkey,
+                    ),
+                )
+            except Exception:
+                if registry_changed:
+                    restore_startup_entry(previous_entry)
+                raise
         except (GuiRuntimeError, GuiSettingsError, OSError) as exc:
             self._show_error("保存开机启动设置失败", exc)
             return
@@ -1461,15 +1475,30 @@ class WorkbenchController(QObject):
                 start_with_windows=self._start_with_windows,
                 hotkey=value,
             )
-            save_gui_preferences(self._config_path, preferences)
-        except (GuiSettingsError, OSError) as exc:
+            if preferences.hotkey == self._hotkey:
+                return
+            if self._hotkey_registrar is not None:
+                self._hotkey_registrar(preferences.hotkey)
+            try:
+                save_gui_preferences(self._config_path, preferences)
+            except Exception:
+                if self._hotkey_registrar is not None:
+                    self._hotkey_registrar(self._hotkey)
+                raise
+        except (GuiRuntimeError, GuiSettingsError, OSError) as exc:
             self._show_error("保存全局快捷键失败", exc)
-            return
-        if preferences.hotkey == self._hotkey:
             return
         self._hotkey = preferences.hotkey
         self.hotkeyChanged.emit(self._hotkey)
         self._notice(f"全局快捷键已设为 {self._hotkey}", "success")
+
+    def set_hotkey_registrar(
+        self,
+        registrar: Callable[[str], None] | None,
+    ) -> None:
+        """Install the host-owned native registration transaction callback."""
+
+        self._hotkey_registrar = registrar
 
     @Slot(bool)
     def setReducedMotion(self, value: bool) -> None:

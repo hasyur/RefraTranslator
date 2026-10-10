@@ -27,6 +27,8 @@ except ImportError:  # pragma: no cover - exercised only without the GUI extra
 
 SINGLE_INSTANCE_MUTEX_NAME = f"Local\\{PRODUCT_NAME}.GUI"
 GUI_WINDOW_TITLE = "RefraTranslator · Prism Workbench"
+ACTIVATION_WINDOW_TITLE = f"{PRODUCT_NAME} · activation target"
+ACTIVATION_MESSAGE = 0x8000 + 0x52
 STARTUP_REGISTRY_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
 STARTUP_VALUE_NAME = PRODUCT_NAME
 DEFAULT_HOTKEY = "Ctrl+Alt+T"
@@ -161,20 +163,53 @@ def _load_winreg():
 def startup_enabled(project_root: Path | None = None) -> bool:
     """Read whether the product's current-user logon entry exists."""
 
-    if sys.platform != "win32":
+    value = startup_entry()
+    if value is None:
         return False
+    if project_root is None:
+        return bool(value)
+    expected = startup_command(project_root)
+    return value.casefold() == expected.casefold()
+
+
+def startup_entry() -> str | None:
+    """Return the exact current-user Run value for transaction rollback."""
+
+    if sys.platform != "win32":
+        return None
     winreg = _load_winreg()
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_REGISTRY_PATH) as key:
             value, _kind = winreg.QueryValueEx(key, STARTUP_VALUE_NAME)
     except FileNotFoundError:
-        return False
+        return None
     except OSError as exc:
         raise GuiRuntimeError(f"读取开机启动设置失败：{exc}") from exc
-    if project_root is None:
-        return bool(value)
-    expected = startup_command(project_root)
-    return isinstance(value, str) and value.casefold() == expected.casefold()
+    if not isinstance(value, str):
+        raise GuiRuntimeError("开机启动注册表值不是文本")
+    return value
+
+
+def restore_startup_entry(value: str | None) -> None:
+    """Restore an exact previously-read Run value, including its absence."""
+
+    winreg = _load_winreg()
+    try:
+        with winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER,
+            STARTUP_REGISTRY_PATH,
+            0,
+            winreg.KEY_SET_VALUE,
+        ) as key:
+            if value is None:
+                try:
+                    key.DeleteValue(STARTUP_VALUE_NAME)
+                except FileNotFoundError:
+                    pass
+            else:
+                key.SetValueEx(STARTUP_VALUE_NAME, 0, winreg.REG_SZ, value)
+    except OSError as exc:
+        raise GuiRuntimeError(f"恢复开机启动设置失败：{exc}") from exc
 
 
 def set_startup_enabled(project_root: Path, enabled: bool) -> str | None:
@@ -260,13 +295,24 @@ def activate_existing_window(title: str = GUI_WINDOW_TITLE) -> bool:
         user32 = ctypes.windll.user32
         user32.FindWindowW.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p)
         user32.FindWindowW.restype = ctypes.c_void_p
+        user32.PostMessageW.argtypes = (
+            ctypes.c_void_p,
+            ctypes.c_uint,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+        )
+        user32.PostMessageW.restype = ctypes.c_bool
         user32.ShowWindow.argtypes = (ctypes.c_void_p, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (ctypes.c_void_p,)
-        hwnd = user32.FindWindowW(None, title)
-        if not hwnd:
-            return False
-        user32.ShowWindow(hwnd, _SW_RESTORE)
-        return bool(user32.SetForegroundWindow(hwnd))
+        for window_title in (title, ACTIVATION_WINDOW_TITLE):
+            hwnd = user32.FindWindowW(None, window_title)
+            if not hwnd:
+                continue
+            if window_title == ACTIVATION_WINDOW_TITLE:
+                return bool(user32.PostMessageW(hwnd, ACTIVATION_MESSAGE, 0, 0))
+            user32.ShowWindow(hwnd, _SW_RESTORE)
+            return bool(user32.SetForegroundWindow(hwnd))
+        return False
     except (AttributeError, OSError, TypeError, ValueError):
         return False
 
@@ -308,37 +354,107 @@ class WindowsGlobalHotkey(QAbstractNativeEventFilter):
         except (AttributeError, RuntimeError):
             return False
 
-    def register(self, value: str) -> bool:
-        spec = parse_hotkey(value)
-        self.unregister()
-        if not self._supported():
-            self._spec = spec
-            return False
-        user32 = ctypes.windll.user32
-        if not user32.RegisterHotKey(
+    @staticmethod
+    def _user32_api():
+        loader = getattr(ctypes, "WinDLL", None)
+        if loader is not None:
+            return loader("user32", use_last_error=True)
+        return ctypes.windll.user32
+
+    @staticmethod
+    def _set_api_signature(function, argtypes, restype) -> None:
+        function.argtypes = argtypes
+        function.restype = restype
+
+    def _unregister_native(self) -> None:
+        if not self._registered or sys.platform != "win32":
+            return
+        user32 = self._user32_api()
+        unregister = user32.UnregisterHotKey
+        self._set_api_signature(
+            unregister,
+            (ctypes.c_void_p, ctypes.c_int),
+            ctypes.c_bool,
+        )
+        unregister(None, self._hotkey_id)
+
+    def _register_native(self, spec: HotkeySpec) -> None:
+        user32 = self._user32_api()
+        register = user32.RegisterHotKey
+        self._set_api_signature(
+            register,
+            (ctypes.c_void_p, ctypes.c_int, ctypes.c_uint, ctypes.c_uint),
+            ctypes.c_bool,
+        )
+        if register(
             None,
             self._hotkey_id,
             spec.modifiers | _MOD_NOREPEAT,
             spec.virtual_key,
         ):
-            error = ctypes.get_last_error()
-            if error == _ERROR_HOTKEY_ALREADY_REGISTERED:
-                raise GuiRuntimeError(f"快捷键 {spec.display} 已被其他程序占用")
-            raise GuiRuntimeError(f"注册快捷键 {spec.display} 失败（错误码 {error}）")
-        self._registered = True
-        self._spec = spec
-        install_filter = getattr(self._application, "installNativeEventFilter", None)
-        if callable(install_filter) and not self._native_filter_installed:
-            install_filter(self)
-            self._native_filter_installed = True
-        return True
+            return
+        error = ctypes.get_last_error()
+        if error == _ERROR_HOTKEY_ALREADY_REGISTERED:
+            raise GuiRuntimeError(f"快捷键 {spec.display} 已被其他程序占用")
+        raise GuiRuntimeError(f"注册快捷键 {spec.display} 失败（错误码 {error}）")
+
+    def register(self, value: str) -> bool:
+        spec = parse_hotkey(value)
+        if self._registered and self._spec == spec:
+            return True
+        previous_spec = self._spec
+        previous_registered = self._registered
+        self._unregister_native()
+        self._registered = False
+        self._spec = None
+        if not self._supported():
+            self._spec = spec
+            return False
+        try:
+            self._register_native(spec)
+            self._registered = True
+            self._spec = spec
+            install_filter = getattr(
+                self._application,
+                "installNativeEventFilter",
+                None,
+            )
+            if callable(install_filter) and not self._native_filter_installed:
+                install_filter(self)
+                self._native_filter_installed = True
+            return True
+        except Exception:
+            if self._registered:
+                try:
+                    self._unregister_native()
+                except (AttributeError, OSError, TypeError, ValueError):
+                    pass
+            self._registered = False
+            self._spec = None
+            if previous_registered and previous_spec is not None:
+                try:
+                    self._register_native(previous_spec)
+                    self._registered = True
+                    self._spec = previous_spec
+                    if not self._native_filter_installed:
+                        install_filter = getattr(
+                            self._application,
+                            "installNativeEventFilter",
+                            None,
+                        )
+                        if callable(install_filter):
+                            install_filter(self)
+                            self._native_filter_installed = True
+                except Exception:
+                    self._registered = False
+                    self._spec = None
+            raise
 
     def unregister(self) -> None:
-        if self._registered and sys.platform == "win32":
-            try:
-                ctypes.windll.user32.UnregisterHotKey(None, self._hotkey_id)
-            except (AttributeError, OSError):
-                pass
+        try:
+            self._unregister_native()
+        except (AttributeError, OSError, TypeError, ValueError):
+            pass
         if self._native_filter_installed:
             remove_filter = getattr(self._application, "removeNativeEventFilter", None)
             if callable(remove_filter):
@@ -380,6 +496,8 @@ class WindowsGlobalHotkey(QAbstractNativeEventFilter):
 
 __all__ = [
     "DEFAULT_HOTKEY",
+    "ACTIVATION_MESSAGE",
+    "ACTIVATION_WINDOW_TITLE",
     "GUI_WINDOW_TITLE",
     "GuiRuntimeError",
     "HotkeySpec",
@@ -388,6 +506,8 @@ __all__ = [
     "activate_existing_window",
     "parse_hotkey",
     "set_startup_enabled",
+    "restore_startup_entry",
     "startup_command",
+    "startup_entry",
     "startup_enabled",
 ]

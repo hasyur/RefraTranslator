@@ -138,6 +138,7 @@ def test_controller_persists_windows_startup_and_hotkey_preferences(
         "set_startup_enabled",
         lambda root, enabled: startup_calls.append((root, enabled)),
     )
+    monkeypatch.setattr(controller_module, "startup_entry", lambda: None)
 
     controller.setStartWithWindows(True)
     controller.setHotkey("Shift+Ctrl+T")
@@ -148,6 +149,75 @@ def test_controller_persists_windows_startup_and_hotkey_preferences(
     assert controller.hotkeyPreference == "Ctrl+Shift+T"
     assert preferences.start_with_windows is True
     assert preferences.hotkey == "Ctrl+Shift+T"
+    controller.shutdown()
+
+
+def test_controller_keeps_previous_hotkey_when_new_registration_conflicts(
+    tmp_path: Path,
+) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    errors: list[tuple[str, str]] = []
+    notices: list[str] = []
+    controller.errorRaised.connect(
+        lambda title, message: errors.append((title, message)),
+    )
+    controller.noticeRaised.connect(notices.append)
+
+    def reject_hotkey(_value: str) -> None:
+        raise controller_module.GuiRuntimeError("快捷键已被其他程序占用")
+
+    controller.set_hotkey_registrar(reject_hotkey)
+    controller.setHotkey("Ctrl+Alt+G")
+
+    assert controller.hotkeyPreference == "Ctrl+Alt+T"
+    assert load_gui_preferences(config_path).hotkey == "Ctrl+Alt+T"
+    assert errors == [("保存全局快捷键失败", "快捷键已被其他程序占用")]
+    assert notices == []
+    controller.shutdown()
+
+
+def test_controller_restores_startup_entry_when_preferences_save_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, _config_path = _controller_with_profile(tmp_path)
+    startup_calls: list[tuple[Path, bool]] = []
+    startup_state = {"value": "old command"}
+
+    def read_startup_entry() -> str:
+        return startup_state["value"]
+
+    def set_startup_entry(root: Path, enabled: bool) -> None:
+        startup_calls.append((root, enabled))
+        startup_state["value"] = "new command"
+
+    monkeypatch.setattr(controller_module, "startup_entry", read_startup_entry)
+    monkeypatch.setattr(
+        controller_module,
+        "set_startup_enabled",
+        set_startup_entry,
+    )
+    monkeypatch.setattr(
+        controller_module,
+        "restore_startup_entry",
+        lambda value: startup_state.__setitem__("value", value),
+    )
+    monkeypatch.setattr(
+        controller_module,
+        "save_gui_preferences",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    errors: list[tuple[str, str]] = []
+    controller.errorRaised.connect(
+        lambda title, message: errors.append((title, message)),
+    )
+
+    controller.setStartWithWindows(True)
+
+    assert startup_calls == [(tmp_path, True)]
+    assert startup_state["value"] == "old command"
+    assert controller.startWithWindows is False
+    assert errors == [("保存开机启动设置失败", "disk full")]
     controller.shutdown()
 
 
