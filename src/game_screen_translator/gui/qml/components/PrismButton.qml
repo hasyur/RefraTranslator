@@ -86,7 +86,7 @@ Button {
               : root.primary ? (root.theme.dohna ? root.theme.ink : root.theme.text)
               : root.theme.text
         font.family: root.theme.monoFontFor(text)
-        font.pixelSize: root.theme.dohna && root.navigation ? 24 : 11
+        font.pixelSize: root.theme.dohna && root.navigation ? 24 : 13
         font.weight: root.theme.dohna && root.navigation ? Font.Bold : Font.DemiBold
         font.letterSpacing: root.theme.dohna && root.navigation ? 0.4 : 0.9
         fontSizeMode: Text.FixedSize

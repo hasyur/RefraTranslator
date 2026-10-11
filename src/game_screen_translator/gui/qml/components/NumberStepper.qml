@@ -72,7 +72,7 @@ RowLayout {
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         font.family: root.theme.monoFontFor(text)
-        font.pixelSize: 13
+        font.pixelSize: 15
         validator: IntValidator { bottom: root.minimum; top: root.maximum }
         Accessible.name: root.accessibleName
         onEditingFinished: root.submit(text)
@@ -97,7 +97,7 @@ RowLayout {
             text: root.suffix
             color: root.theme.textDim
             font.family: root.theme.monoFontFor(text)
-            font.pixelSize: 11
+            font.pixelSize: 13
         }
     }
 

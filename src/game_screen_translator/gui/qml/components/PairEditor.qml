@@ -88,7 +88,7 @@ Item {
                 text: root.sourceTitle
                 color: root.theme.textDim
                 font.family: root.theme.monoFontFor(text)
-                font.pixelSize: 10
+                font.pixelSize: 12
                 font.letterSpacing: 0.8
                 Layout.fillWidth: true
             }
@@ -96,7 +96,7 @@ Item {
                 text: root.targetTitle
                 color: root.theme.textDim
                 font.family: root.theme.monoFontFor(text)
-                font.pixelSize: 10
+                font.pixelSize: 12
                 font.letterSpacing: 0.8
                 Layout.fillWidth: true
             }
@@ -157,7 +157,7 @@ Item {
                             text: String(rowItem.index + 1).padStart(2, "0")
                             color: rowItem.selected ? root.theme.accent : root.theme.textDim
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 10
+                            font.pixelSize: 12
                             Layout.preferredWidth: 24
                         }
                         PrismTextField {
@@ -210,7 +210,7 @@ Item {
             text: root.errorText.length > 0 ? root.errorText : "有尚未保存的更改。"
             color: root.errorText.length > 0 ? root.theme.danger : root.theme.amber
             font.family: root.theme.uiFontFor(text)
-            font.pixelSize: 12
+            font.pixelSize: 14
             Layout.fillWidth: true
         }
 

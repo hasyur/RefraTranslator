@@ -33,7 +33,7 @@ Rectangle {
             text: root.eyebrow
             color: root.theme.accent
             font.family: root.theme.monoFontFor(text)
-            font.pixelSize: 11
+            font.pixelSize: 13
             font.letterSpacing: 1.2
         }
         Text {
@@ -50,7 +50,7 @@ Rectangle {
             text: root.detail
             color: root.theme.textSoft
             font.family: root.theme.uiFontFor(text)
-            font.pixelSize: 13
+            font.pixelSize: 15
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }

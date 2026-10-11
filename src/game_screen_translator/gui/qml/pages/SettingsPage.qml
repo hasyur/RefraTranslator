@@ -55,7 +55,7 @@ Item {
                         text: "动态 ROI 开关位于 OCR 页；这里仅调整与当前模式对应的调度参数。"
                         color: root.theme.textDim
                         font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 11
+                        font.pixelSize: 13
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
@@ -219,7 +219,7 @@ Item {
                         text: "调度参数保存后在下一次运行生效。"
                         color: root.theme.textDim
                         font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 11
+                        font.pixelSize: 13
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
@@ -254,7 +254,7 @@ Item {
                             text: "调试边框设置保存后在下一次运行生效。"
                             color: root.theme.textDim
                             font.family: root.theme.uiFontFor(text)
-                            font.pixelSize: 11
+                            font.pixelSize: 13
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
@@ -344,7 +344,7 @@ Item {
                         selectionColor: root.theme.accent
                         selectedTextColor: root.theme.ink
                         font.family: root.theme.monoFontFor(text)
-                        font.pixelSize: 10
+                        font.pixelSize: 12
                         wrapMode: TextEdit.Wrap
                         background: null
                     }
@@ -396,7 +396,7 @@ Item {
                             text: root.diagnostics.status
                             color: root.theme.textDim
                             font.family: root.theme.uiFontFor(text)
-                            font.pixelSize: 11
+                            font.pixelSize: 13
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
@@ -411,7 +411,7 @@ Item {
                             selectionColor: root.theme.accent
                             selectedTextColor: root.theme.ink
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 11
+                            font.pixelSize: 13
                             wrapMode: TextEdit.Wrap
                             Layout.fillWidth: true
                             background: null
@@ -428,7 +428,7 @@ Item {
                             selectionColor: root.theme.accent
                             selectedTextColor: root.theme.ink
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 11
+                            font.pixelSize: 13
                             wrapMode: TextEdit.Wrap
                             Layout.fillWidth: true
                             background: null
@@ -445,7 +445,7 @@ Item {
                             selectionColor: root.theme.accent
                             selectedTextColor: root.theme.ink
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 11
+                            font.pixelSize: 13
                             wrapMode: TextEdit.Wrap
                             Layout.fillWidth: true
                             background: null

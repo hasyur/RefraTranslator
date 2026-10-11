@@ -36,7 +36,7 @@ Dialog {
             text: root.title
             color: root.theme.text
             font.family: root.theme.displayFontFor(text)
-            font.pixelSize: 17
+            font.pixelSize: 19
             font.weight: Font.DemiBold
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight

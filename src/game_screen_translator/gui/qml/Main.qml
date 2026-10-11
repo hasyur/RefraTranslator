@@ -289,7 +289,7 @@ ApplicationWindow {
             text: errorDialog.errorMessage
             color: prism.text
             font.family: prism.uiFontFor(text)
-            font.pixelSize: 13
+            font.pixelSize: 15
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
@@ -313,7 +313,7 @@ ApplicationWindow {
         Rectangle {
             id: navigationRail
             implicitWidth: prism.dohna ? Math.ceil(dohnaNavigationText.width + 40)
-                                      : root.width < 1100 ? 178 : 222
+                                      : root.width < 1100 ? 202 : 222
             Layout.preferredWidth: implicitWidth
             Layout.fillHeight: true
             color: prism.navigationSurface
@@ -351,8 +351,10 @@ ApplicationWindow {
                         text: "TRANSLATOR / WORKBENCH"
                         color: prism.accent
                         font.family: prism.monoFontFor(text)
-                        font.pixelSize: 8
+                        font.pixelSize: 12
                         font.letterSpacing: 1.1
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
                     }
                 }
 
@@ -409,7 +411,7 @@ ApplicationWindow {
                             text: "ACTIVE PROFILE"
                             color: prism.navigationTextDim
                             font.family: prism.monoFontFor(text)
-                            font.pixelSize: 8
+                            font.pixelSize: 12
                             font.letterSpacing: 1
                         }
                         Text {
@@ -417,7 +419,7 @@ ApplicationWindow {
                             text: root.boundWorkbench.currentProfileName
                             color: prism.navigationText
                             font.family: prism.uiFontFor(text)
-                            font.pixelSize: 13
+                            font.pixelSize: 15
                             font.weight: Font.Medium
                             elide: Text.ElideRight
                             Layout.fillWidth: true
@@ -430,8 +432,11 @@ ApplicationWindow {
                     visible: !prism.dohna
                     color: prism.navigationTextDim
                     font.family: prism.monoFontFor(text)
-                    font.pixelSize: 8
+                    font.pixelSize: 12
                     font.letterSpacing: 0.8
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
+                    Layout.fillWidth: true
                     Layout.alignment: Qt.AlignHCenter
                     Layout.bottomMargin: 5
                 }
@@ -496,7 +501,7 @@ ApplicationWindow {
                                       + " / " + root.boundWorkbench.currentPage
                                 color: prism.accentText
                                 font.family: prism.monoFontFor(text)
-                                font.pixelSize: 9
+                                font.pixelSize: 12
                                 font.letterSpacing: 1.8
                             }
                             Item {
@@ -540,7 +545,7 @@ ApplicationWindow {
                                 text: root.pageSubtitle(root.boundWorkbench.currentPage)
                                 color: prism.textSoft
                                 font.family: prism.uiFontFor(text)
-                                font.pixelSize: 11
+                                font.pixelSize: 13
                                 Layout.topMargin: 10
                             }
                         }
@@ -550,7 +555,7 @@ ApplicationWindow {
                             text: "● 未应用"
                             color: prism.amber
                             font.family: prism.monoFontFor(text)
-                            font.pixelSize: 10
+                            font.pixelSize: 12
                         }
                         PrismButton {
                             objectName: "saveAllButton"
@@ -718,7 +723,7 @@ ApplicationWindow {
                             text: root.boundWorkbench.statusText
                             color: prism.navigationText
                             font.family: prism.uiFontFor(text)
-                            font.pixelSize: 10
+                            font.pixelSize: 12
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
@@ -726,7 +731,7 @@ ApplicationWindow {
                             text: root.boundWorkbench.runPhase.toUpperCase()
                             color: root.boundWorkbench.running ? prism.accent : prism.navigationTextDim
                             font.family: prism.monoFontFor(text)
-                            font.pixelSize: 9
+                            font.pixelSize: 12
                             font.letterSpacing: 1
                         }
                     }

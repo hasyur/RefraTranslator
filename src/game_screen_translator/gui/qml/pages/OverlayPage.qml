@@ -108,7 +108,7 @@ Item {
                     text: root.workbench.overlayStatus
                     color: root.theme.textSoft
                     font.family: root.theme.uiFontFor(text)
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
@@ -175,7 +175,7 @@ Item {
                     text: "0% 仅模糊；1–100% 在模糊背景上叠加对应强度的黑色遮罩。"
                     color: root.theme.textDim
                     font.family: root.theme.uiFontFor(text)
-                    font.pixelSize: 11
+                    font.pixelSize: 13
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
@@ -195,7 +195,7 @@ Item {
                     text: "拖动只更新草稿；点顶部“应用更改”后才写入运行配置。"
                     color: root.theme.textSoft
                     font.family: root.theme.uiFontFor(text)
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
@@ -206,7 +206,7 @@ Item {
                     text: "OBS 浏览器源设置集中在 SETTINGS 页面。"
                     color: root.theme.textDim
                     font.family: root.theme.monoFontFor(text)
-                    font.pixelSize: 10
+                    font.pixelSize: 12
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }

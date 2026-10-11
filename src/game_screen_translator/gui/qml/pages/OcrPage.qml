@@ -64,7 +64,7 @@ Item {
                             text: root.workbench.lastRunStatus
                             color: root.theme.accent
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 10
+                            font.pixelSize: 12
                             Layout.fillWidth: true
                         }
                         Repeater {
@@ -83,7 +83,7 @@ Item {
                                         text: modelData.sourceText
                                         color: root.theme.text
                                         font.family: root.theme.uiFontFor(text)
-                                        font.pixelSize: 14
+                                        font.pixelSize: 16
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
                                     }
@@ -93,7 +93,7 @@ Item {
                                               + " — " + modelData.right + "," + modelData.bottom
                                         color: root.theme.textDim
                                         font.family: root.theme.monoFontFor(text)
-                                        font.pixelSize: 10
+                                        font.pixelSize: 12
                                         Layout.fillWidth: true
                                     }
                                 }
@@ -106,7 +106,7 @@ Item {
                     text: "工作台只呈现控制器提供的状态；不会用示例字幕、置信度或耗时填充这里。"
                     color: root.theme.textDim
                     font.family: root.theme.uiFontFor(text)
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
@@ -139,7 +139,7 @@ Item {
                 ColumnLayout {
                     id: form
                     width: parent.width
-                    spacing: 10
+                    spacing: 7
 
                     SectionHeader {
                         theme: root.theme
@@ -232,7 +232,7 @@ Item {
                                 color: index === root.workbench.detectionQualityIndex
                                        ? root.theme.accent : root.theme.textDim
                                 font.family: root.theme.uiFontFor(text)
-                                font.pixelSize: 11
+                                font.pixelSize: 13
                                 horizontalAlignment: Text.AlignHCenter
                                 Layout.fillWidth: true
                             }
@@ -294,7 +294,7 @@ Item {
                         text: "参数修改后由顶部“应用更改”统一校验并写入运行配置。"
                         color: root.theme.textDim
                         font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 11
+                        font.pixelSize: 13
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }

@@ -26,7 +26,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QColor, QFontMetricsF, QWheelEvent
+from PySide6.QtGui import QColor, QFontInfo, QFontMetricsF, QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine, QQmlProperty
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtTest import QTest
@@ -5222,6 +5222,93 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     assert title.property("refractionRunning") is False
     assert abs(float(title.property("refractionShift")) - 3) < 0.01
     host.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("skin", "theme_name"),
+    [(SKIN_PRISM, "dark"), (SKIN_PRISM, "light"), (SKIN_DOHNA, "light")],
+)
+def test_workbench_text_is_readable_and_controls_fit_across_pages(
+    tmp_path: Path,
+    skin: str,
+    theme_name: str,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path, load_config(config_path), "game", display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(skin)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        host.show()
+        window = host.window
+        assert window is not None
+        pages = (
+            ("HOME", "homePrimaryPanel"),
+            ("CAPTURE", "captureSecondaryPanel"),
+            ("OCR", "ocrSecondaryPanel"),
+            ("TRANSLATION", "translationSecondaryPanel"),
+            ("OVERLAY", "overlaySecondaryPanel"),
+            ("CACHE", "cacheSecondaryPanel"),
+            ("SETTINGS", "settingsPrimaryPanel"),
+        )
+        for width, height in ((980, 700), (1280, 820)):
+            window.resize(max(width, window.minimumWidth()), height)
+            for page, panel_name in pages:
+                controller.setPage(page)
+                panel = _find_quick_item(window, panel_name)
+                assert panel is not None, panel_name
+                _wait_for_page_layout(window, panel, app)
+                pending = [window.contentItem()]
+                checked = 0
+                while pending:
+                    item = pending.pop()
+                    pending.extend(item.childItems())
+                    if not item.isVisible() or not any(
+                        item.inherits(kind)
+                        for kind in ("QQuickText", "QQuickTextInput", "QQuickTextEdit")
+                    ):
+                        continue
+                    text = str(item.property("text") or "")
+                    if not text:
+                        continue
+                    font_size = item.property("font").pixelSize()
+                    assert font_size >= 12, (page, text, font_size)
+                    if item.inherits("QQuickTextInput"):
+                        assert font_size >= 15, (page, text, font_size)
+                        available_height = (
+                            item.height()
+                            - float(item.property("topPadding"))
+                            - float(item.property("bottomPadding"))
+                        )
+                        assert item.property("contentHeight") <= available_height + 1
+                    checked += 1
+                assert checked > 10, page
+
+            for name in (
+                *(f"navigationButton{index}" for index in range(7)),
+                "saveAllButton", "startLiveButton",
+            ):
+                button = _find_quick_item(window, name)
+                assert button is not None, name
+                label = button.findChild(QQuickItem, "prismButtonLabel")
+                assert label is not None, name
+                assert label.property("font").pixelSize() >= 13
+                # Windows' offscreen plugin may have no resolved system fonts.
+                # Check text fitting when Qt has real glyph metrics; the same
+                # test also runs with the native Windows platform for validation.
+                if QFontInfo(label.property("font")).pixelSize() >= 0:
+                    assert label.property("truncated") is False, (
+                        name, label.property("text"), label.width(),
+                        label.property("implicitWidth"),
+                    )
+    finally:
+        host.shutdown()
 
 
 def test_real_workbench_pages_and_themes_are_usable(

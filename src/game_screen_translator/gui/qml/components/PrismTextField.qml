@@ -20,7 +20,7 @@ TextField {
     selectionColor: root.theme.accent
     selectedTextColor: root.theme.ink
     font.family: root.theme.uiFontFor(text.length > 0 ? text : placeholderText)
-    font.pixelSize: 13
+    font.pixelSize: 15
 
     background: Rectangle {
         objectName: "prismTextFieldBackground"

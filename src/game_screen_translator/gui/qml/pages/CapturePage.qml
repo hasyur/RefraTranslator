@@ -154,7 +154,7 @@ Item {
                             text: root.workbench.customRegion ? root.workbench.captureSummary : "整个显示器"
                             color: root.theme.text
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 12
+                            font.pixelSize: 14
                         }
 
                         Text {
@@ -164,7 +164,7 @@ Item {
                             text: "仅显示已配置的几何关系，不是实时画面"
                             color: root.theme.textDim
                             font.family: root.theme.uiFontFor(text)
-                            font.pixelSize: 11
+                            font.pixelSize: 13
                         }
                     }
                 }

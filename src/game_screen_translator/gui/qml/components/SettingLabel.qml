@@ -16,7 +16,7 @@ ColumnLayout {
         text: root.title
         color: root.theme.text
         font.family: root.theme.uiFontFor(text)
-        font.pixelSize: 13
+        font.pixelSize: 15
         font.weight: Font.Medium
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
@@ -26,7 +26,7 @@ ColumnLayout {
         text: root.meta
         color: root.theme.textDim
         font.family: root.theme.monoFontFor(text)
-        font.pixelSize: 9
+        font.pixelSize: 12
         font.letterSpacing: 0.7
         wrapMode: Text.WrapAnywhere
         Layout.fillWidth: true

@@ -72,7 +72,7 @@ Item {
                                     text: modelData.label
                                     color: root.theme.textDim
                                     font.family: root.theme.uiFontFor(text)
-                                    font.pixelSize: 11
+                                    font.pixelSize: 13
                                 }
                             }
                         }
@@ -151,7 +151,7 @@ Item {
                                         text: modelData.sourceText
                                         color: root.theme.text
                                         font.family: root.theme.uiFontFor(text)
-                                        font.pixelSize: 13
+                                        font.pixelSize: 15
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
                                     }
@@ -159,7 +159,7 @@ Item {
                                         text: String(modelData.hits) + " 次"
                                         color: root.theme.accent
                                         font.family: root.theme.monoFontFor(text)
-                                        font.pixelSize: 12
+                                        font.pixelSize: 14
                                     }
                                 }
                             }
@@ -170,7 +170,7 @@ Item {
                         text: "上方为 Profile SQLite 累计统计；上次运行命中列表仅代表最近一次运行。"
                         color: root.theme.textDim
                         font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 11
+                        font.pixelSize: 13
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
@@ -256,7 +256,7 @@ Item {
                             text: root.workbench.profileDirectory
                             color: root.theme.textDim
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 9
+                            font.pixelSize: 12
                             elide: Text.ElideMiddle
                             Layout.fillWidth: true
                         }

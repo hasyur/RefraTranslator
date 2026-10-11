@@ -104,7 +104,7 @@ Item {
             text: "为不同游戏保存独立的区域、术语与提示词。"
             color: root.theme.textSoft
             font.family: root.theme.uiFontFor(text)
-            font.pixelSize: 13
+            font.pixelSize: 15
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
@@ -133,6 +133,7 @@ Item {
         PrismPanel {
             objectName: "homePrimaryPanel"
             theme: root.theme
+            padding: root.compactOverview ? 16 : 22
             motionRole: "primary"
             transitionSerial: root.transitionSerial
             motionEnabled: root.pageMotionEnabled && root.visible
@@ -154,7 +155,7 @@ Item {
                     objectName: "homePrimaryContent"
                     width: parent.width
                     height: implicitHeight
-                    spacing: root.compactOverview ? 8 : 18
+                    spacing: root.compactOverview ? 4 : 14
 
                 SectionHeader {
                     theme: root.theme
@@ -181,7 +182,7 @@ Item {
                         text: root.workbench.currentProfileName
                         color: root.theme.textSoft
                         font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: root.compactOverview ? 16 : 18
+                        font.pixelSize: root.compactOverview ? 18 : 20
                         font.weight: Font.Medium
                     }
                 }
@@ -217,7 +218,7 @@ Item {
                                 text: "OCR"
                                 color: root.theme.accentText
                                 font.family: root.theme.monoFontFor(text)
-                                font.pixelSize: 11
+                                font.pixelSize: 13
                                 font.letterSpacing: 1.4
                             }
                             Text {
@@ -234,7 +235,7 @@ Item {
                                 text: root.workbench.detectionQualitySummary
                                 color: root.theme.textSoft
                                 font.family: root.theme.monoFontFor(text)
-                                font.pixelSize: 10
+                                font.pixelSize: 12
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
@@ -266,7 +267,7 @@ Item {
                                 text: "TRANSLATION"
                                 color: root.theme.spectrumText
                                 font.family: root.theme.monoFontFor(text)
-                                font.pixelSize: 11
+                                font.pixelSize: 13
                                 font.letterSpacing: 1.4
                             }
                             Text {
@@ -283,7 +284,7 @@ Item {
                                 text: root.workbench.backend === "builtin" ? root.workbench.builtinModel : root.workbench.model
                                 color: root.theme.textSoft
                                 font.family: root.theme.monoFontFor(text)
-                                font.pixelSize: 10
+                                font.pixelSize: 12
                                 elide: Text.ElideMiddle
                                 Layout.fillWidth: true
                             }
@@ -320,13 +321,13 @@ Item {
                         objectName: "homeLastRunMetricsContent"
                         anchors.fill: parent
                         anchors.margins: 16
-                        spacing: 12
+                        spacing: root.compactOverview ? 8 : 12
                         Text {
                             objectName: "homeLastRunStatus"
                             text: root.workbench.lastRunStatus
                             color: root.theme.accent
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 11
+                            font.pixelSize: 13
                             font.letterSpacing: 1.1
                             Layout.fillWidth: true
                         }
@@ -349,7 +350,7 @@ Item {
                                         text: "OCR 峰值"
                                         color: root.theme.textSoft
                                         font.family: root.theme.uiFontFor(text)
-                                        font.pixelSize: 12
+                                        font.pixelSize: 14
                                     }
                                     Rectangle {
                                         Layout.fillWidth: true
@@ -382,7 +383,7 @@ Item {
                                         text: "LLM 峰值"
                                         color: root.theme.textSoft
                                         font.family: root.theme.uiFontFor(text)
-                                        font.pixelSize: 12
+                                        font.pixelSize: 14
                                     }
                                     Rectangle {
                                         Layout.fillWidth: true
@@ -407,7 +408,7 @@ Item {
                             text: "仅统计上次正常且有效运行；未产生的单项显示“未产生”。"
                             color: root.theme.textDim
                             font.family: root.theme.uiFontFor(text)
-                            font.pixelSize: 12
+                            font.pixelSize: 14
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
@@ -548,7 +549,7 @@ Item {
                     text: "Dohna 使用固定的明亮配色"
                     color: root.theme.amber
                     font.family: root.theme.uiFontFor(text)
-                    font.pixelSize: 11
+                    font.pixelSize: 13
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
@@ -608,7 +609,7 @@ Item {
                             text: root.workbench.hotkeyPreference
                             color: root.theme.text
                             font.family: root.theme.uiFontFor(text)
-                            font.pixelSize: 13
+                            font.pixelSize: 15
                             verticalAlignment: Text.AlignVCenter
                             elide: Text.ElideRight
                         }
@@ -650,7 +651,7 @@ Item {
                     text: "正在录制：按下包含修饰键的组合；Esc 取消"
                     color: root.theme.amber
                     font.family: root.theme.uiFontFor(text)
-                    font.pixelSize: 11
+                    font.pixelSize: 13
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
@@ -688,7 +689,7 @@ Item {
                           : "先创建配置，之后才能保存区域、术语和人工修订。"
                     color: root.workbench.hasProfile ? root.theme.textDim : root.theme.amber
                     font.family: root.theme.uiFontFor(text)
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }

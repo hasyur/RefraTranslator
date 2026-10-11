@@ -30,7 +30,7 @@ Item {
             text: "将删除当前选择的模型文件并释放磁盘空间。运行时文件不会被删除。\n\n模型：" + root.workbench.builtinModel
             color: root.theme.text
             font.family: root.theme.uiFontFor(text)
-            font.pixelSize: 13
+            font.pixelSize: 15
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
@@ -90,7 +90,7 @@ Item {
                             text: root.workbench.lastRunStatus
                             color: root.theme.accent
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 10
+                            font.pixelSize: 12
                             Layout.fillWidth: true
                         }
                         Repeater {
@@ -109,7 +109,7 @@ Item {
                                         text: modelData.sourceText
                                         color: root.theme.textDim
                                         font.family: root.theme.uiFontFor(text)
-                                        font.pixelSize: 12
+                                        font.pixelSize: 14
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
                                     }
@@ -118,7 +118,7 @@ Item {
                                         text: modelData.translatedText
                                         color: root.theme.text
                                         font.family: root.theme.uiFontFor(text)
-                                        font.pixelSize: 14
+                                        font.pixelSize: 16
                                         wrapMode: Text.WordWrap
                                         Layout.fillWidth: true
                                     }
@@ -141,7 +141,7 @@ Item {
                             text: "连接状态"
                             color: root.theme.accent
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 10
+                            font.pixelSize: 12
                             font.letterSpacing: 1
                         }
                         Text {
@@ -150,7 +150,7 @@ Item {
                                   : root.workbench.connectionState
                             color: root.theme.textSoft
                             font.family: root.theme.uiFontFor(text)
-                            font.pixelSize: 12
+                            font.pixelSize: 14
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
@@ -284,7 +284,7 @@ Item {
                                     text: root.workbench.localModelStatus
                                     color: root.theme.textSoft
                                     font.family: root.theme.uiFontFor(text)
-                                    font.pixelSize: 11
+                                    font.pixelSize: 13
                                     wrapMode: Text.WordWrap
                                     Layout.fillWidth: true
                                 }
@@ -394,7 +394,7 @@ Item {
                                     text: root.workbench.builtinContextSummary
                                     color: root.theme.textDim
                                     font.family: root.theme.monoFontFor(text)
-                                    font.pixelSize: 10
+                                    font.pixelSize: 12
                                     wrapMode: Text.WordWrap
                                     Layout.fillWidth: true
                                 }
@@ -552,7 +552,7 @@ Item {
                                 selectionColor: root.theme.accent
                                 selectedTextColor: root.theme.ink
                                 font.family: root.theme.uiFontFor(text)
-                                font.pixelSize: 12
+                                font.pixelSize: 14
                                 wrapMode: TextEdit.Wrap
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 116

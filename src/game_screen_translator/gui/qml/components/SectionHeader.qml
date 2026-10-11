@@ -16,7 +16,7 @@ RowLayout {
         text: root.title
         color: root.theme.text
         font.family: root.theme.displayFontFor(text)
-        font.pixelSize: 16
+        font.pixelSize: 18
         font.weight: Font.DemiBold
         font.letterSpacing: 2
     }
@@ -32,7 +32,7 @@ RowLayout {
         text: root.meta
         color: root.theme.accentText
         font.family: root.theme.monoFontFor(text)
-        font.pixelSize: 10
+        font.pixelSize: 12
         font.letterSpacing: 1
     }
 }

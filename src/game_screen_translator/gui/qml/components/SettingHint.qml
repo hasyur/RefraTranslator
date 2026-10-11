@@ -159,7 +159,7 @@ HoverHandler {
             text: root.description
             color: root.theme.text
             font.family: root.theme.uiFontFor(text)
-            font.pixelSize: 12
+            font.pixelSize: 14
             wrapMode: Text.WordWrap
             clip: true
             width: root.hintPopup.width

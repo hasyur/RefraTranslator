@@ -25,7 +25,7 @@ ComboBox {
     leftPadding: 12
     rightPadding: 34
     font.family: root.theme.uiFontFor(root.displayText)
-    font.pixelSize: 13
+    font.pixelSize: 15
     hoverEnabled: true
 
     contentItem: Text {
@@ -43,7 +43,7 @@ ComboBox {
         y: (root.height - height) / 2
         text: "⌄"
         color: root.theme.dohna ? root.theme.ink : root.theme.accentText
-        font.pixelSize: 16
+        font.pixelSize: 18
     }
 
     background: Rectangle {

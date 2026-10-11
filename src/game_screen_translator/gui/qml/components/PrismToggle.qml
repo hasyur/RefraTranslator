@@ -110,7 +110,7 @@ CheckBox {
         text: root.text
         color: root.enabled ? root.theme.text : root.theme.textDim
         font.family: root.theme.uiFontFor(text)
-        font.pixelSize: 13
+        font.pixelSize: 15
         verticalAlignment: Text.AlignVCenter
         wrapMode: Text.WordWrap
     }
