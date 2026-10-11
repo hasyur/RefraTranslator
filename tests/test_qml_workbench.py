@@ -35,7 +35,11 @@ from game_screen_translator.gui import qml_workbench as host_module
 from game_screen_translator.gui import runtime as runtime_module
 from game_screen_translator.gui import workbench_controller as controller_module
 from game_screen_translator.gui.qml_workbench import QmlWorkbenchHost
-from game_screen_translator.gui.theme import SKIN_DOHNA, SKIN_PRISM
+from game_screen_translator.gui.theme import (
+    SKIN_DOHNA,
+    SKIN_PRISM,
+    load_gui_preferences,
+)
 from game_screen_translator.gui.workbench_controller import WorkbenchController
 from game_screen_translator.live.latency import LiveLatencyStats
 from game_screen_translator.live.snapshot import CacheHit, SnapshotEntry, new_snapshot, save_snapshot
@@ -448,6 +452,147 @@ def test_host_hotkey_starts_once_and_ignores_an_already_running_live_process() -
     host._start_live_from_hotkey()
     assert controller.start_count == 1
     host.shutdown()
+
+
+def _real_home_hotkey_host(
+    tmp_path: Path,
+) -> tuple[QApplication, WorkbenchController, QmlWorkbenchHost, QQuickWindow]:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+    window = host.window
+    assert window is not None
+    return app, controller, host, window
+
+
+def _begin_home_hotkey_recording(window: QQuickWindow) -> tuple[QObject, QObject]:
+    record_button = window.findChild(QObject, "homeHotkeyRecordButton")
+    recording_hint = window.findChild(QObject, "homeHotkeyRecordingHint")
+    assert record_button is not None
+    assert recording_hint is not None
+    assert QMetaObject.invokeMethod(record_button, "click") is True
+    QCoreApplication.processEvents()
+    assert recording_hint.property("visible") is True
+    assert record_button.property("text") == "按下组合键…"
+    return record_button, recording_hint
+
+
+def test_home_hotkey_recording_normalizes_and_escape_cancels(
+    tmp_path: Path,
+) -> None:
+    app, controller, host, window = _real_home_hotkey_host(tmp_path)
+    field = window.findChild(QObject, "homeHotkeyField")
+    display = window.findChild(QObject, "homeHotkeyDisplay")
+    assert field is not None
+    assert display is not None
+    try:
+        record_button, recording_hint = _begin_home_hotkey_recording(window)
+        QTest.keyClick(
+            window,
+            Qt.Key.Key_T,
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+        )
+        app.processEvents()
+
+        assert controller.hotkeyPreference == "Ctrl+Shift+T"
+        assert display.property("text") == "Ctrl+Shift+T"
+        assert load_gui_preferences(
+            controller._config_path,
+        ).hotkey == "Ctrl+Shift+T"
+        recording_hint = window.findChild(QObject, "homeHotkeyRecordingHint")
+        assert recording_hint is not None
+        assert recording_hint.property("visible") is False
+        assert record_button.property("text") == "录制快捷键"
+
+        old_value = controller.hotkeyPreference
+        record_button, recording_hint = _begin_home_hotkey_recording(window)
+        QTest.keyClick(window, Qt.Key.Key_Escape)
+        app.processEvents()
+        assert controller.hotkeyPreference == old_value
+        assert display.property("text") == old_value
+        assert recording_hint.property("visible") is False
+        assert record_button.property("text") == "录制快捷键"
+    finally:
+        host.shutdown()
+
+
+def test_home_hotkey_recording_conflict_keeps_old_value_and_reports_error(
+    tmp_path: Path,
+) -> None:
+    app, controller, host, window = _real_home_hotkey_host(tmp_path)
+    display = window.findChild(QObject, "homeHotkeyDisplay")
+    assert display is not None
+    errors: list[tuple[str, str]] = []
+    controller.errorRaised.connect(
+        lambda title, message: errors.append((title, message)),
+    )
+
+    def reject_hotkey(_value: str) -> None:
+        raise runtime_module.GuiRuntimeError("快捷键已被其他程序占用")
+
+    controller.set_hotkey_registrar(reject_hotkey)
+    try:
+        _begin_home_hotkey_recording(window)
+        QTest.keyClick(
+            window,
+            Qt.Key.Key_G,
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier,
+        )
+        app.processEvents()
+
+        assert controller.hotkeyPreference == "Ctrl+Alt+T"
+        assert display.property("text") == "Ctrl+Alt+T"
+        assert errors == [("保存全局快捷键失败", "快捷键已被其他程序占用")]
+        error_dialog = window.findChild(QObject, "errorDialog")
+        assert error_dialog is not None
+        assert error_dialog.property("errorMessage") == "快捷键已被其他程序占用"
+    finally:
+        host.shutdown()
+
+
+def test_home_hotkey_default_button_restores_default_and_updates_display(
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setHotkey("Ctrl+Shift+T")
+    host = QmlWorkbenchHost(controller, application=app)
+    host.show()
+    app.processEvents()
+    window = host.window
+    assert window is not None
+    display = window.findChild(QObject, "homeHotkeyDisplay")
+    default_button = window.findChild(QObject, "homeHotkeyDefaultButton")
+    assert display is not None
+    assert default_button is not None
+    try:
+        assert display.property("text") == "Ctrl+Shift+T"
+        assert QMetaObject.invokeMethod(default_button, "click") is True
+        app.processEvents()
+        assert controller.hotkeyPreference == "Ctrl+Alt+T"
+        assert display.property("text") == "Ctrl+Alt+T"
+        assert load_gui_preferences(config_path).hotkey == "Ctrl+Alt+T"
+    finally:
+        host.shutdown()
 
 
 def test_host_tray_recalls_workbench_and_running_close_returns_to_tray() -> None:

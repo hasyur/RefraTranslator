@@ -13,6 +13,75 @@ Item {
     readonly property bool compactOverview: height < 580
     readonly property var themeValues: ["system", "dark", "light"]
     readonly property var skinValues: ["prism", "dohna"]
+    property bool hotkeyRecording: false
+
+    function hotkeyKeyName(key) {
+        if (key >= Qt.Key_A && key <= Qt.Key_Z)
+            return String.fromCharCode(key)
+        if (key >= Qt.Key_0 && key <= Qt.Key_9)
+            return String.fromCharCode(key)
+        if (key >= Qt.Key_F1 && key <= Qt.Key_F24)
+            return "F" + (key - Qt.Key_F1 + 1)
+        if (key === Qt.Key_Space)
+            return "Space"
+        if (key === Qt.Key_Tab)
+            return "Tab"
+        if (key === Qt.Key_Return || key === Qt.Key_Enter)
+            return "Enter"
+        if (key === Qt.Key_Escape || key === Qt.Key_Backspace
+                || key === Qt.Key_Control || key === Qt.Key_Alt
+                || key === Qt.Key_Shift || key === Qt.Key_Meta)
+            return ""
+        if (key === Qt.Key_Insert)
+            return "Insert"
+        if (key === Qt.Key_Delete)
+            return "Delete"
+        if (key === Qt.Key_Home)
+            return "Home"
+        if (key === Qt.Key_End)
+            return "End"
+        if (key === Qt.Key_PageUp)
+            return "PageUp"
+        if (key === Qt.Key_PageDown)
+            return "PageDown"
+        if (key === Qt.Key_Left)
+            return "Left"
+        if (key === Qt.Key_Right)
+            return "Right"
+        if (key === Qt.Key_Up)
+            return "Up"
+        if (key === Qt.Key_Down)
+            return "Down"
+        return ""
+    }
+
+    function recordHotkey(event) {
+        if (!root.hotkeyRecording)
+            return
+        event.accepted = true
+        if (event.isAutoRepeat)
+            return
+        if (event.key === Qt.Key_Escape) {
+            root.hotkeyRecording = false
+            return
+        }
+        var keyName = root.hotkeyKeyName(event.key)
+        if (keyName.length === 0)
+            return
+        var modifiers = []
+        if ((event.modifiers & Qt.ControlModifier) !== 0)
+            modifiers.push("Ctrl")
+        if ((event.modifiers & Qt.AltModifier) !== 0)
+            modifiers.push("Alt")
+        if ((event.modifiers & Qt.ShiftModifier) !== 0)
+            modifiers.push("Shift")
+        if ((event.modifiers & Qt.MetaModifier) !== 0)
+            modifiers.push("Win")
+        if (modifiers.length === 0)
+            return
+        root.hotkeyRecording = false
+        root.workbench.setHotkey(modifiers.join("+") + "+" + keyName)
+    }
 
     PrismDialog {
         id: createProfileDialog
@@ -508,16 +577,80 @@ Item {
                     settingKey: "home-hotkey"
                     Layout.topMargin: 4
                 }
-                PrismTextField {
+                Item {
+                    id: hotkeyField
                     objectName: "homeHotkeyField"
-                    theme: root.theme
-                    accessibleName: "全局翻译快捷键"
-                    settingDescription: "例如 Ctrl+Alt+T；需要包含修饰键。"
-                    settingKey: "home-hotkey"
-                    text: root.workbench.hotkeyPreference
-                    placeholderText: "Ctrl+Alt+T"
                     Layout.fillWidth: true
-                    onEditingFinished: root.workbench.setHotkey(text)
+                    Layout.preferredHeight: 42
+                    focus: root.hotkeyRecording
+                    activeFocusOnTab: true
+                    Accessible.name: "全局翻译快捷键"
+                    Keys.onPressed: event => root.recordHotkey(event)
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: root.theme.inputSurface
+                        border.color: hotkeyField.activeFocus
+                                      ? root.theme.selectionEdge
+                                      : root.theme.lineStrong
+                        border.width: hotkeyField.activeFocus ? 2 : 1
+                        clip: !root.theme.dohna
+
+                        Text {
+                            objectName: "homeHotkeyDisplay"
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            text: root.workbench.hotkeyPreference
+                            color: root.theme.text
+                            font.family: root.theme.uiFontFor(text)
+                            font.pixelSize: 13
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    SettingHint {
+                        theme: root.theme
+                        target: hotkeyField
+                        description: "例如 Ctrl+Alt+T；需要包含修饰键。"
+                        settingKey: "home-hotkey"
+                    }
+                }
+                Text {
+                    objectName: "homeHotkeyRecordingHint"
+                    visible: root.hotkeyRecording
+                    text: "正在录制：按下包含修饰键的组合；Esc 取消"
+                    color: root.theme.amber
+                    font.family: root.theme.uiFontFor(text)
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    PrismButton {
+                        objectName: "homeHotkeyRecordButton"
+                        theme: root.theme
+                        primary: root.hotkeyRecording
+                        text: root.hotkeyRecording ? "按下组合键…" : "录制快捷键"
+                        Layout.fillWidth: true
+                        onClicked: {
+                            root.hotkeyRecording = true
+                            hotkeyField.forceActiveFocus()
+                        }
+                    }
+                    PrismButton {
+                        objectName: "homeHotkeyDefaultButton"
+                        theme: root.theme
+                        text: "恢复默认"
+                        Layout.fillWidth: true
+                        onClicked: {
+                            root.hotkeyRecording = false
+                            root.workbench.setHotkey("Ctrl+Alt+T")
+                        }
+                    }
                 }
 
                 Item { Layout.fillHeight: true }
