@@ -311,9 +311,15 @@ def activate_existing_window(
         deadline = time.monotonic() + max(0.0, timeout_seconds)
         interval = max(0.0, retry_interval_seconds)
         while True:
-            hwnd = user32.FindWindowW(None, ACTIVATION_WINDOW_TITLE)
-            if hwnd and user32.PostMessageW(hwnd, ACTIVATION_MESSAGE, 0, 0):
-                return True
+            # Qt appends QApplication's display name to native Windows titles.
+            # FindWindowW sees that caption, rather than QWidget.windowTitle().
+            for title in (
+                ACTIVATION_WINDOW_TITLE,
+                f"{ACTIVATION_WINDOW_TITLE} - {PRODUCT_NAME}",
+            ):
+                hwnd = user32.FindWindowW(None, title)
+                if hwnd and user32.PostMessageW(hwnd, ACTIVATION_MESSAGE, 0, 0):
+                    return True
             remaining = deadline - time.monotonic()
             if remaining <= 0 or interval <= 0:
                 return False

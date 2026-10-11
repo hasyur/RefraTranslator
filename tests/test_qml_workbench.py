@@ -4,6 +4,8 @@ import ctypes
 import math
 import os
 import re
+import subprocess
+import sys
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -30,6 +32,7 @@ from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
 
+from game_screen_translator.branding import PRODUCT_NAME
 from game_screen_translator.config import load_config
 from game_screen_translator.gui import qml_workbench as host_module
 from game_screen_translator.gui import runtime as runtime_module
@@ -1265,6 +1268,120 @@ def test_second_instance_stop_failure_restores_window_and_reports_error() -> Non
         ]
     finally:
         host.shutdown()
+
+
+def _recall_native_workbench_from_second_launcher(
+    initial_state: str,
+    tmp_path: Path,
+) -> None:
+    """Exercise native Qt in a child, without changing the test application's state."""
+
+    app = _application()
+    assert app.platformName().lower() == "windows"
+    app.setApplicationName(PRODUCT_NAME)
+    app.setApplicationDisplayName(PRODUCT_NAME)
+    target_title = f"{runtime_module.ACTIVATION_WINDOW_TITLE} test {os.getpid()} {initial_state}"
+    mutex_name = f"Local\\{PRODUCT_NAME}.GUI.test.{os.getpid()}.{initial_state}"
+    runtime_module.ACTIVATION_WINDOW_TITLE = target_title
+    host_module.ACTIVATION_WINDOW_TITLE = target_title
+    guard = runtime_module.SingleInstanceGuard(mutex_name)
+    controller = _ActivationController() if initial_state == "running" else _ControllerStub()
+    tray = _TrayRecorder()
+    host = None
+    process = None
+    try:
+        assert guard.acquire()
+        host, _engine = _host(controller, tray_factory=lambda _app: tray)
+        host.show()
+        if initial_state == "running":
+            controller.liveReady.emit()
+        elif initial_state == "tray":
+            host.hide_to_tray()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+        child_script = """
+import sys
+from game_screen_translator import gui_entry
+from game_screen_translator.gui import runtime
+runtime.ACTIVATION_WINDOW_TITLE = sys.argv[1]
+gui_entry.SingleInstanceGuard = lambda: runtime.SingleInstanceGuard(sys.argv[2])
+gui_entry._show_failure = lambda message: print(message, flush=True)
+def unexpected_worker(*args, **kwargs):
+    raise AssertionError("second launcher must not start another worker")
+gui_entry._run_owned = unexpected_worker
+raise SystemExit(gui_entry.run())
+"""
+        process = subprocess.Popen(
+            [sys.executable, "-s", "-X", "utf8", "-c", child_script, target_title, mutex_name],
+            cwd=tmp_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        deadline = time.monotonic() + 5.0
+        while process.poll() is None and time.monotonic() < deadline:
+            app.processEvents()
+            QTest.qWait(1)
+        output, _ = process.communicate(timeout=1.0)
+        assert process.returncode == 0, output
+        app.processEvents()
+        if initial_state == "running":
+            assert controller.stop_count == 1
+            assert controller.runPhase == "stopping"
+            assert host.window is None
+            controller.running = False
+            controller.runPhase = "stopped"
+            controller.liveFinished.emit()
+        else:
+            assert controller.stop_count == 0
+        assert host.window is not None
+        assert host.window.isVisible()
+        assert tray.visible is False
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5.0)
+        if host is not None:
+            host.shutdown()
+        guard.release()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires native Windows Qt windows")
+@pytest.mark.parametrize("initial_state", ("visible", "tray", "running"))
+def test_second_launcher_recalls_native_workbench_with_application_display_name(
+    initial_state: str,
+    tmp_path: Path,
+) -> None:
+    environment = os.environ.copy()
+    environment.update(
+        QT_QPA_PLATFORM="windows",
+        QT_PLUGIN_PATH="",
+        QT_QPA_PLATFORM_PLUGIN_PATH="",
+        QT_QUICK_BACKEND="software",
+    )
+    child_script = """
+import runpy
+import sys
+from pathlib import Path
+tests = runpy.run_path(sys.argv[1])
+tests["_recall_native_workbench_from_second_launcher"](sys.argv[2], Path(sys.argv[3]))
+"""
+    result = subprocess.run(
+        [sys.executable, "-s", "-X", "utf8", "-c", child_script,
+         str(Path(__file__).resolve()), initial_state, str(tmp_path)],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        timeout=15.0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.skipif(

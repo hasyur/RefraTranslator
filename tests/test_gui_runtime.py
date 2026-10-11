@@ -197,6 +197,42 @@ def test_activation_timeout_is_reported_without_starting_another_worker(
     ]
 
 
+def test_activation_finds_qt_native_title_with_application_display_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class NativeFunction:
+        def __init__(self, callback):
+            self._callback = callback
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            return self._callback(*args)
+
+    native_title = f"{runtime.ACTIVATION_WINDOW_TITLE} - {runtime.PRODUCT_NAME}"
+    searched: list[str] = []
+    posted: list[tuple[int, int]] = []
+
+    def find_window(_class_name, title):
+        searched.append(title)
+        return 123 if title == native_title else 0
+
+    def post_message(hwnd, message, _wparam, _lparam):
+        posted.append((hwnd, message))
+        return True
+
+    user32 = SimpleNamespace(
+        FindWindowW=NativeFunction(find_window),
+        PostMessageW=NativeFunction(post_message),
+    )
+    monkeypatch.setattr(runtime.sys, "platform", "win32")
+    monkeypatch.setattr(runtime.ctypes, "windll", SimpleNamespace(user32=user32))
+
+    assert runtime.activate_existing_window(timeout_seconds=0)
+    assert searched == [runtime.ACTIVATION_WINDOW_TITLE, native_title]
+    assert posted == [(123, runtime.ACTIVATION_MESSAGE)]
+
+
 def test_hotkey_registration_reports_windows_conflict_without_external_io(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
