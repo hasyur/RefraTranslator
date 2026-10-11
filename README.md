@@ -44,6 +44,7 @@ nvidia-smi
 - 检查 Python 版本；
 - 在项目目录创建独立的 `.venv` 虚拟环境；
 - 安装图形界面、NVIDIA GPU OCR 和项目依赖；
+- 更新时先检查已有 Paddle GPU 和 CUDA 能否正常运算；可用且版本兼容时直接复用，跳过 GPU 大包下载，否则重新安装；
 - 首次安装时从 `config.example.toml` 创建本机 `config.toml`，再次安装时保留已有配置；
 - 安装成功后清理 `.cache\pip` 中的安装下载缓存。
 
@@ -90,6 +91,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
 ```
 
 `bootstrap.ps1` 还支持 `-KeepInstallCache` 保留安装下载缓存；普通用户无需使用这些参数。
+
+通过 ZIP 安装的用户更新时，可先退出程序并备份旧目录，再将新版 ZIP 解压后的文件覆盖到原安装目录，保留 `.venv`、`.cache`、`config.toml`、`.gui-settings.toml`、`profiles` 和 `output`，然后再次双击 `install.bat`。已有可用的 Paddle GPU 和 CUDA 环境会复用；翻译模型和 OCR 模型缓存也会保留。默认安装会保留兼容的现有 CUDA 版本；显式指定 `-GpuCuda` 时，安装程序会检查版本是否匹配，必要时安装指定版本。
 
 ## 常见问题
 

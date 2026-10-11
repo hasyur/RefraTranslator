@@ -15,6 +15,10 @@ $configTemplate = Join-Path $projectRoot "config.example.toml"
 $localConfig = Join-Path $projectRoot "config.toml"
 
 $installGpuOcr = $WithGui -or $WithGpuOcr
+$requestedGpuCuda = ""
+if ($PSBoundParameters.ContainsKey("GpuCuda")) {
+    $requestedGpuCuda = $GpuCuda
+}
 
 if ($installGpuOcr) {
     Write-Host "OCR installation selected: NVIDIA GPU ($GpuCuda)"
@@ -136,6 +140,64 @@ function Invoke-VenvPython {
     }
 }
 
+function Test-ExistingPaddleGpu {
+    param([string]$ExpectedCuda = "")
+
+    # Probe in a child process so a broken DLL/import cannot abort the installer.
+    # Match the application's DLL search paths before importing Paddle.
+    $probe = @'
+import importlib.metadata
+import os
+from pathlib import Path
+import sys
+
+version = importlib.metadata.version("paddlepaddle-gpu")
+version_parts = tuple(map(int, version.split(".")))
+if len(version_parts) != 3 or not (3, 3, 1) <= version_parts < (3, 4, 0):
+    raise RuntimeError("Unsupported Paddle GPU version: " + version)
+try:
+    importlib.metadata.version("paddlepaddle")
+except importlib.metadata.PackageNotFoundError:
+    pass
+else:
+    raise RuntimeError("Conflicting CPU Paddle package is installed")
+
+dll_handles = []
+if os.name == "nt":
+    directories = sorted((Path(sys.prefix) / "Lib/site-packages/nvidia").glob("*/bin"))
+    for directory in directories:
+        if directory.is_dir():
+            dll_handles.append(os.add_dll_directory(str(directory)))
+            os.environ["PATH"] = str(directory) + os.pathsep + os.environ.get("PATH", "")
+
+import paddle
+if not paddle.device.is_compiled_with_cuda() or paddle.device.cuda.device_count() < 1:
+    raise RuntimeError("No usable Paddle CUDA device")
+cuda_version = str(paddle.version.cuda())
+expected_cuda = sys.argv[1] if len(sys.argv) > 1 else ""
+if expected_cuda and "cu" + cuda_version.replace(".", "") != expected_cuda:
+    raise RuntimeError("Existing CUDA version does not match " + expected_cuda)
+tensor = paddle.to_tensor([1.0], dtype="float32", place=paddle.CUDAPlace(0))
+if float((tensor + tensor).numpy()[0]) != 2.0:
+    raise RuntimeError("Paddle CUDA computation failed")
+print("Paddle GPU " + version + " / CUDA " + cuda_version + " is usable")
+'@
+    try {
+        # Keep diagnostic output separate from the boolean function result.
+        # PowerShell 5.1 turns native stderr into error records; warnings alone
+        # must not prevent reuse. This preference is local to the function.
+        $ErrorActionPreference = "Continue"
+        $probeOutput = $probe | & $venvPython -s - $ExpectedCuda 2>&1
+        $usable = $LASTEXITCODE -eq 0
+        $probeOutput | ForEach-Object { Write-Host $_ }
+        return $usable
+    }
+    catch {
+        Write-Host "Existing Paddle GPU check failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 function Clear-PipInstallCache {
     param(
         [Parameter(Mandatory = $true)]
@@ -205,20 +267,27 @@ if ($extras.Count -gt 0) {
 $env:PIP_REQUIRE_VIRTUALENV = "true"
 Invoke-VenvPython -m pip install --cache-dir $pipCache --upgrade pip
 if ($installGpuOcr) {
-    $gpuIndex = "https://www.paddlepaddle.org.cn/packages/stable/$GpuCuda/"
-    $gpuWheelDir = Join-Path $pipCache "gpu"
-    New-Item -ItemType Directory -Force -Path $gpuWheelDir | Out-Null
-    Invoke-VenvPython -m pip download --cache-dir $pipCache `
-        --no-deps --index-url $gpuIndex --dest $gpuWheelDir `
-        "paddlepaddle-gpu==3.3.1"
-    $gpuWheels = @(
-        Get-ChildItem -LiteralPath $gpuWheelDir -Filter "paddlepaddle_gpu-3.3.1-*.whl" |
-            Sort-Object LastWriteTime -Descending
-    )
-    if ($gpuWheels.Count -eq 0) { throw "The downloaded Paddle GPU wheel was not found" }
-    $gpuWheelPath = $gpuWheels[0].FullName
-    Invoke-VenvPython -m pip uninstall --yes paddlepaddle
-    Invoke-VenvPython -m pip install --cache-dir $pipCache $gpuWheelPath
+    if (Test-ExistingPaddleGpu -ExpectedCuda $requestedGpuCuda) {
+        Write-Host "Reusing existing Paddle GPU and CUDA; skipping GPU package download"
+    }
+    else {
+        Write-Host "Installing Paddle GPU ($GpuCuda); existing runtime is unavailable or incompatible"
+        $gpuIndex = "https://www.paddlepaddle.org.cn/packages/stable/$GpuCuda/"
+        # CUDA variants can share a wheel filename; keep their caches separate.
+        $gpuWheelDir = Join-Path (Join-Path $pipCache "gpu") $GpuCuda
+        New-Item -ItemType Directory -Force -Path $gpuWheelDir | Out-Null
+        Invoke-VenvPython -m pip download --cache-dir $pipCache `
+            --no-deps --index-url $gpuIndex --dest $gpuWheelDir `
+            "paddlepaddle-gpu==3.3.1"
+        $gpuWheels = @(
+            Get-ChildItem -LiteralPath $gpuWheelDir -Filter "paddlepaddle_gpu-3.3.1-*.whl" |
+                Sort-Object LastWriteTime -Descending
+        )
+        if ($gpuWheels.Count -eq 0) { throw "The downloaded Paddle GPU wheel was not found" }
+        $gpuWheelPath = $gpuWheels[0].FullName
+        Invoke-VenvPython -m pip uninstall --yes paddlepaddle
+        Invoke-VenvPython -m pip install --cache-dir $pipCache --force-reinstall --no-deps $gpuWheelPath
+    }
 }
 Invoke-VenvPython -m pip install --cache-dir $pipCache --editable $installTarget
 
