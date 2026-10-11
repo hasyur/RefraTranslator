@@ -5,6 +5,8 @@ import pytest
 from game_screen_translator.gui.theme import (
     GuiPreferences,
     GuiSettingsError,
+    HOTKEY_BEHAVIOR_START_ONLY,
+    HOTKEY_BEHAVIOR_TOGGLE_SHOW,
     SKIN_DOHNA,
     SKIN_PRISM,
     THEME_DARK,
@@ -32,6 +34,23 @@ def test_old_gui_preferences_default_to_prism(tmp_path: Path) -> None:
     assert preferences == GuiPreferences(theme=THEME_DARK, skin=SKIN_PRISM)
     assert preferences.start_with_windows is False
     assert preferences.hotkey == DEFAULT_HOTKEY
+    assert preferences.hotkey_behavior == HOTKEY_BEHAVIOR_START_ONLY
+
+
+def test_existing_gui_behavior_preferences_default_missing_hotkey_behavior(
+    tmp_path: Path,
+) -> None:
+    config_path = _config(tmp_path / "config.toml")
+    (tmp_path / ".gui-settings.toml").write_text(
+        '[behavior]\nstart_with_windows = true\nhotkey = "Shift+Ctrl+T"\n',
+        encoding="utf-8",
+    )
+
+    preferences = load_gui_preferences(config_path)
+
+    assert preferences.start_with_windows is True
+    assert preferences.hotkey == "Ctrl+Shift+T"
+    assert preferences.hotkey_behavior == HOTKEY_BEHAVIOR_START_ONLY
 
 
 @pytest.mark.parametrize(
@@ -73,6 +92,7 @@ def test_gui_behavior_preferences_round_trip(tmp_path: Path) -> None:
         skin=SKIN_PRISM,
         start_with_windows=True,
         hotkey="Shift+Ctrl+T",
+        hotkey_behavior=HOTKEY_BEHAVIOR_TOGGLE_SHOW,
     )
 
     save_gui_preferences(config_path, preferences)
@@ -80,6 +100,7 @@ def test_gui_behavior_preferences_round_trip(tmp_path: Path) -> None:
     loaded = load_gui_preferences(config_path)
     assert loaded.start_with_windows is True
     assert loaded.hotkey == "Ctrl+Shift+T"
+    assert loaded.hotkey_behavior == HOTKEY_BEHAVIOR_TOGGLE_SHOW
 
 
 @pytest.mark.parametrize(
@@ -87,6 +108,8 @@ def test_gui_behavior_preferences_round_trip(tmp_path: Path) -> None:
     (
         '[behavior]\nstart_with_windows = "yes"\n',
         '[behavior]\nhotkey = "T"\n',
+        '[behavior]\nhotkey_behavior = "unknown"\n',
+        '[behavior]\nhotkey_behavior = true\n',
         '[behavior]\nunknown = true\n',
     ),
 )

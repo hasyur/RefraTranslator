@@ -21,6 +21,11 @@ from .runtime import (
     GuiRuntimeError,
     WindowsGlobalHotkey,
 )
+from .theme import (
+    HOTKEY_BEHAVIOR_START_ONLY,
+    HOTKEY_BEHAVIOR_TOGGLE,
+    HOTKEY_BEHAVIOR_TOGGLE_SHOW,
+)
 from .workbench_controller import WorkbenchController
 
 
@@ -283,6 +288,8 @@ class QmlWorkbenchHost(QObject):
         self._global_hotkey: WindowsGlobalHotkey | None = None
         self._activation_window: _ActivationWindow | None = None
         self._activation_restore_pending = False
+        self._hotkey_dispatch_in_progress = False
+        self._pending_hotkey_stop_behavior: str | None = None
 
         set_window_icon = getattr(self._application, "setWindowIcon", None)
         if callable(set_window_icon):
@@ -296,8 +303,8 @@ class QmlWorkbenchHost(QObject):
         controller.stateChanged.connect(self._sync_window_theme)
         controller.regionSelectionRequested.connect(self._open_region_selector)
         controller.liveReady.connect(self._hide_for_live)
-        controller.liveFinished.connect(self._restore_after_live)
-        controller.liveFailed.connect(self._restore_after_live)
+        controller.liveFinished.connect(self._finish_hotkey_stop)
+        controller.liveFailed.connect(self._fail_hotkey_stop)
         hide_requested = getattr(controller, "workbenchHideRequested", None)
         if hide_requested is not None and hasattr(hide_requested, "connect"):
             hide_requested.connect(self._hide_to_tray)
@@ -442,15 +449,62 @@ class QmlWorkbenchHost(QObject):
         hotkey.register(value)
 
     def _start_live_from_hotkey(self) -> None:
-        if self._shutdown_called:
+        if self._shutdown_called or self._hotkey_dispatch_in_progress:
             return
-        # A repeated native WM_HOTKEY while the live child is running is a
-        # deliberate no-op; it must not create a second translation process.
-        if bool(getattr(self._controller, "running", False)):
+
+        behavior = getattr(
+            self._controller,
+            "hotkeyBehaviorPreference",
+            HOTKEY_BEHAVIOR_START_ONLY,
+        )
+        if behavior not in {
+            HOTKEY_BEHAVIOR_START_ONLY,
+            HOTKEY_BEHAVIOR_TOGGLE,
+            HOTKEY_BEHAVIOR_TOGGLE_SHOW,
+        }:
+            behavior = HOTKEY_BEHAVIOR_START_ONLY
+
+        phase = self._hotkey_run_phase()
+        if phase in {"starting", "stopping"}:
             return
+        if phase == "running":
+            if behavior == HOTKEY_BEHAVIOR_START_ONLY:
+                return
+            self._stop_live_from_hotkey(behavior)
+            return
+
         start_live = getattr(self._controller, "startLive", None)
-        if callable(start_live):
+        if not callable(start_live):
+            return
+        # startLive() validates synchronously and pumps QApplication events
+        # before creating the child process. Keep a host-side guard around the
+        # whole call so a reentrant WM_HOTKEY cannot start a second session.
+        self._hotkey_dispatch_in_progress = True
+        try:
             start_live()
+        finally:
+            self._hotkey_dispatch_in_progress = False
+
+    def _hotkey_run_phase(self) -> str:
+        phase = getattr(self._controller, "runPhase", None)
+        if isinstance(phase, str):
+            return phase
+        return "running" if bool(getattr(self._controller, "running", False)) else "stopped"
+
+    def _stop_live_from_hotkey(self, behavior: str) -> None:
+        stop_live = getattr(self._controller, "stopLive", None)
+        if not callable(stop_live):
+            return
+        self._hotkey_dispatch_in_progress = True
+        self._pending_hotkey_stop_behavior = behavior
+        try:
+            stop_live()
+        finally:
+            # A failed shutdown request leaves the controller in running state;
+            # clear the host intent so a later hotkey can retry normally.
+            if self._hotkey_run_phase() != "stopping":
+                self._pending_hotkey_stop_behavior = None
+            self._hotkey_dispatch_in_progress = False
 
     def _set_quit_on_last_window_closed(self, enabled: bool) -> None:
         setter = getattr(self._application, "setQuitOnLastWindowClosed", None)
@@ -547,6 +601,35 @@ class QmlWorkbenchHost(QObject):
         activate = self._activation_restore_pending
         self._activation_restore_pending = False
         self._restore_workbench(activate=activate)
+
+    def _keep_hidden_after_live(self) -> None:
+        if self._shutdown_called:
+            return
+        self._set_quit_on_last_window_closed(False)
+        self._hidden_for_live = True
+        self._show_live_tray()
+
+    def _finish_hotkey_stop(self) -> None:
+        behavior = self._pending_hotkey_stop_behavior
+        self._pending_hotkey_stop_behavior = None
+        if self._activation_restore_pending:
+            self._restore_after_live()
+            return
+        if behavior == HOTKEY_BEHAVIOR_TOGGLE and self._window is None:
+            self._keep_hidden_after_live()
+            return
+        if behavior == HOTKEY_BEHAVIOR_TOGGLE_SHOW:
+            self._restore_after_live()
+            window = self._window
+            if window is not None:
+                window.raise_()
+                window.requestActivate()
+            return
+        self._restore_after_live()
+
+    def _fail_hotkey_stop(self) -> None:
+        self._pending_hotkey_stop_behavior = None
+        self._restore_after_live()
 
     def _open_region_selector(self, monitor_index: int) -> None:
         if self._shutdown_called:
