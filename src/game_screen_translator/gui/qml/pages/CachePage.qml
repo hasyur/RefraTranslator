@@ -198,7 +198,9 @@ Item {
             motionRole: "secondary"
             transitionSerial: root.transitionSerial
             motionEnabled: root.pageMotionEnabled && root.visible
+            Layout.fillWidth: true
             Layout.preferredWidth: 408
+            Layout.maximumWidth: 408
             Layout.minimumWidth: 370
             Layout.fillHeight: true
 

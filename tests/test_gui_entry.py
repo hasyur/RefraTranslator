@@ -8,6 +8,19 @@ import pytest
 from game_screen_translator import gui_entry
 
 
+@pytest.fixture(autouse=True)
+def _isolate_launcher_mutex(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Keep launcher tests independent of an already running user workbench.
+    guard_type = gui_entry.SingleInstanceGuard
+    mutex_name = (
+        f"Local\\RefraTranslator.GUI.test.{tmp_path.parent.name}.{tmp_path.name}"
+    )
+    monkeypatch.setattr(gui_entry, "SingleInstanceGuard", lambda: guard_type(mutex_name))
+
+
 def test_pythonw_entry_does_not_mirror_output_to_the_parent_console(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -288,7 +288,8 @@ def _wait_for_page_layout(
         else:
             stable_frames = 0
         previous_geometry = geometry
-        QTest.qWait(1)
+        # Allow a frame between samples so a queued layout polish can run.
+        QTest.qWait(20)
 
     raise AssertionError(
         "QML page/layout did not settle within "
@@ -5230,9 +5231,12 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
 )
 def test_workbench_text_is_readable_and_controls_fit_across_pages(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     skin: str,
     theme_name: str,
 ) -> None:
+    # Layout checks must not show a hotkey conflict dialog over the page.
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
     app = _application()
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
@@ -5257,13 +5261,35 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
             ("CACHE", "cacheSecondaryPanel"),
             ("SETTINGS", "settingsPrimaryPanel"),
         )
-        for width, height in ((980, 700), (1280, 820)):
+        # Shrink an already laid out wide window, then grow and shrink again.
+        for width, height in ((1280, 820), (980, 700), (1600, 900), (980, 700)):
             window.resize(max(width, window.minimumWidth()), height)
             for page, panel_name in pages:
                 controller.setPage(page)
                 panel = _find_quick_item(window, panel_name)
                 assert panel is not None, panel_name
                 _wait_for_page_layout(window, panel, app)
+                page_item = _find_quick_item(window, page.lower() + "Page")
+                assert page_item is not None, page
+                page_panels = [
+                    _find_quick_item(window, page.lower() + role + "Panel")
+                    for role in ("Primary", "Secondary")
+                ]
+                for page_panel in page_panels:
+                    assert page_panel is not None, page
+                    origin = page_panel.mapToItem(page_item, QPointF(0, 0))
+                    assert origin.x() >= -0.5, (page, page_panel.objectName())
+                    assert origin.x() + page_panel.width() <= page_item.width() + 0.5, (
+                        page, page_panel.objectName(), window.width(),
+                        origin.x(), page_panel.width(), page_item.width(),
+                    )
+                    scene_origin = page_panel.mapToScene(QPointF(0, 0))
+                    assert scene_origin.x() + page_panel.width() <= window.width() + 0.5
+                primary, secondary = page_panels
+                secondary_origin = secondary.mapToItem(page_item, QPointF(0, 0))
+                primary_right = primary.mapToItem(page_item, QPointF(primary.width(), 0))
+                assert secondary_origin.x() - primary_right.x() >= 16 - 0.5, page
+
                 pending = [window.contentItem()]
                 checked = 0
                 while pending:
@@ -5928,10 +5954,12 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
 @pytest.mark.parametrize("dynamic_roi", [True, False], ids=["dynamic_roi", "full_frame"])
 def test_settings_keeps_output_controls_left_and_diagnostics_scrollable(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     skin: str,
     window_size: tuple[int, int],
     dynamic_roi: bool,
 ) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
     app = _application()
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
@@ -6076,7 +6104,12 @@ def test_settings_keeps_output_controls_left_and_diagnostics_scrollable(
             QTest.qWait(20)
             app.processEvents()
             assert_contained(control, form)
-            position = control.mapToScene(QPointF(control.width() / 2, control.height() / 2))
+            # A stretched checkbox can have blank space outside its hit area.
+            indicator = control.property("indicator")
+            assert isinstance(indicator, QQuickItem)
+            position = indicator.mapToScene(
+                QPointF(indicator.width() / 2, indicator.height() / 2)
+            )
             QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=position.toPoint())
             app.processEvents()
             assert bool(control.property("checked")) is not expected
