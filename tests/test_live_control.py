@@ -333,6 +333,92 @@ def test_live_control_text_updates_keep_fixed_columns_and_elide_profile() -> Non
     app.processEvents()
 
 
+def test_live_control_expands_plain_text_error_detail_and_collapses_on_recovery() -> None:
+    app = QApplication.instance() or QApplication([])
+    window = LiveControlWindow(lambda: None)
+    screen = _ScreenGeometryStub(QRect(0, 0, 1920, 1080))
+    live_runtime._position_live_control(window, screen)
+    window.show()
+    app.processEvents()
+    window.layout().activate()
+    window._surface.layout().activate()
+
+    base_columns = tuple(
+        (column.x(), column.width(), column.geometry().right())
+        for column in window._hud_columns
+    )
+    assert window.width() == 1080
+    assert window.height() == 20
+    assert window._surface.height() == 20
+    assert not window._status_detail.isVisible()
+
+    status = "OCR 暂时失败，等待画面变化或定时复查后重试"
+    detail = "<b>服务超时</b>\n第二行原因：连接未在截止时间内完成。" + " 具体上下文" * 40
+    window.set_status(status, detail)
+    app.processEvents()
+    window.layout().activate()
+    window._surface.layout().activate()
+
+    assert window._status.text() == "异常"
+    assert window._status_detail.isVisible()
+    assert window._status_detail.textFormat() == Qt.TextFormat.PlainText
+    assert window._status_detail.text() == f"{status}\n{detail}"
+    assert "QLabel#hudStatusDetail { color: #f472b6; background-color: #000000; }" in (
+        window.styleSheet()
+    )
+    detail_geometry = window._status_detail.geometry()
+    background_pixel = window.grab().toImage().pixelColor(
+        detail_geometry.right() - 2,
+        detail_geometry.top() + 2,
+    )
+    assert (background_pixel.red(), background_pixel.green(), background_pixel.blue()) == (
+        0,
+        0,
+        0,
+    )
+    assert background_pixel.alpha() == 255
+    assert window._status_detail.height() > 20
+    assert window.width() == 1080
+    assert window._surface.height() == 20
+    assert tuple(
+        (column.x(), column.width(), column.geometry().right())
+        for column in window._hud_columns
+    ) == base_columns
+
+    window.set_status("实时翻译运行中", "恢复后继续处理")
+    app.processEvents()
+    window.layout().activate()
+    window._surface.layout().activate()
+
+    assert window._status.text() == ""
+    assert not window._status_detail.isVisible()
+    assert window._status_detail.text() == ""
+    assert window.width() == 1080
+    assert window.height() == 20
+    assert window._surface.height() == 20
+
+    window.set_status("翻译服务异常，屏幕保留原文", "HTTP 503")
+    app.processEvents()
+    assert window._status_detail.isVisible()
+    assert window._status_detail.text() == "翻译服务异常，屏幕保留原文\nHTTP 503"
+    assert window.height() > 20
+
+    scaled_screen = _ScreenGeometryStub(QRect(-800, 0, 800, 600))
+    live_runtime._position_live_control(window, scaled_screen)
+    app.processEvents()
+    window.layout().activate()
+    window._surface.layout().activate()
+    assert window.width() == 450
+    assert window._surface.width() == 450
+    assert window._surface.height() == 8
+    assert window._status_detail.width() == 450
+    assert window._hud_font_pixels == 7
+    assert window.height() > 8
+
+    window.close()
+    app.processEvents()
+
+
 def test_live_control_repositions_on_selected_screen_geometry_and_dpi_signals() -> None:
     app = QApplication.instance() or QApplication([])
     window = LiveControlWindow(lambda: None)

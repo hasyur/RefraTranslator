@@ -3612,6 +3612,7 @@ def test_protocol_failure_splits_batch_and_recovers_every_visible_text(
     assert len(controller._translation_retries) == 2
     assert [len(item.batch.items) for item in controller._translation_retries] == [1, 1]
     assert control.status == "翻译格式异常，正在自动恢复"
+    assert control.detail == "缺少 id"
     captured = capsys.readouterr()
     assert "翻译协议偏差，正在自动恢复：缺少 id" in captured.err
     assert "翻译错误：" not in captured.err
