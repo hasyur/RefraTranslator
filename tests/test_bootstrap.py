@@ -12,6 +12,14 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+
+@pytest.fixture
+def installer_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    # Pytest's default per-test directory includes the long test name. On CI,
+    # that plus runneradmin's temp path trips the installer's MAX_PATH guard.
+    return tmp_path_factory.mktemp("bi")
+
+
 # Replace only the package manager in a temporary copy. The real PowerShell
 # installer, Python probe, config migration and cache cleanup still execute.
 PIP_STUB = r'''
@@ -116,7 +124,10 @@ def _run_installer(
         timeout=30,
         check=False,
     )
-    calls = (tmp_path / "pip-calls.txt").read_text(encoding="ascii").splitlines()
+    calls_path = tmp_path / "pip-calls.txt"
+    # Early installer failures may happen before pip runs. Return its output
+    # to the assertions instead of hiding the real error with FileNotFoundError.
+    calls = calls_path.read_text(encoding="ascii").splitlines() if calls_path.exists() else []
     for path in (tmp_path / ".venv/keep.txt", tmp_path / ".cache/local-llm/models/keep.gguf",
                  tmp_path / ".cache/paddlex/keep.txt", tmp_path / "profiles/game/keep.txt",
                  tmp_path / "output/keep.txt"):
@@ -127,14 +138,14 @@ def _run_installer(
 
 @pytest.mark.parametrize("scenario", ["ready", "patch", "other_cuda", "warning"])
 def test_installer_reuses_usable_paddle_without_gpu_download(
-    tmp_path: Path, scenario: str,
+    installer_root: Path, scenario: str,
 ) -> None:
-    completed, calls = _run_installer(tmp_path, scenario)
+    completed, calls = _run_installer(installer_root, scenario)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert "Reusing existing Paddle GPU and CUDA" in completed.stdout
     assert not any("download" in call or "uninstall" in call or ".whl" in call for call in calls)
     assert any("--editable" in call and "[ocr-gpu,gui]" in call for call in calls)
-    assert not (tmp_path / ".cache/pip").exists()
+    assert not (installer_root / ".cache/pip").exists()
 
 
 @pytest.mark.parametrize("scenario", [
@@ -142,9 +153,9 @@ def test_installer_reuses_usable_paddle_without_gpu_download(
     "broken_cuda", "wrong_result",
 ])
 def test_installer_installs_gpu_when_existing_runtime_is_not_usable(
-    tmp_path: Path, scenario: str,
+    installer_root: Path, scenario: str,
 ) -> None:
-    completed, calls = _run_installer(tmp_path, scenario)
+    completed, calls = _run_installer(installer_root, scenario)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert "Reusing existing" not in completed.stdout
     downloads = [call for call in calls if "pip download" in call]
@@ -154,14 +165,14 @@ def test_installer_installs_gpu_when_existing_runtime_is_not_usable(
     editable = next(index for index, call in enumerate(calls) if "--editable" in call)
     assert uninstall < install < editable
     assert "--force-reinstall --no-deps" in calls[install]
-    assert not (tmp_path / ".cache/pip").exists()
+    assert not (installer_root / ".cache/pip").exists()
 
 
 @pytest.mark.parametrize("scenario,reuse", [("other_cuda", True), ("ready", False)])
 def test_installer_honors_explicit_cuda_version(
-    tmp_path: Path, scenario: str, reuse: bool,
+    installer_root: Path, scenario: str, reuse: bool,
 ) -> None:
-    completed, calls = _run_installer(tmp_path, scenario, "-GpuCuda", "cu126")
+    completed, calls = _run_installer(installer_root, scenario, "-GpuCuda", "cu126")
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert ("Reusing existing" in completed.stdout) is reuse
     downloads = [call for call in calls if "pip download" in call]
@@ -171,9 +182,19 @@ def test_installer_honors_explicit_cuda_version(
         assert "gpu\\cu126" in downloads[0]
 
 
-def test_installer_preserves_cache_and_stops_on_gpu_download_failure(tmp_path: Path) -> None:
-    completed, calls = _run_installer(tmp_path, "download_failure")
+def test_installer_preserves_cache_and_stops_on_gpu_download_failure(installer_root: Path) -> None:
+    completed, calls = _run_installer(installer_root, "download_failure")
     assert completed.returncode != 0
     assert not any("uninstall" in call or "--editable" in call for call in calls)
-    assert (tmp_path / ".cache/pip/gpu/cu129").is_dir()
+    assert (installer_root / ".cache/pip/gpu/cu129").is_dir()
+    assert "Isolated environment is ready" not in completed.stdout
+
+
+def test_installer_rejects_long_paths_before_running_pip(installer_root: Path) -> None:
+    long_root = installer_root / ("x" * 100)
+    long_root.mkdir()
+    completed, calls = _run_installer(long_root, "ready")
+    assert completed.returncode != 0
+    assert "Project path is too long" in completed.stdout + completed.stderr
+    assert calls == []
     assert "Isolated environment is ready" not in completed.stdout
