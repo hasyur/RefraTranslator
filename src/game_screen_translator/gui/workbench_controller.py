@@ -81,9 +81,9 @@ from .latency_diagnostics import read_latency_diagnostics
 from .theme import (
     GuiPreferences,
     GuiSettingsError,
+    HOTKEY_BEHAVIOR_OPTIONS,
     SKIN_DOHNA,
     SKIN_OPTIONS,
-    THEME_DARK,
     THEME_OPTIONS,
     effective_theme,
     load_gui_preferences,
@@ -368,6 +368,7 @@ class WorkbenchController(QObject):
         self._skin_preference = preferences.skin
         self._start_with_windows = preferences.start_with_windows
         self._hotkey = preferences.hotkey
+        self._hotkey_behavior = preferences.hotkey_behavior
         self._hotkey_registrar: Callable[[str], None] | None = None
         app = QApplication.instance()
         self._effective_theme = effective_theme(
@@ -569,6 +570,10 @@ class WorkbenchController(QObject):
     @Property(str, notify=stateChanged)
     def hotkeyPreference(self) -> str:
         return self._hotkey
+
+    @Property(str, notify=stateChanged)
+    def hotkeyBehaviorPreference(self) -> str:
+        return self._hotkey_behavior
 
     @Property(bool, notify=stateChanged)
     def reducedMotion(self) -> bool:
@@ -1388,6 +1393,7 @@ class WorkbenchController(QObject):
                     skin=self._skin_preference,
                     start_with_windows=self._start_with_windows,
                     hotkey=self._hotkey,
+                    hotkey_behavior=self._hotkey_behavior,
                 ),
             )
         except (GuiSettingsError, OSError) as exc:
@@ -1419,6 +1425,7 @@ class WorkbenchController(QObject):
                     skin=value,
                     start_with_windows=self._start_with_windows,
                     hotkey=self._hotkey,
+                    hotkey_behavior=self._hotkey_behavior,
                 ),
             )
         except (GuiSettingsError, OSError) as exc:
@@ -1454,6 +1461,7 @@ class WorkbenchController(QObject):
                         skin=self._skin_preference,
                         start_with_windows=value,
                         hotkey=self._hotkey,
+                        hotkey_behavior=self._hotkey_behavior,
                     ),
                 )
             except Exception:
@@ -1474,6 +1482,7 @@ class WorkbenchController(QObject):
                 skin=self._skin_preference,
                 start_with_windows=self._start_with_windows,
                 hotkey=value,
+                hotkey_behavior=self._hotkey_behavior,
             )
             if preferences.hotkey == self._hotkey:
                 return
@@ -1491,6 +1500,29 @@ class WorkbenchController(QObject):
         self._hotkey = preferences.hotkey
         self.hotkeyChanged.emit(self._hotkey)
         self._notice(f"全局快捷键已设为 {self._hotkey}", "success")
+
+    @Slot(str)
+    def setHotkeyBehavior(self, value: str) -> None:
+        try:
+            preferences = GuiPreferences(
+                theme=self._theme_preference,
+                skin=self._skin_preference,
+                start_with_windows=self._start_with_windows,
+                hotkey=self._hotkey,
+                hotkey_behavior=value,
+            )
+            if preferences.hotkey_behavior == self._hotkey_behavior:
+                return
+            save_gui_preferences(self._config_path, preferences)
+        except (GuiSettingsError, OSError) as exc:
+            self._show_error("保存快捷键行为失败", exc)
+            return
+        self._hotkey_behavior = preferences.hotkey_behavior
+        label = dict(HOTKEY_BEHAVIOR_OPTIONS).get(
+            self._hotkey_behavior,
+            self._hotkey_behavior,
+        )
+        self._notice(f"快捷键行为已设为“{label}”并保存", "success")
 
     def set_hotkey_registrar(
         self,

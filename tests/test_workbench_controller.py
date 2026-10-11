@@ -27,6 +27,7 @@ from game_screen_translator.config import load_config
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.gui import workbench_controller as controller_module
 from game_screen_translator.gui.theme import (
+    HOTKEY_BEHAVIOR_TOGGLE_SHOW,
     SKIN_DOHNA,
     SKIN_PRISM,
     THEME_DARK,
@@ -140,15 +141,37 @@ def test_controller_persists_windows_startup_and_hotkey_preferences(
     )
     monkeypatch.setattr(controller_module, "startup_entry", lambda: None)
 
+    controller.setHotkeyBehavior(HOTKEY_BEHAVIOR_TOGGLE_SHOW)
+
+    def assert_saved_behavior() -> None:
+        assert load_gui_preferences(config_path).hotkey_behavior == (
+            HOTKEY_BEHAVIOR_TOGGLE_SHOW
+        )
+
+    assert_saved_behavior()
+    controller.setTheme(THEME_DARK)
+    assert_saved_behavior()
+    controller.setSkin(SKIN_DOHNA)
+    assert_saved_behavior()
     controller.setStartWithWindows(True)
+    assert_saved_behavior()
     controller.setHotkey("Shift+Ctrl+T")
+    assert_saved_behavior()
 
     preferences = load_gui_preferences(config_path)
     assert startup_calls == [(tmp_path, True)]
+    assert controller.themePreference == THEME_DARK
+    assert controller.skinPreference == SKIN_DOHNA
     assert controller.startWithWindows is True
     assert controller.hotkeyPreference == "Ctrl+Shift+T"
+    assert controller.hotkeyBehaviorPreference == HOTKEY_BEHAVIOR_TOGGLE_SHOW
     assert preferences.start_with_windows is True
     assert preferences.hotkey == "Ctrl+Shift+T"
+    assert preferences.hotkey_behavior == HOTKEY_BEHAVIOR_TOGGLE_SHOW
+
+    reloaded = WorkbenchController(config_path, probe_ocr_devices=False)
+    assert reloaded.hotkeyBehaviorPreference == HOTKEY_BEHAVIOR_TOGGLE_SHOW
+    reloaded.shutdown()
     controller.shutdown()
 
 

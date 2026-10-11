@@ -36,6 +36,8 @@ from game_screen_translator.gui import runtime as runtime_module
 from game_screen_translator.gui import workbench_controller as controller_module
 from game_screen_translator.gui.qml_workbench import QmlWorkbenchHost
 from game_screen_translator.gui.theme import (
+    HOTKEY_BEHAVIOR_TOGGLE,
+    HOTKEY_BEHAVIOR_TOGGLE_SHOW,
     SKIN_DOHNA,
     SKIN_PRISM,
     load_gui_preferences,
@@ -454,6 +456,151 @@ def test_host_hotkey_starts_once_and_ignores_an_already_running_live_process() -
     host.shutdown()
 
 
+@pytest.mark.parametrize(
+    ("behavior", "expect_restore"),
+    ((HOTKEY_BEHAVIOR_TOGGLE, False), (HOTKEY_BEHAVIOR_TOGGLE_SHOW, True)),
+)
+def test_host_hotkey_toggle_stops_live_and_applies_window_behavior(
+    behavior: str,
+    expect_restore: bool,
+) -> None:
+    class ToggleController(_ControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.runPhase = "stopped"
+            self.hotkeyBehaviorPreference = behavior
+
+        def stopLive(self) -> None:  # noqa: N802
+            self.stop_count += 1
+            self.runPhase = "stopping"
+
+    controller = ToggleController()
+    tray = _TrayRecorder()
+    host, _engine = _host(controller, tray_factory=lambda _app: tray)
+
+    controller.liveReady.emit()
+    assert host.window is None
+    assert tray.visible is True
+    controller.runPhase = "running"
+    host._start_live_from_hotkey()
+    assert controller.stop_count == 1
+    assert host._pending_hotkey_stop_behavior == behavior
+
+    controller.runPhase = "stopped"
+    controller.liveFinished.emit()
+    assert (host.window is not None) is expect_restore
+    assert tray.visible is not expect_restore
+    if expect_restore:
+        assert host.window is not None
+        assert host.window.isVisible()
+    host.shutdown()
+
+
+def test_host_hotkey_toggle_keeps_visible_workbench_visible_after_stop() -> None:
+    class ToggleController(_ControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.runPhase = "stopped"
+            self.hotkeyBehaviorPreference = HOTKEY_BEHAVIOR_TOGGLE
+            self.running = True
+
+        def stopLive(self) -> None:  # noqa: N802
+            self.stop_count += 1
+            self.runPhase = "stopping"
+
+    controller = ToggleController()
+    tray = _TrayRecorder()
+    host, _engine = _host(controller, tray_factory=lambda _app: tray)
+    host.show()
+    assert host.window is not None
+    controller.liveReady.emit()
+    tray.activated.emit(QSystemTrayIcon.ActivationReason.DoubleClick)
+    assert host.window is not None
+    assert host.window.isVisible()
+    assert tray.visible is False
+
+    controller.runPhase = "running"
+    host._start_live_from_hotkey()
+    assert controller.stop_count == 1
+    controller.runPhase = "stopped"
+    controller.liveFinished.emit()
+    assert host.window is not None
+    assert host.window.isVisible()
+    assert tray.visible is False
+    host.shutdown()
+
+
+def test_host_hotkey_stop_failure_clears_pending_action_for_retry() -> None:
+    class FailingStopController(_ControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.runPhase = "running"
+            self.hotkeyBehaviorPreference = HOTKEY_BEHAVIOR_TOGGLE
+
+    controller = FailingStopController()
+    host, _engine = _host(controller)
+
+    host._start_live_from_hotkey()
+    host._start_live_from_hotkey()
+
+    assert controller.stop_count == 2
+    assert host._pending_hotkey_stop_behavior is None
+    host.shutdown()
+
+
+def test_host_hotkey_stop_failure_signal_restores_workbench_and_tray() -> None:
+    class FailingProcessController(_ControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.runPhase = "stopped"
+            self.hotkeyBehaviorPreference = HOTKEY_BEHAVIOR_TOGGLE
+
+        def stopLive(self) -> None:  # noqa: N802
+            self.stop_count += 1
+            self.runPhase = "stopping"
+
+    controller = FailingProcessController()
+    tray = _TrayRecorder()
+    host, _engine = _host(controller, tray_factory=lambda _app: tray)
+    controller.liveReady.emit()
+    controller.runPhase = "running"
+    host._start_live_from_hotkey()
+    assert host._pending_hotkey_stop_behavior == HOTKEY_BEHAVIOR_TOGGLE
+
+    controller.runPhase = "failed"
+    controller.liveFailed.emit()
+    assert host._pending_hotkey_stop_behavior is None
+    assert host.window is not None
+    assert host.window.isVisible()
+    assert tray.visible is False
+    host.shutdown()
+
+
+def test_host_hotkey_dispatch_guard_covers_synchronous_start_event_pump() -> None:
+    class ReentrantController(_ControllerStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.runPhase = "stopped"
+            self.hotkeyBehaviorPreference = HOTKEY_BEHAVIOR_TOGGLE
+            self.start_count = 0
+
+        def startLive(self) -> None:  # noqa: N802
+            self.start_count += 1
+            host._start_live_from_hotkey()
+            self.runPhase = "starting"
+
+    controller = ReentrantController()
+    host, _engine = _host(controller)
+
+    host._start_live_from_hotkey()
+
+    assert controller.start_count == 1
+    assert host._hotkey_dispatch_in_progress is False
+    host._start_live_from_hotkey()
+    assert controller.start_count == 1
+    host.shutdown()
+
+
 def _real_home_hotkey_host(
     tmp_path: Path,
 ) -> tuple[QApplication, WorkbenchController, QmlWorkbenchHost, QQuickWindow]:
@@ -673,6 +820,143 @@ def test_home_hotkey_default_button_restores_default_and_updates_display(
         assert controller.hotkeyPreference == "Ctrl+Alt+T"
         assert display.property("text") == "Ctrl+Alt+T"
         assert load_gui_preferences(config_path).hotkey == "Ctrl+Alt+T"
+    finally:
+        host.shutdown()
+
+
+def test_home_hotkey_behavior_selector_persists_and_survives_live_recreate(
+    tmp_path: Path,
+) -> None:
+    app, controller, host, window = _real_home_hotkey_host(tmp_path)
+    selector = window.findChild(QObject, "homeHotkeyBehaviorSelector")
+    assert selector is not None
+    try:
+        assert selector.property("currentText") == "仅启动"
+        scroll = window.findChild(QObject, "homeSecondaryScroll")
+        assert scroll is not None
+        scroll.setProperty(
+            "contentY",
+            max(
+                0.0,
+                float(scroll.property("contentHeight"))
+                - float(scroll.property("height")),
+            ),
+        )
+        app.processEvents()
+        assert selector.property("visible") is True
+        center = selector.mapToScene(
+            QPointF(selector.width() / 2, selector.height() / 2),
+        ).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=center)
+        app.processEvents()
+        QTest.keyClick(window, Qt.Key.Key_Down)
+        QTest.keyClick(window, Qt.Key.Key_Down)
+        QTest.keyClick(window, Qt.Key.Key_Return)
+        app.processEvents()
+
+        assert controller.hotkeyBehaviorPreference == HOTKEY_BEHAVIOR_TOGGLE_SHOW
+        assert selector.property("currentText") == "启动 / 停止并打开 GUI"
+        assert (
+            load_gui_preferences(controller._config_path).hotkey_behavior
+            == HOTKEY_BEHAVIOR_TOGGLE_SHOW
+        )
+
+        controller.liveReady.emit()
+        app.processEvents()
+        assert host.window is None
+        controller.liveFinished.emit()
+        app.processEvents()
+        recreated = host.window
+        assert recreated is not None
+        recreated_selector = recreated.findChild(
+            QObject,
+            "homeHotkeyBehaviorSelector",
+        )
+        assert recreated_selector is not None
+        assert recreated_selector.property("currentIndex") == 2
+        assert recreated_selector.property("currentText") == "启动 / 停止并打开 GUI"
+    finally:
+        host.shutdown()
+
+
+def test_real_controller_hotkey_toggle_normal_finish_stays_in_tray(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+
+    class ProcessStub:
+        pid = 4321
+
+        def __init__(self) -> None:
+            self.return_code: int | None = None
+
+        def poll(self) -> int | None:
+            return self.return_code
+
+        def terminate(self) -> None:
+            self.return_code = 1
+
+    process = ProcessStub()
+    popen_calls: list[object] = []
+    monkeypatch.setattr(
+        controller_module,
+        "_validate_ocr_device_isolated",
+        lambda _device: "gpu:0 · hotkey toggle test",
+    )
+    monkeypatch.setattr(
+        controller_module.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: popen_calls.append(process) or process,
+    )
+    monkeypatch.setattr(
+        controller_module,
+        "_request_live_graceful_shutdown",
+        lambda current: current is process,
+    )
+
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setHotkeyBehavior(HOTKEY_BEHAVIOR_TOGGLE)
+    tray = _TrayRecorder()
+    host = QmlWorkbenchHost(
+        controller,
+        application=app,
+        tray_factory=lambda _app: tray,
+    )
+    try:
+        controller.startLive()
+        app.processEvents()
+        assert controller.runPhase == "running"
+        assert host.window is None
+        assert tray.visible is True
+
+        host._start_live_from_hotkey()
+        assert controller.runPhase == "stopping"
+        process.return_code = 0
+        controller._check_live_process()
+        app.processEvents()
+
+        assert controller.runPhase == "stopped"
+        assert host.window is None
+        assert tray.visible is True
+        assert app.quitOnLastWindowClosed() is False
+
+        process.return_code = None
+        host._start_live_from_hotkey()
+        app.processEvents()
+        assert len(popen_calls) == 2
+        assert controller.runPhase == "running"
+        assert host.window is None
+        assert tray.visible is True
+        assert app.quitOnLastWindowClosed() is False
     finally:
         host.shutdown()
 
@@ -1736,6 +2020,7 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         "home-motion": {"control"},
             "home-startup": {"control"},
             "home-hotkey": {"label", "control"},
+            "home-hotkey-behavior": {"label", "control"},
         "capture-monitor": {"label", "control"},
         "capture-fullscreen": {"control"},
         "capture-custom": {"control"},

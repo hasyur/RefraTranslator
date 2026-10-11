@@ -13,6 +13,8 @@ Item {
     readonly property bool compactOverview: height < 580
     readonly property var themeValues: ["system", "dark", "light"]
     readonly property var skinValues: ["prism", "dohna"]
+    readonly property var hotkeyBehaviorValues: ["start_only", "toggle", "toggle_show"]
+    readonly property var hotkeyBehaviorLabels: ["仅启动", "启动 / 停止翻译", "启动 / 停止并打开 GUI"]
     property bool hotkeyRecording: false
 
     function hotkeyKeyName(key) {
@@ -575,7 +577,7 @@ Item {
                     theme: root.theme
                     title: "全局快捷键"
                     meta: "START TRANSLATION"
-                    description: "软件运行或驻留托盘时，使用此快捷键启动一次实时翻译。翻译已运行时不会重复启动。"
+                    description: "软件运行或驻留托盘时，使用此快捷键启动实时翻译；具体行为由下方选项决定。"
                     settingKey: "home-hotkey"
                     Layout.topMargin: 4
                 }
@@ -617,6 +619,29 @@ Item {
                         target: hotkeyField
                         description: "例如 Ctrl+Alt+T；需要包含修饰键。"
                         settingKey: "home-hotkey"
+                    }
+                }
+                SettingLabel {
+                    theme: root.theme
+                    title: "快捷键行为"
+                    meta: "HOTKEY ACTION"
+                    description: "选择翻译已经运行时再次按下全局快捷键的处理方式。"
+                    settingKey: "home-hotkey-behavior"
+                }
+                PrismComboBox {
+                    objectName: "homeHotkeyBehaviorSelector"
+                    theme: root.theme
+                    accessibleName: "快捷键行为"
+                    settingDescription: "选择翻译已经运行时再次按下全局快捷键的处理方式。"
+                    settingKey: "home-hotkey-behavior"
+                    model: root.hotkeyBehaviorLabels
+                    currentIndex: Math.max(0, root.hotkeyBehaviorValues.indexOf(
+                        root.workbench.hotkeyBehaviorPreference
+                    ))
+                    Layout.fillWidth: true
+                    onActivated: index => {
+                        if (index >= 0 && index < root.hotkeyBehaviorValues.length)
+                            root.workbench.setHotkeyBehavior(root.hotkeyBehaviorValues[index])
                     }
                 }
                 Text {
