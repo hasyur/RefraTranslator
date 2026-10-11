@@ -28,7 +28,9 @@ Item {
             return "Tab"
         if (key === Qt.Key_Return || key === Qt.Key_Enter)
             return "Enter"
-        if (key === Qt.Key_Escape || key === Qt.Key_Backspace
+        if (key === Qt.Key_Backspace)
+            return "Backspace"
+        if (key === Qt.Key_Escape
                 || key === Qt.Key_Control || key === Qt.Key_Alt
                 || key === Qt.Key_Shift || key === Qt.Key_Meta)
             return ""

@@ -527,6 +527,26 @@ def test_home_hotkey_recording_normalizes_and_escape_cancels(
         host.shutdown()
 
 
+def test_home_hotkey_recording_accepts_ctrl_backspace_and_exits(
+    tmp_path: Path,
+) -> None:
+    app, controller, host, window = _real_home_hotkey_host(tmp_path)
+    display = window.findChild(QObject, "homeHotkeyDisplay")
+    assert display is not None
+    try:
+        record_button, recording_hint = _begin_home_hotkey_recording(window)
+        QTest.keyClick(window, Qt.Key.Key_Backspace, Qt.KeyboardModifier.ControlModifier)
+        app.processEvents()
+
+        assert controller.hotkeyPreference == "Ctrl+Backspace"
+        assert display.property("text") == "Ctrl+Backspace"
+        assert load_gui_preferences(controller._config_path).hotkey == "Ctrl+Backspace"
+        assert recording_hint.property("visible") is False
+        assert record_button.property("text") == "录制快捷键"
+    finally:
+        host.shutdown()
+
+
 def test_home_hotkey_recording_conflict_keeps_old_value_and_reports_error(
     tmp_path: Path,
 ) -> None:
