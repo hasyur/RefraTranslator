@@ -228,8 +228,13 @@ def run(
     guard = SingleInstanceGuard()
     try:
         if not guard.acquire():
-            activate_existing_window()
-            return 0
+            if activate_existing_window():
+                return 0
+            _show_failure(
+                "RefraTranslator is already running but did not become ready "
+                "within the activation timeout."
+            )
+            return 1
         return _run_owned(
             arguments,
             project_root=project_root,

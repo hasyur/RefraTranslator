@@ -170,6 +170,20 @@ class _ControllerStub(QObject):
         self.host_errors.append((title, message))
 
 
+class _ActivationController(_ControllerStub):
+    def __init__(self, *, stop_result: bool = True, phase: str = "running") -> None:
+        super().__init__()
+        self.running = True
+        self.runPhase = phase
+        self.stop_result = stop_result
+
+    def stopLive(self) -> bool:  # noqa: N802
+        self.stop_count += 1
+        if self.stop_result:
+            self.runPhase = "stopping"
+        return self.stop_result
+
+
 class _SelectorStub(QDialog):
     def __init__(self) -> None:
         super().__init__()
@@ -781,6 +795,59 @@ def test_login_tray_start_keeps_native_target_for_second_instance_activation(
     assert host.window.isVisible()
     assert tray.visible is False
     host.shutdown()
+
+
+@pytest.mark.parametrize("terminal_signal", ("liveFinished", "liveFailed"))
+def test_second_instance_waits_for_live_terminal_signal_and_stops_once(
+    terminal_signal: str,
+) -> None:
+    controller = _ActivationController()
+    tray = _TrayRecorder()
+    host, _engine = _host(controller, tray_factory=lambda _app: tray)
+    try:
+        controller.liveReady.emit()
+        assert host.window is None
+        assert tray.visible is True
+
+        host._activate_from_second_instance()
+        host._activate_from_second_instance()
+        assert controller.stop_count == 1
+        assert host.window is None
+        assert tray.visible is True
+
+        controller.running = False
+        getattr(controller, terminal_signal).emit()
+        assert host.window is not None
+        assert host.window.isVisible()
+        assert tray.visible is False
+    finally:
+        host.shutdown()
+
+
+def test_second_instance_stop_failure_restores_window_and_reports_error() -> None:
+    controller = _ActivationController(stop_result=False)
+    tray = _TrayRecorder()
+    host, _engine = _host(controller, tray_factory=lambda _app: tray)
+    try:
+        controller.liveReady.emit()
+        assert host.window is None
+
+        host._activate_from_second_instance()
+
+        assert controller.stop_count == 1
+        assert controller.running is True
+        assert host.window is not None
+        assert host.window.isVisible()
+        assert tray.visible is False
+        assert host._application.quitOnLastWindowClosed() is False
+        assert controller.host_errors == [
+            (
+                "停止实时翻译失败",
+                "无法请求实时翻译正常关闭；实时翻译仍在运行，已恢复主窗口。",
+            )
+        ]
+    finally:
+        host.shutdown()
 
 
 @pytest.mark.skipif(

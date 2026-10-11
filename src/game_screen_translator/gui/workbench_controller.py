@@ -2449,36 +2449,37 @@ class WorkbenchController(QObject):
             self.startLive()
 
     @Slot()
-    def stopLive(self) -> None:
+    def stopLive(self) -> bool:
         process = self._live_process
         if process is None or process.poll() is not None:
             self._live_process = None
             self._set_run_state("已停止", "neutral", False)
-            return
+            return False
         if self._live_stop_requested:
             if not self._live_force_stop_available or self._live_force_stop_requested:
-                return
+                return False
             try:
                 process.terminate()
             except OSError as exc:
                 self._show_error("强制停止实时翻译失败", exc)
-                return
+                return False
             self._live_force_stop_requested = True
             self._set_run_state("正在强制停止", "warning", True)
             self._set_status("正在强制停止实时翻译；未完成的新快照不会覆盖旧快照。", "warning")
-            return
+            return True
         if not _request_live_graceful_shutdown(process):
             self._set_status(
                 "无法请求实时翻译正常关闭；实时进程仍在运行，可再次尝试。",
                 "error",
             )
-            return
+            return False
         self._live_stop_requested = True
         self._live_stop_started_at = time.monotonic()
         self._live_force_stop_available = False
         self._live_force_stop_requested = False
         self._set_run_state("正在保存并停止", "warning", True)
         self._set_status("正在保存并停止", "warning")
+        return True
 
     @Slot()
     def startLive(self) -> None:

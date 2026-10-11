@@ -282,6 +282,7 @@ class QmlWorkbenchHost(QObject):
         self._tray_icon: QSystemTrayIcon | None = None
         self._global_hotkey: WindowsGlobalHotkey | None = None
         self._activation_window: _ActivationWindow | None = None
+        self._activation_restore_pending = False
 
         set_window_icon = getattr(self._application, "setWindowIcon", None)
         if callable(set_window_icon):
@@ -481,15 +482,27 @@ class QmlWorkbenchHost(QObject):
     def _activate_from_second_instance(self) -> None:
         if self._shutdown_called:
             return
+        phase = getattr(self._controller, "runPhase", None)
+        if phase == "stopping":
+            self._activation_restore_pending = True
+            return
         running = bool(getattr(self._controller, "running", False))
-        self._hidden_for_live = False
-        self._set_quit_on_last_window_closed(not running)
-        self._hide_live_tray()
-        self.show()
-        window = self._window
-        if window is not None:
-            window.raise_()
-            window.requestActivate()
+        if not running:
+            self._restore_workbench(activate=True)
+            return
+        self._activation_restore_pending = True
+        stop_live = getattr(self._controller, "stopLive", None)
+        if not callable(stop_live):
+            self._activation_restore_pending = False
+            self._restore_workbench(activate=True)
+            self._report_activation_stop_failure()
+            return
+        accepted = stop_live()
+        if accepted is False:
+            self._activation_restore_pending = False
+            self._restore_workbench(activate=True)
+            if bool(getattr(self._controller, "running", False)):
+                self._report_activation_stop_failure()
 
     def hide_to_tray(self) -> None:
         """Enter background residency for a Windows logon-started GUI."""
@@ -503,14 +516,31 @@ class QmlWorkbenchHost(QObject):
             return
         self._activate_from_second_instance()
 
-    def _restore_after_live(self) -> None:
-        if self._shutdown_called:
-            return
-        self._set_quit_on_last_window_closed(True)
+    def _restore_workbench(self, *, activate: bool = False) -> None:
+        running = bool(getattr(self._controller, "running", False))
+        self._set_quit_on_last_window_closed(not running)
         self._hidden_for_live = False
         self._hide_live_tray()
         if self._selector is None:
             self.show()
+        if activate and self._window is not None:
+            self._window.raise_()
+            self._window.requestActivate()
+
+    def _report_activation_stop_failure(self) -> None:
+        reporter = getattr(self._controller, "reportHostError", None)
+        if callable(reporter):
+            reporter(
+                "停止实时翻译失败",
+                "无法请求实时翻译正常关闭；实时翻译仍在运行，已恢复主窗口。",
+            )
+
+    def _restore_after_live(self) -> None:
+        if self._shutdown_called:
+            return
+        activate = self._activation_restore_pending
+        self._activation_restore_pending = False
+        self._restore_workbench(activate=activate)
 
     def _open_region_selector(self, monitor_index: int) -> None:
         if self._shutdown_called:

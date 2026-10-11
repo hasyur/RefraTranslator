@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -43,6 +44,8 @@ _MOD_SHIFT = 0x0004
 _MOD_WIN = 0x0008
 _MOD_NOREPEAT = 0x4000
 _SW_RESTORE = 9
+_ACTIVATION_RETRY_TIMEOUT_SECONDS = 2.0
+_ACTIVATION_RETRY_INTERVAL_SECONDS = 0.05
 
 
 class GuiRuntimeError(RuntimeError):
@@ -286,7 +289,12 @@ class SingleInstanceGuard:
         self.release()
 
 
-def activate_existing_window(title: str = GUI_WINDOW_TITLE) -> bool:
+def activate_existing_window(
+    title: str = GUI_WINDOW_TITLE,
+    *,
+    timeout_seconds: float = _ACTIVATION_RETRY_TIMEOUT_SECONDS,
+    retry_interval_seconds: float = _ACTIVATION_RETRY_INTERVAL_SECONDS,
+) -> bool:
     """Restore and foreground an existing workbench window."""
 
     if sys.platform != "win32":
@@ -304,15 +312,24 @@ def activate_existing_window(title: str = GUI_WINDOW_TITLE) -> bool:
         user32.PostMessageW.restype = ctypes.c_bool
         user32.ShowWindow.argtypes = (ctypes.c_void_p, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (ctypes.c_void_p,)
-        for window_title in (title, ACTIVATION_WINDOW_TITLE):
-            hwnd = user32.FindWindowW(None, window_title)
-            if not hwnd:
-                continue
-            if window_title == ACTIVATION_WINDOW_TITLE:
-                return bool(user32.PostMessageW(hwnd, ACTIVATION_MESSAGE, 0, 0))
-            user32.ShowWindow(hwnd, _SW_RESTORE)
-            return bool(user32.SetForegroundWindow(hwnd))
-        return False
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        interval = max(0.0, retry_interval_seconds)
+        while True:
+            for window_title in (title, ACTIVATION_WINDOW_TITLE):
+                hwnd = user32.FindWindowW(None, window_title)
+                if not hwnd:
+                    continue
+                if window_title == ACTIVATION_WINDOW_TITLE:
+                    if user32.PostMessageW(hwnd, ACTIVATION_MESSAGE, 0, 0):
+                        return True
+                    continue
+                user32.ShowWindow(hwnd, _SW_RESTORE)
+                if user32.SetForegroundWindow(hwnd):
+                    return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or interval <= 0:
+                return False
+            time.sleep(min(interval, remaining))
     except (AttributeError, OSError, TypeError, ValueError):
         return False
 
