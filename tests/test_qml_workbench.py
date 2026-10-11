@@ -2498,6 +2498,10 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         "settings-debug-border": {"control"},
     }
 
+    startup_toggle = window.findChild(QObject, "homeStartupToggle")
+    assert startup_toggle is not None
+    assert startup_toggle.property("text") == "开机自启动"
+
     hint_items: dict[tuple[str, str], list[QObject]] = {}
     for item in window.findChildren(QObject):
         object_name = item.objectName()

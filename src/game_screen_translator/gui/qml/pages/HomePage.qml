@@ -565,7 +565,7 @@ Item {
                 PrismToggle {
                     objectName: "homeStartupToggle"
                     theme: root.theme
-                    text: "登录后自动进入托盘"
+                    text: "开机自启动"
                     settingDescription: "Windows 登录后静默启动 RefraTranslator，并在系统托盘驻留。"
                     settingKey: "home-startup"
                     checked: root.workbench.startWithWindows
