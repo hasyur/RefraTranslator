@@ -24,7 +24,7 @@ Item {
             return "F" + (key - Qt.Key_F1 + 1)
         if (key === Qt.Key_Space)
             return "Space"
-        if (key === Qt.Key_Tab)
+        if (key === Qt.Key_Tab || key === Qt.Key_Backtab)
             return "Tab"
         if (key === Qt.Key_Return || key === Qt.Key_Enter)
             return "Enter"

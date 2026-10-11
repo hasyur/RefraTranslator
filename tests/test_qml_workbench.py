@@ -547,6 +547,68 @@ def test_home_hotkey_recording_accepts_ctrl_backspace_and_exits(
         host.shutdown()
 
 
+def test_home_hotkey_recording_maps_all_runtime_special_keys(
+    tmp_path: Path,
+) -> None:
+    app, controller, host, window = _real_home_hotkey_host(tmp_path)
+    display = window.findChild(QObject, "homeHotkeyDisplay")
+    assert display is not None
+    special_keys = (
+        (Qt.Key.Key_Space, Qt.KeyboardModifier.ControlModifier, "space"),
+        (
+            Qt.Key.Key_Tab,
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+            "tab",
+        ),
+        (
+            Qt.Key.Key_Backtab,
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+            "tab",
+        ),
+        (Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier, "enter"),
+        (Qt.Key.Key_Enter, Qt.KeyboardModifier.ControlModifier, "return"),
+        (Qt.Key.Key_Backspace, Qt.KeyboardModifier.ControlModifier, "backspace"),
+        (Qt.Key.Key_Insert, Qt.KeyboardModifier.ControlModifier, "insert"),
+        (Qt.Key.Key_Delete, Qt.KeyboardModifier.ControlModifier, "delete"),
+        (Qt.Key.Key_Home, Qt.KeyboardModifier.ControlModifier, "home"),
+        (Qt.Key.Key_End, Qt.KeyboardModifier.ControlModifier, "end"),
+        (Qt.Key.Key_PageUp, Qt.KeyboardModifier.ControlModifier, "pageup"),
+        (Qt.Key.Key_PageDown, Qt.KeyboardModifier.ControlModifier, "pagedown"),
+        (Qt.Key.Key_Left, Qt.KeyboardModifier.ControlModifier, "left"),
+        (Qt.Key.Key_Right, Qt.KeyboardModifier.ControlModifier, "right"),
+        (Qt.Key.Key_Up, Qt.KeyboardModifier.ControlModifier, "up"),
+        (Qt.Key.Key_Down, Qt.KeyboardModifier.ControlModifier, "down"),
+    )
+    assert {parser_key for _qt_key, _modifiers, parser_key in special_keys} == (
+        set(runtime_module._SPECIAL_KEYS) - {"esc", "escape"}
+    )
+    try:
+        for qt_key, modifiers, parser_key in special_keys:
+            record_button, recording_hint = _begin_home_hotkey_recording(window)
+            modifier_names = []
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                modifier_names.append("Ctrl")
+            if modifiers & Qt.KeyboardModifier.AltModifier:
+                modifier_names.append("Alt")
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                modifier_names.append("Shift")
+            if modifiers & Qt.KeyboardModifier.MetaModifier:
+                modifier_names.append("Win")
+            expected = runtime_module.parse_hotkey(
+                "+".join((*modifier_names, parser_key)),
+            ).display
+
+            QTest.keyClick(window, qt_key, modifiers)
+            app.processEvents()
+
+            assert controller.hotkeyPreference == expected
+            assert display.property("text") == expected
+            assert recording_hint.property("visible") is False
+            assert record_button.property("text") == "录制快捷键"
+    finally:
+        host.shutdown()
+
+
 def test_home_hotkey_recording_conflict_keeps_old_value_and_reports_error(
     tmp_path: Path,
 ) -> None:
