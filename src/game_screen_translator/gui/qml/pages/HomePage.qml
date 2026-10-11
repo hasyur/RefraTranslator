@@ -618,7 +618,7 @@ Item {
                     SettingHint {
                         theme: root.theme
                         target: hotkeyField
-                        description: "例如 Ctrl+Alt+T；需要包含修饰键。"
+                        description: "按住 Ctrl、Alt、Shift 或 Win 中的至少一个，再按另一个键，例如 Ctrl+Alt+T。"
                         settingKey: "home-hotkey"
                     }
                 }
@@ -648,7 +648,7 @@ Item {
                 Text {
                     objectName: "homeHotkeyRecordingHint"
                     visible: root.hotkeyRecording
-                    text: "正在录制：按下包含修饰键的组合；Esc 取消"
+                    text: "正在录制：按住 Ctrl、Alt、Shift 或 Win，再按另一个键；Esc 取消"
                     color: root.theme.amber
                     font.family: root.theme.uiFontFor(text)
                     font.pixelSize: 13

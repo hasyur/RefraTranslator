@@ -655,6 +655,9 @@ def _begin_home_hotkey_recording(window: QQuickWindow) -> tuple[QObject, QObject
     assert QMetaObject.invokeMethod(record_button, "click") is True
     QCoreApplication.processEvents()
     assert recording_hint.property("visible") is True
+    assert recording_hint.property("text") == (
+        "正在录制：按住 Ctrl、Alt、Shift 或 Win，再按另一个键；Esc 取消"
+    )
     assert record_button.property("text") == "按下组合键…"
     return record_button, recording_hint
 
@@ -668,6 +671,11 @@ def test_home_hotkey_recording_normalizes_and_escape_cancels(
     assert field is not None
     assert display is not None
     try:
+        hint = window.findChild(QObject, "settingHint-home-hotkey-control")
+        assert hint is not None
+        assert hint.property("description") == (
+            "按住 Ctrl、Alt、Shift 或 Win 中的至少一个，再按另一个键，例如 Ctrl+Alt+T。"
+        )
         record_button, recording_hint = _begin_home_hotkey_recording(window)
         QTest.keyClick(
             window,
