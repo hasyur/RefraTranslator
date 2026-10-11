@@ -109,6 +109,7 @@ try:
         QFrame,
         QHBoxLayout,
         QLabel,
+        QVBoxLayout,
         QWidget,
     )
 except ImportError as exc:  # pragma: no cover - exercised only without GUI extra
@@ -383,6 +384,14 @@ class LiveControlWindow(QWidget):
         status_row.addWidget(self._status)
         surface_layout.addWidget(self._status_cell)
 
+        self._status_detail = QLabel(self)
+        self._status_detail.setObjectName("hudStatusDetail")
+        self._status_detail.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._status_detail.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self._status_detail.setTextFormat(Qt.TextFormat.PlainText)
+        self._status_detail.setWordWrap(True)
+        self._status_detail.setVisible(False)
+
         self._profile = self._new_hud_label(self._profile_name, "hudProfile")
         self._profile.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._profile.setToolTip(self._profile_name)
@@ -496,9 +505,11 @@ class LiveControlWindow(QWidget):
             "peak_total": "峰值总延迟",
         }
 
-        root_layout = QHBoxLayout(self)
+        root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
         root_layout.addWidget(self._surface)
+        root_layout.addWidget(self._status_detail)
 
         self._apply_hud_scale(1.0)
 
@@ -569,6 +580,14 @@ class LiveControlWindow(QWidget):
             ),
             height,
         )
+        detail_padding = max(0, int(round(4 * scale)))
+        self._status_detail.setContentsMargins(
+            detail_padding,
+            detail_padding,
+            detail_padding,
+            detail_padding,
+        )
+        self._status_detail.setFixedWidth(target_width)
         label_padding = max(0, int(round(4 * scale)))
         for label in (
             self._profile,
@@ -587,10 +606,11 @@ class LiveControlWindow(QWidget):
             "QFrame#hudLatencyMetricLast { border-right: none; }"
             "QLabel#hudStatus, QLabel#hudStatusIndicator, QLabel#hudProfile, "
             "QLabel#hudCoverage, QLabel#hudLatencyGroup, QLabel#hudLatencyTitle, "
-            "QLabel#hudLatencyValue {"
+            "QLabel#hudLatencyValue, QLabel#hudStatusDetail {"
             f"font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
             "font-weight: 500; }"
             "QLabel#hudStatus, QLabel#hudStatusIndicator { color: #22d3ee; }"
+            "QLabel#hudStatusDetail { color: #f472b6; background-color: #000000; }"
             "QLabel#hudProfile { color: #4c8dff; }"
             "QLabel#hudCoverage { color: #f472b6; }"
             "QLabel#hudLatencyGroup, QLabel#hudLatencyTitle, "
@@ -599,6 +619,7 @@ class LiveControlWindow(QWidget):
         for label in (
             self._status_indicator,
             self._status,
+            self._status_detail,
             self._profile,
             self._coverage,
             self._recent_heading,
@@ -664,6 +685,7 @@ class LiveControlWindow(QWidget):
                 ),
                 height,
             )
+        self._resize_status_detail(target_width, height)
         self._refresh_profile_text()
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt callback name
@@ -683,6 +705,15 @@ class LiveControlWindow(QWidget):
         self._status.setText(display_status)
         self._last_detail = detail
         if display_status == "异常":
+            detail_parts = [status]
+            if detail:
+                detail_parts.append(detail)
+            self._status_detail.setText("\n".join(detail_parts))
+            self._status_detail.setVisible(True)
+        else:
+            self._status_detail.clear()
+            self._status_detail.setVisible(False)
+        if display_status == "异常":
             color = "#f472b6"
         elif display_status in {"停止", "恢复", "警告"}:
             color = "#4c8dff"
@@ -692,6 +723,10 @@ class LiveControlWindow(QWidget):
         self._status.setStyleSheet(f"color: {color};")
         self._status.setToolTip(detail)
         self._status_indicator.setToolTip(detail)
+        self._resize_status_detail(
+            max(1, self.width()),
+            max(1, int(round(_HUD_BASE_HEIGHT * getattr(self, "_hud_scale", 1.0)))),
+        )
         self._refresh_tooltip()
 
     def set_profile_name(self, profile_name: str) -> None:
@@ -728,6 +763,32 @@ class LiveControlWindow(QWidget):
         if "警告" in status:
             return "警告"
         return status
+
+    def _resize_status_detail(self, width: int, surface_height: int) -> None:
+        width = max(1, int(width))
+        surface_height = max(1, int(surface_height))
+        self._status_detail.setFixedWidth(width)
+        if self._status_detail.isHidden() or not self._status_detail.text():
+            self._status_detail.setFixedHeight(0)
+            self.setFixedSize(width, surface_height)
+            return
+
+        margins = self._status_detail.contentsMargins()
+        text_width = max(1, width - margins.left() - margins.right())
+        text_rect = QFontMetrics(self._status_detail.font()).boundingRect(
+            0,
+            0,
+            text_width,
+            1000000,
+            int(Qt.TextFlag.TextWordWrap),
+            self._status_detail.text(),
+        )
+        detail_height = max(
+            1,
+            text_rect.height() + margins.top() + margins.bottom(),
+        )
+        self._status_detail.setFixedHeight(detail_height)
+        self.setFixedSize(width, surface_height + detail_height)
 
     def _refresh_profile_text(self) -> None:
         padding = max(1, int(round(8 * getattr(self, "_hud_scale", 1.0))))
