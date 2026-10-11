@@ -797,6 +797,112 @@ def test_login_tray_start_keeps_native_target_for_second_instance_activation(
     host.shutdown()
 
 
+def test_second_instance_target_wins_when_main_window_is_also_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _ActivationController()
+    tray = _TrayRecorder()
+    host, _engine = _host(controller, tray_factory=lambda _app: tray)
+    controller.liveReady.emit()
+    activation_window = host._activation_window
+    assert activation_window is not None
+    target_hwnd = int(activation_window.winId())
+    main_hwnd = target_hwnd + 1
+
+    class NativeFunction:
+        def __init__(self, callback):
+            self._callback = callback
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            return self._callback(*args)
+
+    class Message(ctypes.Structure):
+        _fields_ = (
+            ("hwnd", ctypes.c_void_p),
+            ("message", ctypes.c_uint32),
+            ("wParam", ctypes.c_size_t),
+            ("lParam", ctypes.c_ssize_t),
+            ("time", ctypes.c_uint32),
+            ("pt_x", ctypes.c_long),
+            ("pt_y", ctypes.c_long),
+        )
+
+    class User32:
+        def __init__(self) -> None:
+            self.find_titles: list[str] = []
+            self.posted: list[tuple[int, int]] = []
+            self.fronted: list[int] = []
+            self.FindWindowW = NativeFunction(self._find_window)  # noqa: N802
+            self.PostMessageW = NativeFunction(self._post_message)  # noqa: N802
+            self.ShowWindow = NativeFunction(self._show_window)  # noqa: N802
+            self.SetForegroundWindow = NativeFunction(  # noqa: N802
+                self._set_foreground,
+            )
+
+        def _find_window(self, _class_name, title):
+            self.find_titles.append(title)
+            return {
+                runtime_module.GUI_WINDOW_TITLE: main_hwnd,
+                runtime_module.ACTIVATION_WINDOW_TITLE: target_hwnd,
+            }.get(title, 0)
+
+        def _post_message(self, hwnd, message, _wparam, _lparam):
+            self.posted.append((hwnd, message))
+            native_message = Message(hwnd, message, 0, 0, 0, 0, 0)
+            assert activation_window.nativeEvent(
+                b"windows_generic_MSG",
+                ctypes.addressof(native_message),
+            ) == (True, 0)
+            return True
+
+        def _show_window(self, hwnd, _command):
+            self.fronted.append(hwnd)
+            return True
+
+        def _set_foreground(self, hwnd):
+            self.fronted.append(hwnd)
+            return True
+
+    user32 = User32()
+    monkeypatch.setattr(runtime_module.sys, "platform", "win32")
+    monkeypatch.setattr(
+        runtime_module.ctypes,
+        "windll",
+        SimpleNamespace(user32=user32),
+    )
+    try:
+        assert runtime_module.activate_existing_window(timeout_seconds=0)
+        assert user32.find_titles == [runtime_module.ACTIVATION_WINDOW_TITLE]
+        assert user32.posted == [(target_hwnd, runtime_module.ACTIVATION_MESSAGE)]
+        assert user32.fronted == []
+        assert controller.stop_count == 1
+        assert controller.runPhase == "stopping"
+        assert host.window is None
+    finally:
+        host.shutdown()
+
+
+def test_tray_double_click_restores_running_workbench_without_stopping() -> None:
+    controller = _ActivationController()
+    tray = _TrayRecorder()
+    host, _engine = _host(controller, tray_factory=lambda _app: tray)
+    try:
+        controller.liveReady.emit()
+        assert host.window is None
+
+        host._on_tray_activated(QSystemTrayIcon.ActivationReason.DoubleClick)
+
+        assert controller.stop_count == 0
+        assert controller.runPhase == "running"
+        assert host.window is not None
+        assert host.window.isVisible()
+        assert tray.visible is False
+    finally:
+        host.shutdown()
+
+
 @pytest.mark.parametrize("terminal_signal", ("liveFinished", "liveFailed"))
 def test_second_instance_waits_for_live_terminal_signal_and_stops_once(
     terminal_signal: str,

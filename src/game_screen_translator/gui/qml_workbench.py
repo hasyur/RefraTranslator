@@ -504,6 +504,12 @@ class QmlWorkbenchHost(QObject):
             if bool(getattr(self._controller, "running", False)):
                 self._report_activation_stop_failure()
 
+    def _activate_from_tray(self) -> None:
+        if self._shutdown_called:
+            return
+        self._activation_restore_pending = False
+        self._restore_workbench(activate=True)
+
     def hide_to_tray(self) -> None:
         """Enter background residency for a Windows logon-started GUI."""
 
@@ -514,7 +520,7 @@ class QmlWorkbenchHost(QObject):
             return
         if self._shutdown_called:
             return
-        self._activate_from_second_instance()
+        self._activate_from_tray()
 
     def _restore_workbench(self, *, activate: bool = False) -> None:
         running = bool(getattr(self._controller, "running", False))

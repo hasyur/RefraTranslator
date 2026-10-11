@@ -43,7 +43,6 @@ _MOD_CONTROL = 0x0002
 _MOD_SHIFT = 0x0004
 _MOD_WIN = 0x0008
 _MOD_NOREPEAT = 0x4000
-_SW_RESTORE = 9
 _ACTIVATION_RETRY_TIMEOUT_SECONDS = 2.0
 _ACTIVATION_RETRY_INTERVAL_SECONDS = 0.05
 
@@ -290,12 +289,11 @@ class SingleInstanceGuard:
 
 
 def activate_existing_window(
-    title: str = GUI_WINDOW_TITLE,
     *,
     timeout_seconds: float = _ACTIVATION_RETRY_TIMEOUT_SECONDS,
     retry_interval_seconds: float = _ACTIVATION_RETRY_INTERVAL_SECONDS,
 ) -> bool:
-    """Restore and foreground an existing workbench window."""
+    """Ask the surviving activation target to restore the workbench."""
 
     if sys.platform != "win32":
         return False
@@ -310,22 +308,12 @@ def activate_existing_window(
             ctypes.c_void_p,
         )
         user32.PostMessageW.restype = ctypes.c_bool
-        user32.ShowWindow.argtypes = (ctypes.c_void_p, ctypes.c_int)
-        user32.SetForegroundWindow.argtypes = (ctypes.c_void_p,)
         deadline = time.monotonic() + max(0.0, timeout_seconds)
         interval = max(0.0, retry_interval_seconds)
         while True:
-            for window_title in (title, ACTIVATION_WINDOW_TITLE):
-                hwnd = user32.FindWindowW(None, window_title)
-                if not hwnd:
-                    continue
-                if window_title == ACTIVATION_WINDOW_TITLE:
-                    if user32.PostMessageW(hwnd, ACTIVATION_MESSAGE, 0, 0):
-                        return True
-                    continue
-                user32.ShowWindow(hwnd, _SW_RESTORE)
-                if user32.SetForegroundWindow(hwnd):
-                    return True
+            hwnd = user32.FindWindowW(None, ACTIVATION_WINDOW_TITLE)
+            if hwnd and user32.PostMessageW(hwnd, ACTIVATION_MESSAGE, 0, 0):
+                return True
             remaining = deadline - time.monotonic()
             if remaining <= 0 or interval <= 0:
                 return False
