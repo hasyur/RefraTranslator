@@ -335,6 +335,12 @@ def _open_dialog(dialog: QObject) -> None:
     assert dialog.property("visible") is True
 
 
+def _quick_popup(owner: QObject) -> QObject:
+    popups = [child for child in owner.children() if child.inherits("QQuickPopup")]
+    assert len(popups) == 1
+    return popups[0]
+
+
 def _assert_prism_dialog_palette(
     window: QQuickWindow,
     theme: QObject,
@@ -892,6 +898,127 @@ def test_home_hotkey_behavior_selector_persists_and_survives_live_recreate(
         assert recreated_selector is not None
         assert recreated_selector.property("currentIndex") == 2
         assert recreated_selector.property("currentText") == "启动 / 停止并打开 GUI"
+    finally:
+        host.shutdown()
+
+
+@pytest.mark.parametrize("skin", (SKIN_PRISM, SKIN_DOHNA))
+@pytest.mark.parametrize("hover_ms", (100, 450))
+def test_combo_box_opening_cancels_pending_and_visible_setting_hints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    skin: str,
+    hover_ms: int,
+) -> None:
+    # Do not let another app's global hotkey open a blocking startup dialog.
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
+    app, controller, host, window = _real_home_hotkey_host(tmp_path)
+    try:
+        controller.setSkin(skin)
+        selector = window.findChild(QQuickItem, "homeHotkeyBehaviorSelector")
+        hint = window.findChild(QObject, "settingHint-home-hotkey-behavior-control")
+        scroll = window.findChild(QObject, "homeSecondaryScroll")
+        assert selector is not None and hint is not None and scroll is not None
+        scroll.setProperty(
+            "contentY",
+            max(
+                0.0,
+                float(scroll.property("contentHeight")) - float(scroll.property("height")),
+            ),
+        )
+        app.processEvents()
+        _wait_for_page_layout(window, selector, app)
+        center = selector.mapToScene(
+            QPointF(selector.width() / 2, selector.height() / 2),
+        ).toPoint()
+        QTest.mouseMove(window, QPoint(2, 2))
+        QTest.mouseMove(window, center)
+        QTest.qWait(hover_ms)
+        assert hint.property("hintVisible") is (hover_ms >= 400)
+
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=center)
+        app.processEvents()
+        popup = _quick_popup(selector)
+        assert popup.property("visible") is True
+        assert hint.property("hintVisible") is False
+        QTest.qWait(450)
+        assert popup.property("visible") is True
+        assert hint.property("hintVisible") is False
+
+        options = popup.property("contentItem")
+        option_center = options.mapToScene(
+            QPointF(options.width() / 2, options.height() / 2),
+        ).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=option_center)
+        app.processEvents()
+        assert popup.property("visible") is False
+        assert controller.hotkeyBehaviorPreference == HOTKEY_BEHAVIOR_TOGGLE
+
+        QTest.mouseMove(window, QPoint(2, 2))
+        QTest.mouseMove(window, center)
+        QTest.qWait(450)
+        assert hint.property("hintVisible") is True
+    finally:
+        host.shutdown()
+
+
+@pytest.mark.parametrize("skin", (SKIN_PRISM, SKIN_DOHNA))
+def test_delayed_label_hint_stays_below_open_combo_box(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    skin: str,
+) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
+    app, controller, host, window = _real_home_hotkey_host(tmp_path)
+    try:
+        controller.setSkin(skin)
+        selector = window.findChild(QQuickItem, "homeHotkeyBehaviorSelector")
+        hint = window.findChild(QObject, "settingHint-home-hotkey-behavior-label")
+        scroll = window.findChild(QObject, "homeSecondaryScroll")
+        assert selector is not None and hint is not None and scroll is not None
+        # A longer explanation wraps far enough to overlap the first menu option.
+        hint.setProperty("description", str(hint.property("description")) * 3)
+        scroll.setProperty(
+            "contentY",
+            max(
+                0.0,
+                float(scroll.property("contentHeight")) - float(scroll.property("height")),
+            ),
+        )
+        app.processEvents()
+        _wait_for_page_layout(window, selector, app)
+        label = hint.property("target")
+        QTest.mouseMove(window, QPoint(2, 2))
+        QTest.mouseMove(
+            window,
+            label.mapToScene(QPointF(label.width() / 2, label.height() / 2)).toPoint(),
+        )
+        popup = _quick_popup(selector)
+        assert QMetaObject.invokeMethod(popup, "open") is True
+        QTest.qWait(450)
+        assert popup.property("visible") is True
+        assert hint.property("hintVisible") is True
+
+        menu_item = popup.property("contentItem").parentItem()
+        hint_item = _quick_popup(hint).property("contentItem").parentItem()
+        overlay = menu_item.parentItem()
+        assert hint_item.parentItem() == overlay
+        menu_rect = menu_item.mapRectToItem(overlay, menu_item.boundingRect())
+        hint_rect = hint_item.mapRectToItem(overlay, hint_item.boundingRect())
+        overlap = menu_rect.intersected(hint_rect)
+        assert not overlap.isEmpty(), (menu_rect, hint_rect)
+        point = overlap.center()
+        assert menu_item.z() > hint_item.z()
+
+        controller.setHotkeyBehavior(HOTKEY_BEHAVIOR_TOGGLE_SHOW)
+        QTest.mouseClick(
+            window,
+            Qt.MouseButton.LeftButton,
+            pos=overlay.mapToScene(point).toPoint(),
+        )
+        app.processEvents()
+        assert popup.property("visible") is False
+        assert selector.property("currentIndex") == 0
     finally:
         host.shutdown()
 

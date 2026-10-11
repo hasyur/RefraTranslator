@@ -196,5 +196,6 @@ ComboBox {
         target: root
         description: root.settingDescription
         settingKey: root.settingKey
+        enabled: description.length > 0 && !root.popup.visible
     }
 }

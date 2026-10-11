@@ -121,11 +121,18 @@ HoverHandler {
         }
     }
 
+    onEnabledChanged: {
+        if (!enabled) {
+            showTimer.stop()
+            hintPopup.close()
+        }
+    }
+
     property Timer showTimer: Timer {
         interval: 400
         repeat: false
         onTriggered: {
-            if (!root.hovered || !root.targetIsVisible())
+            if (!root.enabled || !root.hovered || !root.targetIsVisible())
                 return
             root.reposition()
             root.hintPopup.open()
@@ -140,6 +147,8 @@ HoverHandler {
 
     property Popup hintPopup: Popup {
         parent: Overlay.overlay
+        // Interactive popups must stay above hints, even if a hint opens later.
+        z: -1
         width: 280
         padding: 10
         modal: false
