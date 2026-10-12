@@ -3238,8 +3238,13 @@ def test_real_dohna_titles_enter_opposite_content_on_every_page(tmp_path: Path) 
 
 @pytest.mark.parametrize("checked", [False, True])
 def test_native_dohna_toggle_smooths_edges_without_shrinking_or_clipping(
-    tmp_path: Path, checked: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    checked: bool,
 ) -> None:
+    # This pixel-only test must not depend on whether another app owns the
+    # user's system-wide default shortcut.
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
     app = _application()
     if app.platformName() != "windows":
         pytest.skip("requires native Windows rendering for pixel coverage checks")

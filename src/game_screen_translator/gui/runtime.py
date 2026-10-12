@@ -10,6 +10,7 @@ runtime so the existing non-Windows test and development paths stay usable.
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -146,6 +147,12 @@ def parse_hotkey(value: str) -> HotkeySpec:
 def startup_command(project_root: Path) -> str:
     """Return the per-user Run command that opens this project's GUI in tray."""
 
+    if os.environ.get("REFRATRANSLATOR_INSTALLED") == "1":
+        pythonw = Path(sys.executable).resolve().with_name("pythonw.exe")
+        return (
+            f'"{pythonw}" -s -X utf8 -m game_screen_translator.gui_entry '
+            "--installed --startup"
+        )
     batch = (project_root.resolve() / "start_gui.bat").resolve()
     # The outer quotes belong to cmd.exe's /c parsing; the inner quotes keep a
     # project path containing spaces valid.

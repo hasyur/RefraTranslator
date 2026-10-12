@@ -7,6 +7,9 @@ include install.bat
 include start_gui.bat
 include start_gui(debug).bat
 include start_test_scenes.bat
+include packaging/build_windows_installer.py
+include packaging/prepare_ocr_manifest.py
+include packaging/windows_installer.iss
 include tests/test_*.py
 include tests/integration/test_*.py
 include tests/manual/animated_ocr_scenes.py
@@ -14,3 +17,6 @@ include tests/manual/README.md
 recursive-include src/game_screen_translator/gui/qml *.qml
 prune scripts
 prune .local-tools
+prune .cache
+prune build
+prune dist

@@ -80,16 +80,56 @@ def _worker_environment() -> dict[str, str]:
     return environment
 
 
-def _prepare_config(project_root: Path) -> Path:
+def _prepare_config(project_root: Path, template_root: Path | None = None) -> Path:
     config_path = project_root / "config.toml"
     if config_path.is_file():
         return config_path
 
-    template_path = project_root / "config.example.toml"
+    template_path = (template_root or project_root) / "config.example.toml"
     if not template_path.is_file():
         raise FileNotFoundError(f"Configuration template not found: {template_path}")
     shutil.copyfile(template_path, config_path)
     return config_path
+
+
+def _install_root() -> Path:
+    override = os.environ.get("REFRATRANSLATOR_INSTALL_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    executable = Path(sys.executable).resolve()
+    # The relocatable Python runtime lives in {app}\\runtime.
+    return executable.parent.parent
+
+
+def _installed_data_root(install_root: Path) -> Path:
+    override = os.environ.get("REFRATRANSLATOR_DATA_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    default_root = (
+        Path(local_app_data).expanduser()
+        if local_app_data
+        else Path.home() / "AppData" / "Local"
+    ) / "RefraTranslator"
+    # Preserve an existing portable install's config, profiles and cache in
+    # place when setup is run over that directory. The source remains intact.
+    if (default_root / "config.toml").is_file():
+        return default_root.resolve()
+    if (install_root / "config.toml").is_file():
+        return install_root.resolve()
+    cwd = Path.cwd().resolve()
+    if cwd != install_root and (cwd / "config.toml").is_file():
+        return cwd
+    return default_root.resolve()
+
+
+def _duration_argument(arguments: Sequence[str]) -> str | None:
+    for index, argument in enumerate(arguments):
+        if argument == "--duration" and index + 1 < len(arguments):
+            return arguments[index + 1]
+        if argument.startswith("--duration="):
+            return argument.partition("=")[2]
+    return None
 
 
 def _run_logged(
@@ -136,8 +176,14 @@ def _run_owned(
     *,
     project_root: Path | None = None,
     mirror: TextIO | None = None,
+    installed: bool = False,
 ) -> int:
-    root = (project_root or Path.cwd()).resolve()
+    install_root = (project_root or _install_root()).resolve() if installed else None
+    root = (
+        _installed_data_root(install_root)
+        if installed and install_root is not None
+        else (project_root or Path.cwd()).resolve()
+    )
     output_dir = root / "output"
     log_path = output_dir / "launcher.log"
     console = _default_mirror() if mirror is None else mirror
@@ -158,9 +204,17 @@ def _run_owned(
         try:
             _emit(log, console, "RefraTranslator launcher diagnostics")
             _emit(log, console, f"Working directory: {root}")
-            config_path = _prepare_config(root)
+            config_path = _prepare_config(root, install_root)
             worker = _worker_python()
             environment = _worker_environment()
+            if installed:
+                environment.update(
+                    {
+                        "REFRATRANSLATOR_INSTALLED": "1",
+                        "REFRATRANSLATOR_INSTALL_DIR": str(install_root),
+                        "REFRATRANSLATOR_DATA_DIR": str(root),
+                    }
+                )
 
             _emit(log, console, "Checking the isolated Python and GUI dependencies...")
             exit_code = _run_logged(
@@ -182,9 +236,9 @@ def _run_owned(
             if exit_code != 0:
                 _emit(log, console, f"Dependency check failed with code {exit_code}.")
             else:
-                _emit(log, console, "Starting RefraTranslator GUI...")
-                exit_code = _run_logged(
-                    [
+                if installed:
+                    _emit(log, console, "Checking first-run OCR resources...")
+                    first_run_command = [
                         str(worker),
                         "-u",
                         "-X",
@@ -192,17 +246,42 @@ def _run_owned(
                         "-X",
                         "faulthandler",
                         "-m",
-                        "game_screen_translator",
+                        "game_screen_translator.first_run",
                         "--config",
                         str(config_path),
-                        "gui",
-                        *(arguments if arguments is not None else sys.argv[1:]),
-                    ],
-                    project_root=root,
-                    environment=environment,
-                    log=log,
-                    mirror=console,
-                )
+                    ]
+                    duration = _duration_argument(arguments or ())
+                    if duration is not None:
+                        first_run_command.extend(("--duration", duration))
+                    exit_code = _run_logged(
+                        first_run_command,
+                        project_root=install_root,
+                        environment=environment,
+                        log=log,
+                        mirror=console,
+                    )
+                if exit_code == 0:
+                    _emit(log, console, "Starting RefraTranslator GUI...")
+                    exit_code = _run_logged(
+                        [
+                            str(worker),
+                            "-u",
+                            "-X",
+                            "utf8",
+                            "-X",
+                            "faulthandler",
+                            "-m",
+                            "game_screen_translator",
+                            "--config",
+                            str(config_path),
+                            "gui",
+                            *(arguments if arguments is not None else sys.argv[1:]),
+                        ],
+                        project_root=root if not installed else install_root,
+                        environment=environment,
+                        log=log,
+                        mirror=console,
+                    )
                 if exit_code != 0:
                     _emit(log, console, f"GUI exited unexpectedly with code {exit_code}.")
         except Exception:
@@ -235,10 +314,14 @@ def run(
                 "within the activation timeout."
             )
             return 1
+        values = list(sys.argv[1:] if arguments is None else arguments)
+        installed = "--installed" in values
+        values = [value for value in values if value != "--installed"]
         return _run_owned(
-            arguments,
+            values,
             project_root=project_root,
             mirror=mirror,
+            installed=installed,
         )
     finally:
         guard.release()

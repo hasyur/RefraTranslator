@@ -450,6 +450,7 @@ def test_readme_installation_guide_matches_supported_environment() -> None:
 
     assert requires_python == ">=3.11,<3.14"
     assert "64 位 Windows 10 或 Windows 11" in readme
+    assert "不需要先安装 Python" in readme
     assert "64 位 Python 3.11、3.12 或 3.13" in readme
     assert "nvidia-smi" in readme
     assert "C:\\RefraTranslator" in readme
@@ -463,8 +464,10 @@ def test_readme_installation_guide_documents_installer_contract() -> None:
     assert "再次安装时保留已有配置" in readme
     assert "安装成功后清理 `.cache\\pip`" in readme
     assert "只删除项目根目录中的 `.venv`" in readme
+    assert "`%LOCALAPPDATA%\\RefraTranslator\\output\\launcher.log`" in readme
     assert "`output\\launcher.log`" in readme
     assert "`output\\live.log`" in readme
+    assert "再次运行 `RefraTranslator-Setup.exe`" in readme
     assert "-WithGui -WithDev" in readme
     assert "WindowsApps\\python.exe" in readme
     assert "where.exe python" in readme

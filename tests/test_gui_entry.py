@@ -106,3 +106,56 @@ def test_shared_gui_backend_stops_after_a_failed_dependency_probe(
     assert commands[0][-2] == "-c"
     log = (tmp_path / "output" / "launcher.log").read_text(encoding="utf-8")
     assert "Dependency check failed with code 7" in log
+
+
+def test_installed_launcher_uses_isolated_data_root_and_runs_first_run_preparation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_root = tmp_path / "installed-app"
+    install_root.mkdir()
+    (install_root / "config.example.toml").write_text(
+        "example = true\n",
+        encoding="utf-8",
+    )
+    data_root = tmp_path / "isolated-user-data"
+    worker = tmp_path / "runtime" / "python.exe"
+    commands: list[list[str]] = []
+    environments: list[dict[str, str]] = []
+    monkeypatch.setenv("REFRATRANSLATOR_DATA_DIR", str(data_root))
+    monkeypatch.setattr(gui_entry, "_worker_python", lambda: worker)
+
+    def fake_run_logged(command, **kwargs) -> int:
+        commands.append([str(argument) for argument in command])
+        environments.append(kwargs["environment"])
+        return 0
+
+    monkeypatch.setattr(gui_entry, "_run_logged", fake_run_logged)
+
+    assert gui_entry.run(
+        ["--installed", "--duration", "0.5"],
+        project_root=install_root,
+        mirror=StringIO(),
+    ) == 0
+
+    config_path = data_root / "config.toml"
+    assert config_path.read_text(encoding="utf-8") == "example = true\n"
+    assert len(commands) == 3
+    assert commands[1][commands[1].index("game_screen_translator.first_run") :] == [
+        "game_screen_translator.first_run",
+        "--config",
+        str(config_path),
+        "--duration",
+        "0.5",
+    ]
+    assert commands[2][-6:] == [
+        "game_screen_translator",
+        "--config",
+        str(config_path),
+        "gui",
+        "--duration",
+        "0.5",
+    ]
+    assert environments[0]["REFRATRANSLATOR_INSTALLED"] == "1"
+    assert environments[0]["REFRATRANSLATOR_DATA_DIR"] == str(data_root.resolve())
+    assert all(environment is environments[0] for environment in environments)
