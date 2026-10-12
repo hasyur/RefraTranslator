@@ -126,6 +126,35 @@ Item {
         onAccepted: root.workbench.createProfile(profileName.text.trim())
     }
 
+    PrismDialog {
+        id: deleteProfileDialog
+        objectName: "deleteProfileDialog"
+        surfaceName: "deleteProfileDialog"
+        property string profileId: ""
+        property string profileName: ""
+        theme: root.theme
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        title: "删除游戏配置"
+        acceptText: "删除配置"
+        acceptTone: "danger"
+        rejectText: "取消"
+        acceptEnabled: root.workbench.hasProfile && !root.workbench.running
+                       && root.workbench.runPhase !== "stopping"
+        width: 420
+
+        Text {
+            text: "确定删除“" + deleteProfileDialog.profileName
+                  + "”？该配置的设置、术语表、翻译缓存、手动修正和运行快照将一并删除，无法撤销。"
+            color: root.theme.textSoft
+            font.family: root.theme.uiFontFor(text)
+            font.pixelSize: 15
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        onAccepted: root.workbench.deleteProfile(profileId)
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 16
@@ -488,6 +517,20 @@ Item {
                         text: "新建"
                         Layout.fillWidth: true
                         onClicked: createProfileDialog.open()
+                    }
+                    PrismButton {
+                        objectName: "openDeleteProfileDialogButton"
+                        theme: root.theme
+                        text: "删除"
+                        tone: "danger"
+                        enabled: root.workbench.hasProfile && !root.workbench.running
+                                 && root.workbench.runPhase !== "stopping"
+                        Layout.fillWidth: true
+                        onClicked: {
+                            deleteProfileDialog.profileId = root.workbench.profileIds[root.workbench.currentProfileIndex]
+                            deleteProfileDialog.profileName = root.workbench.currentProfileName
+                            deleteProfileDialog.open()
+                        }
                     }
                 }
 

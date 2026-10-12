@@ -28,12 +28,14 @@ from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.gui import workbench_controller as controller_module
 from game_screen_translator.gui.theme import (
     HOTKEY_BEHAVIOR_TOGGLE_SHOW,
+    GuiPreferences,
     SKIN_DOHNA,
     SKIN_PRISM,
     THEME_DARK,
     THEME_LIGHT,
     gui_settings_path,
     load_gui_preferences,
+    save_gui_preferences,
 )
 from game_screen_translator.gui.workbench_controller import WorkbenchController
 from game_screen_translator.live.latency import LiveLatencyStats
@@ -81,6 +83,173 @@ def _controller_with_profile(tmp_path: Path) -> tuple[WorkbenchController, Path]
         display_name="测试游戏",
     )
     return WorkbenchController(config_path, probe_ocr_devices=False), config_path
+
+
+def test_restart_restores_last_profile_and_its_settings_but_starts_on_home(tmp_path: Path) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    second = create_game_profile(config_path, load_config(config_path), "second", display_name="ZZ last")
+    save_profile_custom_prompt(second, "上次配置的提示词")
+    save_profile_capture_settings(second, ProfileCaptureSettings(monitor_index=0, region=(30, 40, 900, 250)))
+    controller.refreshProfiles()
+    controller.selectProfile(controller.profileIds.index("second"))
+    controller.setPage("OCR")
+    controller.setTheme("dark")
+    controller.setSkin(SKIN_DOHNA)
+    controller.setHotkey("Ctrl+Shift+F9")
+    controller.setHotkeyBehavior(HOTKEY_BEHAVIOR_TOGGLE_SHOW)
+    assert load_gui_preferences(config_path).last_profile_id == "second"
+
+    restored = WorkbenchController(config_path, probe_ocr_devices=False)
+    assert restored.profileIds[restored.currentProfileIndex] == "second"
+    assert restored.customPrompt == "上次配置的提示词"
+    assert (restored.captureLeft, restored.captureTop, restored.captureWidth, restored.captureHeight) == (30, 40, 900, 250)
+    assert restored.currentPage == "HOME"
+
+
+def test_missing_last_profile_falls_back_and_updates_preference(tmp_path: Path) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    save_gui_preferences(config_path, GuiPreferences(last_profile_id="missing"))
+    restored = WorkbenchController(config_path, probe_ocr_devices=False)
+    assert restored.profileIds[restored.currentProfileIndex] == "game"
+    assert load_gui_preferences(config_path).last_profile_id == "game"
+
+
+def test_create_profile_is_remembered_on_restart(tmp_path: Path) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    controller.createProfile("ZZ 新配置")
+    restored = WorkbenchController(config_path, probe_ocr_devices=False)
+    assert restored.currentProfileName == "ZZ 新配置"
+
+
+def test_delete_selected_profile_selects_survivor_then_clears_empty_state(tmp_path: Path) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    second = create_game_profile(config_path, load_config(config_path), "second")
+    controller.refreshProfiles()
+    controller.selectProfile(controller.profileIds.index("second"))
+    controller.deleteProfile("second")
+    assert not second.directory.exists()
+    assert controller.profileIds == ["game"]
+    assert load_gui_preferences(config_path).last_profile_id == "game"
+    restored = WorkbenchController(config_path, probe_ocr_devices=False)
+    assert restored.currentProfileName == "测试游戏"
+
+    controller.setCustomPrompt("待删除草稿")
+    controller.deleteProfile("game")
+    assert controller.profileIds == []
+    assert controller.currentProfileIndex == -1
+    assert controller.hasProfile is False
+    assert controller.canStart is False
+    assert controller.customPrompt == ""
+    assert load_gui_preferences(config_path).last_profile_id == ""
+    assert WorkbenchController(config_path, probe_ocr_devices=False).hasProfile is False
+
+
+@pytest.mark.parametrize("stopping", [False, True])
+def test_delete_profile_is_blocked_while_running_or_stopping(tmp_path: Path, stopping: bool) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    controller._live_process = SimpleNamespace(poll=lambda: 0 if stopping else None)
+    controller._live_stop_requested = stopping
+    errors = []
+    controller.errorRaised.connect(lambda title, detail: errors.append((title, detail)))
+    controller.deleteProfile("game")
+    assert (config_path.parent / "profiles/game/settings.toml").is_file()
+    assert controller.hasProfile is True
+    assert "请先停止翻译" in errors[-1][1]
+
+
+def test_delete_failure_keeps_selected_profile_and_preference(tmp_path: Path, monkeypatch) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    errors = []
+    controller.errorRaised.connect(lambda title, detail: errors.append((title, detail)))
+    def fail(*args):
+        raise PermissionError("文件被占用")
+    monkeypatch.setattr(controller_module, "delete_game_profile", fail)
+    controller.deleteProfile("game")
+    assert controller.profileIds == ["game"]
+    assert controller.currentProfileName == "测试游戏"
+    assert load_gui_preferences(config_path).last_profile_id == "game"
+    assert "文件被占用" in errors[-1][1]
+
+
+def test_partial_delete_failure_clears_invalid_state_and_reports_residual_files(tmp_path: Path, monkeypatch) -> None:
+    from game_screen_translator import profiles as profiles_module
+    controller, config_path = _controller_with_profile(tmp_path)
+    controller.setCustomPrompt("不能保留的草稿")
+    errors = []
+    controller.errorRaised.connect(lambda title, detail: errors.append((title, detail)))
+    def fail(holding):
+        (holding / "game/profile.toml").unlink()
+        (holding / "game/settings.toml").unlink()
+        raise PermissionError("缓存被占用")
+    monkeypatch.setattr(profiles_module.shutil, "rmtree", fail)
+    controller.deleteProfile("game")
+    assert controller.hasProfile is False
+    assert controller.canStart is False
+    assert controller.profileIds == []
+    assert controller.customPrompt == ""
+    assert controller._last_run_snapshot is None
+    assert load_gui_preferences(config_path).last_profile_id == ""
+    assert errors[-1][0] == "配置已移除，文件清理未完成"
+    assert ".deleting-" in errors[-1][1]
+    assert "缓存被占用" in errors[-1][1]
+    assert WorkbenchController(config_path, probe_ocr_devices=False).hasProfile is False
+
+
+def test_delete_success_refresh_failure_clears_old_state_and_keeps_error(tmp_path: Path) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    second = create_game_profile(config_path, load_config(config_path), "second")
+    controller.refreshProfiles()
+    controller.setCustomPrompt("旧草稿")
+    second.manifest_path.write_text('id = "wrong"\n', encoding="utf-8")
+    errors = []
+    controller.errorRaised.connect(lambda title, detail: errors.append((title, detail)))
+    controller.deleteProfile("game")
+    assert not (config_path.parent / "profiles/game").exists()
+    assert controller.hasProfile is False
+    assert controller.canStart is False
+    assert controller.profileIds == []
+    assert controller.currentProfileIndex == -1
+    assert controller.customPrompt == ""
+    assert controller._last_run_snapshot is None
+    assert load_gui_preferences(config_path).last_profile_id == ""
+    assert errors[-1][0] == "无法读取配置"
+    assert errors[-1][1] in controller.statusText
+
+
+def test_delete_stale_confirmation_cannot_delete_another_profile(tmp_path: Path) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    second = create_game_profile(config_path, load_config(config_path), "second")
+    controller.refreshProfiles()
+    controller.selectProfile(controller.profileIds.index("second"))
+    controller.deleteProfile("game")
+    assert second.directory.is_dir()
+    assert (config_path.parent / "profiles/game").is_dir()
+    assert load_gui_preferences(config_path).last_profile_id == "second"
+
+
+def test_failed_profile_load_does_not_replace_remembered_selection(tmp_path: Path) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    second = create_game_profile(config_path, load_config(config_path), "second")
+    controller.refreshProfiles()
+    second.manifest_path.write_text('id = "wrong"\n', encoding="utf-8")
+    controller.selectProfile(controller.profileIds.index("second"))
+    assert controller.currentProfileName == "测试游戏"
+    assert load_gui_preferences(config_path).last_profile_id == "game"
+
+
+def test_profile_preference_save_failure_is_reported_without_losing_settings(tmp_path: Path, monkeypatch) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    create_game_profile(config_path, load_config(config_path), "second")
+    controller.refreshProfiles()
+    errors = []
+    controller.errorRaised.connect(lambda title, detail: errors.append((title, detail)))
+    def fail(*args):
+        raise OSError("磁盘已满")
+    monkeypatch.setattr(controller_module, "save_gui_preferences", fail)
+    controller.selectProfile(controller.profileIds.index("second"))
+    assert controller.profileIds[controller.currentProfileIndex] == "second"
+    assert load_gui_preferences(config_path).last_profile_id == "game"
+    assert errors == [("保存上次使用的配置失败", "磁盘已满")]
 
 
 def test_controller_projects_real_profile_data_and_truthful_telemetry_empty_state(
@@ -897,7 +1066,7 @@ def test_theme_preference_persists_next_to_config_and_restores(
     controller, config_path = _controller_with_profile(tmp_path)
     settings_path = gui_settings_path(config_path)
     assert settings_path.parent == tmp_path
-    assert not settings_path.exists()
+    assert load_gui_preferences(config_path).last_profile_id == "game"
 
     controller.setTheme(THEME_DARK)
     assert controller.themePreference == THEME_DARK
@@ -923,6 +1092,7 @@ def test_theme_preference_does_not_change_when_project_save_fails(
     controller, config_path = _controller_with_profile(tmp_path)
     initial_preference = controller.themePreference
     initial_effective = controller.effectiveTheme
+    initial_preferences = load_gui_preferences(config_path)
     errors: list[tuple[str, str]] = []
     controller.errorRaised.connect(lambda title, message: errors.append((title, message)))
     monkeypatch.setattr(
@@ -935,7 +1105,7 @@ def test_theme_preference_does_not_change_when_project_save_fails(
 
     assert controller.themePreference == initial_preference
     assert controller.effectiveTheme == initial_effective
-    assert not gui_settings_path(config_path).exists()
+    assert load_gui_preferences(config_path) == initial_preferences
     assert errors == [("保存界面主题失败", "disk full")]
     controller.shutdown()
 
@@ -988,6 +1158,7 @@ def test_skin_preference_does_not_change_when_project_save_fails(
 ) -> None:
     controller, config_path = _controller_with_profile(tmp_path)
     initial_effective = controller.effectiveTheme
+    initial_preferences = load_gui_preferences(config_path)
     errors: list[tuple[str, str]] = []
     controller.errorRaised.connect(lambda title, message: errors.append((title, message)))
     monkeypatch.setattr(
@@ -1000,7 +1171,7 @@ def test_skin_preference_does_not_change_when_project_save_fails(
 
     assert controller.skinPreference == SKIN_PRISM
     assert controller.effectiveTheme == initial_effective
-    assert not gui_settings_path(config_path).exists()
+    assert load_gui_preferences(config_path) == initial_preferences
     assert errors == [("保存界面皮肤失败", "disk full")]
     controller.shutdown()
 

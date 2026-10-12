@@ -103,6 +103,19 @@ def test_gui_behavior_preferences_round_trip(tmp_path: Path) -> None:
     assert loaded.hotkey_behavior == HOTKEY_BEHAVIOR_TOGGLE_SHOW
 
 
+def test_last_profile_preference_round_trip_supports_unicode(tmp_path: Path) -> None:
+    config_path = _config(tmp_path / "config.toml")
+    preferences = GuiPreferences(last_profile_id="游戏-2", theme=THEME_DARK)
+    save_gui_preferences(config_path, preferences)
+    assert load_gui_preferences(config_path) == preferences
+
+
+@pytest.mark.parametrize("profile_id", [12, "../other", " ", "CON"])
+def test_invalid_last_profile_preference_is_rejected(profile_id) -> None:
+    with pytest.raises(GuiSettingsError, match="last_profile_id"):
+        GuiPreferences(last_profile_id=profile_id)
+
+
 @pytest.mark.parametrize(
     "content",
     (

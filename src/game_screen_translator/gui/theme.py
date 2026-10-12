@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tomllib
@@ -11,6 +12,7 @@ from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
 from game_screen_translator.branding import PRODUCT_NAME
+from game_screen_translator.profiles import ProfileError, validate_profile_id
 from .runtime import DEFAULT_HOTKEY, GuiRuntimeError, parse_hotkey
 
 
@@ -55,8 +57,16 @@ class GuiPreferences:
     start_with_windows: bool = False
     hotkey: str = DEFAULT_HOTKEY
     hotkey_behavior: str = HOTKEY_BEHAVIOR_START_ONLY
+    last_profile_id: str = ""
 
     def __post_init__(self) -> None:
+        if not isinstance(self.last_profile_id, str):
+            raise GuiSettingsError("behavior.last_profile_id 必须是字符串")
+        if self.last_profile_id:
+            try:
+                object.__setattr__(self, "last_profile_id", validate_profile_id(self.last_profile_id))
+            except ProfileError as exc:
+                raise GuiSettingsError(f"behavior.last_profile_id 无效：{exc}") from exc
         if not isinstance(self.theme, str) or self.theme not in _VALID_THEMES:
             choices = ", ".join(sorted(_VALID_THEMES))
             raise GuiSettingsError(f"界面主题必须是以下值之一：{choices}")
@@ -115,6 +125,7 @@ def load_gui_preferences(config_path: Path) -> GuiPreferences:
         "start_with_windows",
         "hotkey",
         "hotkey_behavior",
+        "last_profile_id",
     }
     if unknown_behavior:
         raise GuiSettingsError(
@@ -138,6 +149,7 @@ def load_gui_preferences(config_path: Path) -> GuiPreferences:
         start_with_windows=start_with_windows,
         hotkey=hotkey,
         hotkey_behavior=hotkey_behavior,
+        last_profile_id=behavior.get("last_profile_id", ""),
     )
 
 
@@ -154,6 +166,7 @@ def save_gui_preferences(config_path: Path, preferences: GuiPreferences) -> Path
         f"start_with_windows = {'true' if preferences.start_with_windows else 'false'}\n"
         f'hotkey = "{preferences.hotkey}"\n'
         f'hotkey_behavior = "{preferences.hotkey_behavior}"\n'
+        f'last_profile_id = {json.dumps(preferences.last_profile_id, ensure_ascii=False)}\n'
     )
     try:
         temporary.write_text(content, encoding="utf-8")

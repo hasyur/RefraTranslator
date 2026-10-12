@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import stat
 import tempfile
 import tomllib
 import unicodedata
@@ -43,6 +45,10 @@ _WINDOWS_RESERVED_NAMES = {
 
 class ProfileError(ValueError):
     """Raised when a per-game profile is invalid or unavailable."""
+
+
+class ProfileDeletionCleanupError(ProfileError):
+    """The profile was removed from selection, but file cleanup failed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -624,6 +630,39 @@ def list_game_profiles(config_path: Path, config: AppConfig) -> tuple[GameProfil
     return tuple(
         sorted(profiles, key=lambda profile: (profile.display_name.casefold(), profile.profile_id))
     )
+
+
+def delete_game_profile(config_path: Path, config: AppConfig, profile_id: str) -> None:
+    normalized_id = validate_profile_id(profile_id)
+    root = resolve_profiles_root(config_path, config)
+    directory = root / normalized_id
+    if directory.resolve().parent != root:
+        raise ProfileError("Profile 路径越出了资料库根目录")
+    if not directory.is_dir():
+        raise ProfileError(f"找不到游戏 Profile {normalized_id!r}")
+    attributes = directory.lstat()
+    if directory.is_symlink() or (
+        getattr(attributes, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise ProfileError("不能删除链接目录中的 Profile")
+    manifest = _read_toml(directory / "profile.toml", "Profile 清单")
+    if manifest.get("id") != normalized_id:
+        raise ProfileError("profile.toml 的 id 与目录名不一致")
+    # Keep interrupted cleanup outside the selectable profile layout. The
+    # holding directory has no manifest, so list_game_profiles ignores it.
+    holding = Path(tempfile.mkdtemp(prefix=".deleting-", dir=root))
+    try:
+        directory.rename(holding / normalized_id)
+    except OSError:
+        holding.rmdir()
+        raise
+    try:
+        shutil.rmtree(holding)
+    except OSError as exc:
+        raise ProfileDeletionCleanupError(
+            f"配置已从列表移除，但部分文件未能清理：{holding}。"
+            f"请解除文件占用后删除该目录。原因：{exc}"
+        ) from exc
 
 
 def save_profile_capture_settings(

@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -8,11 +10,13 @@ from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.profiles import (
     MAX_CUSTOM_PROMPT_CHARACTERS,
     ProfileCaptureSettings,
+    ProfileDeletionCleanupError,
     ProfileError,
     apply_profile_capture_settings,
     apply_profile_runtime_settings,
     create_game_profile,
     create_named_game_profile,
+    delete_game_profile,
     list_game_profiles,
     load_game_profile,
     profile_id_from_display_name,
@@ -31,6 +35,89 @@ def _config() -> AppConfig:
             model="hy-mt1.5-7b",
         )
     )
+
+
+def test_delete_profile_removes_owned_data_and_preserves_other_files(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[translation]\n", encoding="utf-8")
+    first = create_game_profile(config_path, _config(), "first")
+    second = create_game_profile(config_path, _config(), "second")
+    (first.directory / "last-run.json").write_text("{}", encoding="utf-8")
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"shared")
+
+    delete_game_profile(config_path, _config(), first.profile_id)
+
+    assert not first.directory.exists()
+    assert load_game_profile(config_path, _config(), second.profile_id).directory == second.directory
+    assert config_path.read_text(encoding="utf-8") == "[translation]\n"
+    assert model.read_bytes() == b"shared"
+    assert sorted(path.name for path in second.directory.parent.iterdir()) == ["second"]
+
+
+def test_delete_profile_rename_failure_preserves_the_entire_profile(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    def fail(*args):
+        raise PermissionError("目录被占用")
+    monkeypatch.setattr(Path, "rename", fail)
+    with pytest.raises(PermissionError, match="目录被占用"):
+        delete_game_profile(config_path, _config(), "game")
+    assert load_game_profile(config_path, _config(), "game").settings_path.is_file()
+    assert sorted(path.name for path in profile.directory.parent.iterdir()) == ["game"]
+
+
+def test_partial_cleanup_failure_leaves_no_selectable_broken_profile(tmp_path: Path, monkeypatch) -> None:
+    from game_screen_translator import profiles as profiles_module
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    survivor = create_game_profile(config_path, _config(), "survivor")
+    residual = []
+    def fail(holding):
+        residual.append(holding)
+        (holding / "game/profile.toml").unlink()
+        (holding / "game/settings.toml").unlink()
+        raise PermissionError("缓存被占用")
+    monkeypatch.setattr(profiles_module.shutil, "rmtree", fail)
+    with pytest.raises(ProfileDeletionCleanupError, match="缓存被占用") as error:
+        delete_game_profile(config_path, _config(), "game")
+    assert str(residual[0]) in str(error.value)
+    assert not profile.directory.exists()
+    assert [item.profile_id for item in list_game_profiles(config_path, _config())] == [survivor.profile_id]
+
+
+@pytest.mark.parametrize("profile_id", ["../other", "", "CON", "missing"])
+def test_delete_profile_rejects_invalid_or_missing_targets(tmp_path: Path, profile_id: str) -> None:
+    config_path = tmp_path / "config.toml"
+    survivor = create_game_profile(config_path, _config(), "survivor")
+    with pytest.raises(ProfileError):
+        delete_game_profile(config_path, _config(), profile_id)
+    assert survivor.manifest_path.is_file()
+
+
+def test_delete_profile_rejects_manifest_id_mismatch(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    profile.manifest_path.write_text('id = "other"\n', encoding="utf-8")
+    with pytest.raises(ProfileError, match="id 与目录名不一致"):
+        delete_game_profile(config_path, _config(), "game")
+    assert profile.directory.is_dir()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows directory junction")
+def test_delete_profile_rejects_junction_to_another_profile(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    alias = profile.directory.parent / "alias"
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(alias), str(profile.directory)],
+        capture_output=True,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    with pytest.raises(ProfileError, match="链接目录"):
+        delete_game_profile(config_path, _config(), "alias")
+    assert profile.manifest_path.is_file()
 
 
 def test_create_and_load_isolated_game_profile(tmp_path: Path) -> None:

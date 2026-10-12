@@ -45,9 +45,11 @@ from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.profiles import (
     GameProfile,
     ProfileCaptureSettings,
+    ProfileDeletionCleanupError,
     ProfileError,
     apply_profile_runtime_settings,
     create_named_game_profile,
+    delete_game_profile,
     list_game_profiles,
     load_game_profile,
     save_profile_capture_settings,
@@ -369,6 +371,7 @@ class WorkbenchController(QObject):
         self._start_with_windows = preferences.start_with_windows
         self._hotkey = preferences.hotkey
         self._hotkey_behavior = preferences.hotkey_behavior
+        self._last_profile_id = preferences.last_profile_id
         self._hotkey_registrar: Callable[[str], None] | None = None
         app = QApplication.instance()
         self._effective_theme = effective_theme(
@@ -1173,15 +1176,15 @@ class WorkbenchController(QObject):
     def refreshProfiles(self) -> None:
         self._refresh_profiles()
 
-    def _refresh_profiles(self, preferred_id: str | None = None) -> None:
+    def _refresh_profiles(self, preferred_id: str | None = None) -> bool:
         current_id = preferred_id or (
-            self._profile.profile_id if self._profile else None
+            self._profile.profile_id if self._profile else self._last_profile_id
         )
         try:
             profiles = list_game_profiles(self._config_path, self._machine_config)
-        except (ProfileError, RuntimeError, ValueError) as exc:
+        except (ProfileError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("无法读取配置", exc)
-            return
+            return False
         self._profiles = profiles
         self._current_profile_index = next(
             (index for index, profile in enumerate(profiles) if profile.profile_id == current_id),
@@ -1204,66 +1207,74 @@ class WorkbenchController(QObject):
             if preserve_drafts:
                 self._notice("配置列表已刷新；未保存的当前配置草稿已保留", "neutral")
             else:
-                self._load_profile(selected_id, self._current_profile_index)
+                return self._load_profile(selected_id, self._current_profile_index)
         else:
-            self._profile = None
-            self._config = self._machine_config
-            translation = self._config.translation
-            ocr = self._config.ocr
-            live = self._config.live
-            self._backend = translation.backend
-            self._builtin_model = translation.builtin_model
-            self._builtin_cuda_device = translation.builtin_cuda_device
-            self._builtin_parallel = translation.builtin_parallel
-            self._builtin_kv_cache_type = translation.builtin_kv_cache_type
-            self._base_url = translation.base_url
-            self._api_key = translation.api_key
-            self._model = translation.model
-            self._model_ids = [
-                self._model,
-                *[model for model in self._model_ids if model != self._model],
-            ]
-            self._max_concurrency = translation.max_concurrency
-            self._ocr_device = ocr.device
-            self._ocr_filter_enabled = ocr.text_filter_enabled
-            self._ocr_merge_enabled = ocr.text_merge_enabled
-            self._overlay_opacity = self._config.preview.overlay_opacity
-            self._browser_overlay_enabled = self._config.recording.browser_overlay_enabled
-            self._dynamic_roi_enabled = live.dynamic_roi_enabled
-            self._debug_enabled = live.debug_border
-            self._change_poll_fps = live.change_poll_fps
-            self._roi_response_target_ms = live.dynamic_roi_response_target_ms
-            self._clear_after_ms = live.clear_after_ms
-            self._settle_rescan_ms = live.settle_rescan_ms
-            self._idle_rescan_ms = live.idle_rescan_ms
-            self._ocr_cooldown_ms = live.ocr_cooldown_ms
-            self._restore_detection_quality_from_config()
-            self._last_run_snapshot = None
-            self._profile_revision += 1
-            self._glossary = []
-            self._corrections = []
-            self._glossary_dirty = False
-            self._corrections_dirty = False
-            self._custom_prompt = ""
-            self._monitor_index = (
-                self._config.live.monitor_index
-                if self._config.live.monitor_index in self._monitor_values
-                else (0 if self._monitor_values else self._config.live.monitor_index)
-            )
-            self._capture_left = 0
-            self._capture_top = 0
-            self._capture_width = 0
-            self._capture_height = 0
-            self._custom_region = False
-            self._automatic_entries = 0
-            self._automatic_hits = 0
-            self._manual_corrections = 0
-            self._manual_hits = 0
-            self._prompt_dirty = False
-            self._capture_dirty = False
-            self._runtime_dirty = False
-            self._set_status("请先在 HOME 创建一个 Profile", "warning")
-            self._emit_state()
+            self._clear_profile_state()
+        return True
+
+    def _clear_profile_state(self) -> None:
+        self._profiles = ()
+        self._current_profile_index = -1
+        self._profile = None
+        self.profilesChanged.emit()
+        self._config = self._machine_config
+        translation = self._config.translation
+        ocr = self._config.ocr
+        live = self._config.live
+        self._backend = translation.backend
+        self._builtin_model = translation.builtin_model
+        self._builtin_cuda_device = translation.builtin_cuda_device
+        self._builtin_parallel = translation.builtin_parallel
+        self._builtin_kv_cache_type = translation.builtin_kv_cache_type
+        self._base_url = translation.base_url
+        self._api_key = translation.api_key
+        self._model = translation.model
+        self._model_ids = [
+            self._model,
+            *[model for model in self._model_ids if model != self._model],
+        ]
+        self._max_concurrency = translation.max_concurrency
+        self._ocr_device = ocr.device
+        self._ocr_filter_enabled = ocr.text_filter_enabled
+        self._ocr_merge_enabled = ocr.text_merge_enabled
+        self._overlay_opacity = self._config.preview.overlay_opacity
+        self._browser_overlay_enabled = self._config.recording.browser_overlay_enabled
+        self._dynamic_roi_enabled = live.dynamic_roi_enabled
+        self._debug_enabled = live.debug_border
+        self._change_poll_fps = live.change_poll_fps
+        self._roi_response_target_ms = live.dynamic_roi_response_target_ms
+        self._clear_after_ms = live.clear_after_ms
+        self._settle_rescan_ms = live.settle_rescan_ms
+        self._idle_rescan_ms = live.idle_rescan_ms
+        self._ocr_cooldown_ms = live.ocr_cooldown_ms
+        self._restore_detection_quality_from_config()
+        self._last_run_snapshot = None
+        self._profile_revision += 1
+        self._glossary = []
+        self._corrections = []
+        self._glossary_dirty = False
+        self._corrections_dirty = False
+        self._custom_prompt = ""
+        self._monitor_index = (
+            self._config.live.monitor_index
+            if self._config.live.monitor_index in self._monitor_values
+            else (0 if self._monitor_values else self._config.live.monitor_index)
+        )
+        self._capture_left = 0
+        self._capture_top = 0
+        self._capture_width = 0
+        self._capture_height = 0
+        self._custom_region = False
+        self._automatic_entries = 0
+        self._automatic_hits = 0
+        self._manual_corrections = 0
+        self._manual_hits = 0
+        self._prompt_dirty = False
+        self._capture_dirty = False
+        self._runtime_dirty = False
+        self._set_status("请先在 HOME 创建一个 Profile", "warning")
+        self._emit_state()
+        self._remember_profile("")
 
     @Slot(str)
     def createProfile(self, display_name: str) -> None:
@@ -1280,7 +1291,51 @@ class WorkbenchController(QObject):
         self._refresh_profiles(profile.profile_id)
         self._notice(f"已创建 {profile.display_name}")
 
-    def _load_profile(self, profile_id: str, index: int) -> None:
+    @Slot(str)
+    def deleteProfile(self, profile_id: str) -> None:
+        if self.running or self._live_stop_requested:
+            self._show_error("删除配置失败", "请先停止翻译，再删除配置")
+            return
+        if self._profile is None or self._profile.profile_id != profile_id:
+            self._show_error("删除配置失败", "当前配置已改变，请重新选择并确认删除")
+            return
+        name = self._profile.display_name
+        cleanup_error = None
+        try:
+            delete_game_profile(self._config_path, self._machine_config, profile_id)
+        except ProfileDeletionCleanupError as exc:
+            cleanup_error = exc
+        except (ProfileError, OSError, RuntimeError, ValueError) as exc:
+            self._show_error("删除配置失败", exc)
+            return
+        self._clear_profile_state()
+        refreshed = self._refresh_profiles()
+        if cleanup_error is not None:
+            self._show_error("配置已移除，文件清理未完成", cleanup_error)
+        elif refreshed:
+            self._notice(f"已删除 {name}")
+
+    def _remember_profile(self, profile_id: str) -> None:
+        if profile_id == self._last_profile_id:
+            return
+        try:
+            save_gui_preferences(
+                self._config_path,
+                GuiPreferences(
+                    theme=self._theme_preference,
+                    skin=self._skin_preference,
+                    start_with_windows=self._start_with_windows,
+                    hotkey=self._hotkey,
+                    hotkey_behavior=self._hotkey_behavior,
+                    last_profile_id=profile_id,
+                ),
+            )
+        except (GuiSettingsError, OSError) as exc:
+            self._show_error("保存上次使用的配置失败", exc)
+            return
+        self._last_profile_id = profile_id
+
+    def _load_profile(self, profile_id: str, index: int) -> bool:
         try:
             profile = load_game_profile(
                 self._config_path,
@@ -1296,9 +1351,9 @@ class WorkbenchController(QObject):
                 target_language=effective_config.translation.target_language,
             )
             stats = profile.cache.stats()
-        except (ProfileError, RuntimeError, ValueError) as exc:
+        except (ProfileError, OSError, RuntimeError, ValueError) as exc:
             self._show_error("加载配置失败", exc)
-            return
+            return False
         self._profile = profile
         self._config = effective_config
         self._last_run_snapshot = load_snapshot(profile.directory)
@@ -1371,6 +1426,8 @@ class WorkbenchController(QObject):
             )
         else:
             self._notice(f"已加载 {profile.display_name}", "neutral")
+        self._remember_profile(profile.profile_id)
+        return True
 
     def _reload_last_run_snapshot(self) -> None:
         if self._profile is None:
@@ -1394,6 +1451,7 @@ class WorkbenchController(QObject):
                     start_with_windows=self._start_with_windows,
                     hotkey=self._hotkey,
                     hotkey_behavior=self._hotkey_behavior,
+                    last_profile_id=self._last_profile_id,
                 ),
             )
         except (GuiSettingsError, OSError) as exc:
@@ -1426,6 +1484,7 @@ class WorkbenchController(QObject):
                     start_with_windows=self._start_with_windows,
                     hotkey=self._hotkey,
                     hotkey_behavior=self._hotkey_behavior,
+                    last_profile_id=self._last_profile_id,
                 ),
             )
         except (GuiSettingsError, OSError) as exc:
@@ -1462,6 +1521,7 @@ class WorkbenchController(QObject):
                         start_with_windows=value,
                         hotkey=self._hotkey,
                         hotkey_behavior=self._hotkey_behavior,
+                        last_profile_id=self._last_profile_id,
                     ),
                 )
             except Exception:
@@ -1483,6 +1543,7 @@ class WorkbenchController(QObject):
                 start_with_windows=self._start_with_windows,
                 hotkey=value,
                 hotkey_behavior=self._hotkey_behavior,
+                last_profile_id=self._last_profile_id,
             )
             if preferences.hotkey == self._hotkey:
                 return
@@ -1510,6 +1571,7 @@ class WorkbenchController(QObject):
                 start_with_windows=self._start_with_windows,
                 hotkey=self._hotkey,
                 hotkey_behavior=value,
+                last_profile_id=self._last_profile_id,
             )
             if preferences.hotkey_behavior == self._hotkey_behavior:
                 return
