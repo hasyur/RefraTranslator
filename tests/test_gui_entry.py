@@ -6,6 +6,12 @@ from pathlib import Path
 import pytest
 
 from game_screen_translator import gui_entry
+from game_screen_translator.config import load_config
+from game_screen_translator.profiles import (
+    apply_profile_runtime_settings,
+    create_game_profile,
+    load_game_profile,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -114,10 +120,8 @@ def test_installed_launcher_keeps_data_in_install_root_and_runs_first_run_prepar
 ) -> None:
     install_root = tmp_path / "installed-app"
     install_root.mkdir()
-    (install_root / "config.example.toml").write_text(
-        "example = true\n",
-        encoding="utf-8",
-    )
+    template = Path(__file__).resolve().parents[1] / "config.example.toml"
+    (install_root / "config.example.toml").write_bytes(template.read_bytes())
     data_root = install_root
     worker = tmp_path / "runtime" / "python.exe"
     commands: list[list[str]] = []
@@ -139,7 +143,15 @@ def test_installed_launcher_keeps_data_in_install_root_and_runs_first_run_prepar
     ) == 0
 
     config_path = data_root / "config.toml"
-    assert config_path.read_text(encoding="utf-8") == "example = true\n"
+    assert config_path.read_bytes() == template.read_bytes()
+    config = load_config(config_path)
+    assert config.translation.backend == "builtin"
+    assert config.translation.builtin_model == "Hy-MT2-1.8B-Q8_0.gguf"
+    create_game_profile(config_path, config, "first-game")
+    profile = load_game_profile(config_path, config, "first-game")
+    runtime = apply_profile_runtime_settings(config, profile)
+    assert runtime.translation.backend == "builtin"
+    assert runtime.translation.builtin_model == "Hy-MT2-1.8B-Q8_0.gguf"
     assert len(commands) == 3
     assert commands[1][commands[1].index("game_screen_translator.first_run") :] == [
         "game_screen_translator.first_run",
@@ -164,6 +176,26 @@ def test_installed_launcher_keeps_data_in_install_root_and_runs_first_run_prepar
     assert (install_root / ".cache" / "qt" / "qml").is_dir()
     assert all(environment is environments[0] for environment in environments)
     assert not (tmp_path / "ignored-data-override").exists()
+
+
+@pytest.mark.parametrize("backend", ["external", "builtin"])
+def test_prepare_config_preserves_saved_backend(
+    tmp_path: Path, backend: str,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    saved = (
+        '[translation]\n'
+        f'backend = "{backend}"\n'
+        'base_url = "http://server.test/v1"\n'
+        'model = "saved-model"\n'
+        'builtin_model = "Hy-MT2-7B-Q4_K_M.gguf"\n'
+    ).encode("utf-8")
+    config_path.write_bytes(saved)
+    template_root = Path(__file__).resolve().parents[1]
+
+    assert gui_entry._prepare_config(tmp_path, template_root) == config_path
+    assert config_path.read_bytes() == saved
+    assert load_config(config_path).translation.backend == backend
 
 
 def test_installed_root_is_derived_from_its_own_runtime(

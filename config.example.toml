@@ -1,8 +1,8 @@
 # 以下运行设置只作为新建 Profile 和旧 Profile 首次迁移时的初始模板。
 # GUI 后续把实际运行选择保存到各 Profile 的 settings.toml，不会回写共享模板。
 [translation]
-# external 使用用户自己的 OpenAI-compatible API；builtin 使用程序管理的本地模型。
-backend = "external"
+# 默认使用 builtin（程序管理的本地模型）；external 使用用户自己的 OpenAI-compatible API。
+backend = "builtin"
 # 切换后端不会覆盖下面的外部 API 地址、模型或 API Key。
 builtin_model = "Hy-MT2-1.8B-Q8_0.gguf"
 # follow_ocr 跟随 OCR；也可以独立指定 gpu:0、gpu:1 等单张物理显卡。
