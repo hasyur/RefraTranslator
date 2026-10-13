@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -64,6 +65,28 @@ def test_zero_exit_without_a_ready_gui_is_rejected(tmp_path: Path) -> None:
         handle.write("Traceback (most recent call last)\n")
     with pytest.raises(verifier.VerificationError, match="traceback"):
         verifier._check_launcher_log(log, runtime)
+
+
+def test_cli_can_report_chinese_install_paths_to_a_legacy_windows_console(tmp_path: Path) -> None:
+    script = ROOT / "packaging" / "verify_windows_install.py"
+    program = (
+        "import importlib.util, sys; "
+        "spec = importlib.util.spec_from_file_location('verify_install', sys.argv[1]); "
+        "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+        "module.verify = lambda *a, **kw: {'status': 'passed', 'install_root': '安装目录 with spaces'}; "
+        "sys.argv = [sys.argv[1], '--installer', 'unused.exe']; "
+        "raise SystemExit(module.main())"
+    )
+    environment = os.environ.copy()
+    environment["PYTHONIOENCODING"] = "cp1252:strict"
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(script)], cwd=tmp_path,
+        env=environment, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("ascii", errors="replace")
+    report = json.loads(result.stdout.decode("ascii"))
+    assert report["status"] == "passed"
+    assert report["install_root"] == "安装目录 with spaces"
 
 
 def _probe_fixture(install_root: Path) -> dict:

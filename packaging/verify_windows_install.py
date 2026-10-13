@@ -254,7 +254,9 @@ def main() -> int:
         report = verify(args.installer, args.work_dir, duration=args.duration, timeout=args.timeout)
     except (VerificationError, OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
         parser.exit(1, f"Installation verification failed: {exc}\n")
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    # Hosted Windows runners may pipe stdout through a legacy code page.
+    # Keep console JSON ASCII-safe; the retained UTF-8 report preserves names.
+    print(json.dumps(report, ensure_ascii=True, indent=2))
     return 0
 
 
