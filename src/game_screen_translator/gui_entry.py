@@ -93,34 +93,15 @@ def _prepare_config(project_root: Path, template_root: Path | None = None) -> Pa
 
 
 def _install_root() -> Path:
-    override = os.environ.get("REFRATRANSLATOR_INSTALL_DIR", "").strip()
-    if override:
-        return Path(override).expanduser().resolve()
     executable = Path(sys.executable).resolve()
     # The relocatable Python runtime lives in {app}\\runtime.
     return executable.parent.parent
 
 
 def _installed_data_root(install_root: Path) -> Path:
-    override = os.environ.get("REFRATRANSLATOR_DATA_DIR", "").strip()
-    if override:
-        return Path(override).expanduser().resolve()
-    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
-    default_root = (
-        Path(local_app_data).expanduser()
-        if local_app_data
-        else Path.home() / "AppData" / "Local"
-    ) / "RefraTranslator"
-    # Preserve an existing portable install's config, profiles and cache in
-    # place when setup is run over that directory. The source remains intact.
-    if (default_root / "config.toml").is_file():
-        return default_root.resolve()
-    if (install_root / "config.toml").is_file():
-        return install_root.resolve()
-    cwd = Path.cwd().resolve()
-    if cwd != install_root and (cwd / "config.toml").is_file():
-        return cwd
-    return default_root.resolve()
+    # The installed application is self-contained. Legacy user-directory data
+    # is left untouched and may be copied here by the user before launching.
+    return install_root.resolve()
 
 
 def _duration_argument(arguments: Sequence[str]) -> str | None:
@@ -207,6 +188,15 @@ def _run_owned(
             config_path = _prepare_config(root, install_root)
             worker = _worker_python()
             environment = _worker_environment()
+            qt_cache = root / ".cache" / "qt"
+            qml_cache = qt_cache / "qml"
+            qml_cache.mkdir(parents=True, exist_ok=True)
+            pipeline_cache = qt_cache / "pipeline.cache"
+            environment.update({
+                "QML_DISK_CACHE_PATH": str(qml_cache),
+                "QSG_RHI_PIPELINE_CACHE_LOAD": str(pipeline_cache),
+                "QSG_RHI_PIPELINE_CACHE_SAVE": str(pipeline_cache),
+            })
             if installed:
                 environment.update(
                     {

@@ -503,6 +503,72 @@ def _wheel_path(config_path: str | Path, wheel: WheelResource) -> Path:
     return _wheelhouse(config_path) / wheel.filename
 
 
+def _model_archive_path(config_path: str | Path, model_name: str) -> Path:
+    return (
+        _data_root(config_path)
+        / DOWNLOAD_RELATIVE_PATH
+        / f"{model_name}_infer.tar"
+    )
+
+
+def _unlink_known_download(config_path: str | Path, path: Path) -> None:
+    """Remove one known download and its resumable sidecar, never directories."""
+
+    data_root = _data_root(config_path).resolve()
+    try:
+        path.parent.resolve().relative_to(data_root)
+    except (OSError, ValueError):
+        return
+
+    for candidate in (path, path.with_name(path.name + ".part")):
+        try:
+            if candidate.is_file() or candidate.is_symlink():
+                candidate.unlink()
+        except OSError:
+            # Resource cleanup is opportunistic; a locked cache must not make
+            # already-installed OCR resources unusable.
+            continue
+
+
+def _cleanup_wheelhouse_if_ready(
+    config_path: str | Path,
+    wheels: tuple[WheelResource, ...],
+) -> bool:
+    if not _ocr_packages_are_ready(wheels):
+        return False
+    for wheel in wheels:
+        _unlink_known_download(config_path, _wheel_path(config_path, wheel))
+    return True
+
+
+def _cleanup_ready_model_archives(config_path: str | Path) -> None:
+    config = load_config(config_path)
+    model_names = dict.fromkeys(
+        (config.ocr.detection_model, config.ocr.recognition_model)
+    )
+    for model_name in model_names:
+        if model_name in MODEL_ARTIFACTS and _model_is_ready(config_path, model_name):
+            _unlink_known_download(
+                config_path,
+                _model_archive_path(config_path, model_name),
+            )
+
+
+def cleanup_prepared_downloads(
+    config_path: str | Path,
+    wheels: tuple[WheelResource, ...] | None = None,
+) -> None:
+    """Delete known downloads whose installed OCR payloads already pass health checks.
+
+    This local-only cleanup is safe to call when startup finds all resources ready.
+    It does not download, install, or remove unknown files from cache directories.
+    """
+
+    known_wheels = _read_wheel_manifest() if wheels is None else wheels
+    _cleanup_wheelhouse_if_ready(config_path, known_wheels)
+    _cleanup_ready_model_archives(config_path)
+
+
 def _cached_download_bytes(path: Path, expected_size: int) -> int:
     """Count reusable bytes for the inventory without doing network I/O."""
 
@@ -631,8 +697,9 @@ def _install_wheelhouse(
                 )
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
-    if not _ocr_packages_are_ready(all_wheels):
+    if not _cleanup_wheelhouse_if_ready(config_path, all_wheels):
         raise OcrPreparationError("Paddle GPU OCR wheel 已安装，但运行依赖检查未通过。")
+    _cleanup_ready_model_archives(config_path)
     progress("ready", "Paddle GPU OCR 运行依赖", 1, 1)
 
 
@@ -712,6 +779,8 @@ def prepare_ocr_resources(
 
     wheels = _read_wheel_manifest()
     wheel_plan = _pending_wheels(wheels)
+    if not wheel_plan:
+        cleanup_prepared_downloads(config_path, wheels)
     model_plan = tuple(
         dict.fromkeys(
             name
@@ -768,6 +837,10 @@ def prepare_ocr_resources(
             if cancelled.is_set():
                 raise OcrPreparationCancelled("OCR 资源准备已取消")
             if _model_is_ready(config_path, model_name):
+                _unlink_known_download(
+                    config_path,
+                    _model_archive_path(config_path, model_name),
+                )
                 callback("ready", model_name, 1, 1)
                 continue
             model_artifact = MODEL_ARTIFACTS.get(model_name)
@@ -782,7 +855,7 @@ def prepare_ocr_resources(
             )
             archive = _download_file(
                 model_artifact[0],
-                _data_root(config_path) / DOWNLOAD_RELATIVE_PATH / f"{model_name}_infer.tar",
+                _model_archive_path(config_path, model_name),
                 size_bytes,
                 expected_sha256=model_artifact[2],
                 client=client,
@@ -791,7 +864,14 @@ def prepare_ocr_resources(
                 label=model_name,
             )
             _safe_extract_model(archive, cache_root / model_name, model_name)
-            archive.unlink(missing_ok=True)
+            if not _model_is_ready(config_path, model_name):
+                raise OcrPreparationError(
+                    f"{model_name} 模型已解压，但运行文件检查未通过。可重试。"
+                )
+            _unlink_known_download(
+                config_path,
+                _model_archive_path(config_path, model_name),
+            )
             callback("ready", model_name, 1, 1)
 
     inventory = inspect_ocr_resources(config_path, http_transport=http_transport)

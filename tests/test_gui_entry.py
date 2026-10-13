@@ -108,7 +108,7 @@ def test_shared_gui_backend_stops_after_a_failed_dependency_probe(
     assert "Dependency check failed with code 7" in log
 
 
-def test_installed_launcher_uses_isolated_data_root_and_runs_first_run_preparation(
+def test_installed_launcher_keeps_data_in_install_root_and_runs_first_run_preparation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -118,11 +118,11 @@ def test_installed_launcher_uses_isolated_data_root_and_runs_first_run_preparati
         "example = true\n",
         encoding="utf-8",
     )
-    data_root = tmp_path / "isolated-user-data"
+    data_root = install_root
     worker = tmp_path / "runtime" / "python.exe"
     commands: list[list[str]] = []
     environments: list[dict[str, str]] = []
-    monkeypatch.setenv("REFRATRANSLATOR_DATA_DIR", str(data_root))
+    monkeypatch.setenv("REFRATRANSLATOR_DATA_DIR", str(tmp_path / "ignored-data-override"))
     monkeypatch.setattr(gui_entry, "_worker_python", lambda: worker)
 
     def fake_run_logged(command, **kwargs) -> int:
@@ -158,4 +158,64 @@ def test_installed_launcher_uses_isolated_data_root_and_runs_first_run_preparati
     ]
     assert environments[0]["REFRATRANSLATOR_INSTALLED"] == "1"
     assert environments[0]["REFRATRANSLATOR_DATA_DIR"] == str(data_root.resolve())
+    assert environments[0]["QML_DISK_CACHE_PATH"] == str(install_root / ".cache" / "qt" / "qml")
+    assert environments[0]["QSG_RHI_PIPELINE_CACHE_LOAD"] == str(install_root / ".cache" / "qt" / "pipeline.cache")
+    assert environments[0]["QSG_RHI_PIPELINE_CACHE_SAVE"] == environments[0]["QSG_RHI_PIPELINE_CACHE_LOAD"]
+    assert (install_root / ".cache" / "qt" / "qml").is_dir()
     assert all(environment is environments[0] for environment in environments)
+    assert not (tmp_path / "ignored-data-override").exists()
+
+
+def test_installed_root_is_derived_from_its_own_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_root = tmp_path / "安装目录 with spaces"
+    monkeypatch.setattr(gui_entry.sys, "executable", str(install_root / "runtime" / "pythonw.exe"))
+    monkeypatch.setenv("REFRATRANSLATOR_INSTALL_DIR", str(tmp_path / "stale-install"))
+    assert gui_entry._install_root() == install_root.resolve()
+
+
+def test_existing_user_directory_and_working_directory_cannot_redirect_installed_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy = tmp_path / "LocalAppData" / "RefraTranslator"
+    legacy.mkdir(parents=True)
+    (legacy / "config.toml").write_text("legacy config", encoding="utf-8")
+    (legacy / "keep.part").write_bytes(b"resume me")
+    unrelated = tmp_path / "working-directory"
+    unrelated.mkdir()
+    (unrelated / "config.toml").write_text("unrelated config", encoding="utf-8")
+    install_root = tmp_path / "installed-app"
+    install_root.mkdir()
+    (install_root / "config.example.toml").write_text("fresh = true\n", encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(legacy.parent))
+    monkeypatch.chdir(unrelated)
+    monkeypatch.setattr(gui_entry, "_worker_python", lambda: install_root / "runtime" / "python.exe")
+    monkeypatch.setattr(gui_entry, "_run_logged", lambda *_args, **_kwargs: 0)
+
+    assert gui_entry.run(["--installed", "--duration", "0.1"], project_root=install_root, mirror=StringIO()) == 0
+    assert (install_root / "config.toml").read_text(encoding="utf-8") == "fresh = true\n"
+    assert (install_root / "output" / "launcher.log").is_file()
+    assert (legacy / "config.toml").read_text(encoding="utf-8") == "legacy config"
+    assert (legacy / "keep.part").read_bytes() == b"resume me"
+    assert not (legacy / "output").exists()
+
+
+def test_manual_data_copy_in_install_root_is_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_root = tmp_path / "installed-app"
+    install_root.mkdir()
+    config = install_root / "config.toml"
+    config.write_text("copied = true\n", encoding="utf-8")
+    model = install_root / ".cache" / "local-llm" / "models" / "existing.gguf"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"existing model")
+    partial = model.with_name("unfinished.gguf.part")
+    partial.write_bytes(b"unfinished download")
+    monkeypatch.setattr(gui_entry, "_worker_python", lambda: install_root / "runtime" / "python.exe")
+    monkeypatch.setattr(gui_entry, "_run_logged", lambda *_args, **_kwargs: 0)
+    assert gui_entry.run(["--installed"], project_root=install_root, mirror=StringIO()) == 0
+    assert config.read_text(encoding="utf-8") == "copied = true\n"
+    assert model.read_bytes() == b"existing model"
+    assert partial.read_bytes() == b"unfinished download"

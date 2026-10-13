@@ -226,6 +226,8 @@ def test_same_version_wheel_with_missing_record_or_payload_is_repaired(
     importlib.invalidate_caches()
 
     wheel = _make_tiny_wheel(config_path)
+    wheel_path = resources._wheel_path(config_path, wheel)
+    wheel_part = wheel_path.with_name(wheel_path.name + ".part")
     commands: list[list[str]] = []
     pip_popen = resources.subprocess.Popen
 
@@ -236,6 +238,12 @@ def test_same_version_wheel_with_missing_record_or_payload_is_repaired(
     monkeypatch.setattr(resources.subprocess, "Popen", capture_popen)
 
     def install() -> None:
+        nonlocal wheel
+        if not wheel_path.is_file():
+            # A successful installation now purges its verified download. Rebuild
+            # the tiny wheel to model a fresh retry after the installed payload is damaged.
+            wheel = _make_tiny_wheel(config_path)
+        wheel_part.write_bytes(b"obsolete partial download")
         resources._install_wheelhouse(
             config_path,
             (wheel,),
@@ -246,6 +254,9 @@ def test_same_version_wheel_with_missing_record_or_payload_is_repaired(
 
     install()
     assert resources._wheel_is_installed(wheel)
+    assert not wheel_path.exists()
+    assert not wheel_part.exists()
+    assert (site_packages / "refra_retry_probe" / "runtime_probe.dll").is_file()
 
     distribution = importlib.metadata.distribution(wheel.name)
     record = next(
@@ -277,7 +288,270 @@ def test_same_version_wheel_with_missing_record_or_payload_is_repaired(
     assert probe_dll.is_file()
     assert probe_dll.read_bytes() == expected_dll
     assert resources._wheel_is_installed(wheel)
+    assert not wheel_path.exists()
+    assert not wheel_part.exists()
     assert sum("--ignore-installed" in command for command in commands) == 3
+
+
+@pytest.mark.parametrize(
+    ("pip_return_code", "expected_error"),
+    [
+        (1, "安装已校验的 Paddle GPU OCR 资源失败"),
+        (0, "运行依赖检查未通过"),
+    ],
+)
+def test_failed_wheel_install_keeps_download_and_partial_for_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pip_return_code: int,
+    expected_error: str,
+) -> None:
+    config_path = _write_config(tmp_path)
+    wheel = resources.WheelResource(
+        "refra-test-wheel",
+        "1.0",
+        "https://example.invalid/refra_test_wheel-1.0-py3-none-any.whl",
+        "0" * 64,
+        12,
+        24,
+    )
+    wheel_path = resources._wheel_path(config_path, wheel)
+    wheel_path.parent.mkdir(parents=True, exist_ok=True)
+    wheel_path.write_bytes(b"verified wheel")
+    wheel_part = wheel_path.with_name(wheel_path.name + ".part")
+    wheel_part.write_bytes(b"resumable fragment")
+
+    class CompletedProcess:
+        stdout = io.StringIO("pip output\n")
+
+        def poll(self) -> int:
+            return pip_return_code
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return pip_return_code
+
+    monkeypatch.setattr(
+        resources.subprocess, "Popen", lambda *_args, **_kwargs: CompletedProcess()
+    )
+    if pip_return_code == 0:
+        monkeypatch.setattr(resources, "_ocr_packages_are_ready", lambda _wheels: False)
+
+    with pytest.raises(resources.OcrPreparationError, match=expected_error):
+        resources._install_wheelhouse(
+            config_path,
+            (wheel,),
+            all_wheels=(wheel,),
+            progress=lambda *_values: None,
+            cancel=threading.Event(),
+        )
+
+    assert wheel_path.read_bytes() == b"verified wheel"
+    assert wheel_part.read_bytes() == b"resumable fragment"
+    assert not (config_path.parent / resources.PIP_TEMP_RELATIVE_PATH).exists()
+
+
+def test_prepare_ready_resources_cleans_only_known_downloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path / "data")
+    manifest_path = tmp_path / "manifest.json"
+    _write_manifest(manifest_path)
+    monkeypatch.setenv("REFRATRANSLATOR_OCR_MANIFEST_PATH", str(manifest_path))
+    wheel = resources._read_wheel_manifest()[0]
+    wheel_path = resources._wheel_path(config_path, wheel)
+    wheel_path.parent.mkdir(parents=True, exist_ok=True)
+    wheel_path.write_bytes(b"old verified wheel")
+    wheel_part = wheel_path.with_name(wheel_path.name + ".part")
+    wheel_part.write_bytes(b"old partial")
+    unknown_wheelhouse_file = wheel_path.parent / "keep-me.txt"
+    unknown_wheelhouse_file.write_text("unknown", encoding="utf-8")
+
+    download_root = config_path.parent / resources.DOWNLOAD_RELATIVE_PATH
+    download_root.mkdir(parents=True, exist_ok=True)
+    archives: list[Path] = []
+    for model_name in ("PP-OCRv6_small_det", "PP-OCRv6_small_rec"):
+        archive = download_root / f"{model_name}_infer.tar"
+        archive.write_bytes(b"old verified archive")
+        archive.with_name(archive.name + ".part").write_bytes(b"old partial")
+        archives.append(archive)
+    unknown_download = download_root / "keep-me.bin"
+    unknown_download.write_bytes(b"unknown")
+
+    final_model_payloads: list[Path] = []
+    for model_name in ("PP-OCRv6_small_det", "PP-OCRv6_small_rec"):
+        model_dir = resources._model_cache_root(config_path) / model_name
+        model_dir.mkdir(parents=True, exist_ok=True)
+        payload = model_dir / "inference.pdiparams"
+        payload.write_bytes(b"installed model payload")
+        final_model_payloads.append(payload)
+
+    monkeypatch.setattr(resources, "_wheel_is_installed", lambda _wheel: True)
+    monkeypatch.setattr(resources, "_ocr_packages_are_ready", lambda _wheels: True)
+    monkeypatch.setattr(resources, "_model_is_ready", lambda _path, _name: True)
+
+    def fail_if_requested(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"ready resources must not request HTTP: {request!r}")
+
+    inventory = resources.prepare_ocr_resources(
+        config_path,
+        http_transport=httpx.MockTransport(fail_if_requested),
+    )
+
+    assert inventory.ready
+    assert not wheel_path.exists()
+    assert not wheel_part.exists()
+    assert unknown_wheelhouse_file.read_text(encoding="utf-8") == "unknown"
+    for archive in archives:
+        assert not archive.exists()
+        assert not archive.with_name(archive.name + ".part").exists()
+    assert unknown_download.read_bytes() == b"unknown"
+    assert all(
+        payload.read_bytes() == b"installed model payload"
+        for payload in final_model_payloads
+    )
+
+
+@pytest.mark.parametrize("invalid_payload", ["wrong_hash", "missing_file"])
+def test_model_cache_cleanup_uses_real_hash_health_and_preserves_unknown_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_payload: str,
+) -> None:
+    config_path = _write_config(tmp_path / "data")
+    model_payloads = {
+        "inference.json": b'{"model":"tiny-test"}',
+        "inference.pdiparams": b"tiny-model-weights",
+        "inference.yml": b"Global:\n  model_name: tiny-test\n",
+    }
+    artifacts: dict[str, tuple[str, int, str, dict[str, str]]] = {}
+    for model_name in ("PP-OCRv6_small_det", "PP-OCRv6_small_rec"):
+        artifacts[model_name] = (
+            f"https://example.invalid/{model_name}_infer.tar",
+            32,
+            "0" * 64,
+            {
+                filename: hashlib.sha256(content).hexdigest()
+                for filename, content in model_payloads.items()
+            },
+        )
+    monkeypatch.setattr(resources, "MODEL_ARTIFACTS", artifacts)
+    monkeypatch.setattr(resources, "_ocr_packages_are_ready", lambda _wheels: True)
+
+    detection_dir = resources._model_cache_root(config_path) / "PP-OCRv6_small_det"
+    detection_dir.mkdir(parents=True, exist_ok=True)
+    for filename, content in model_payloads.items():
+        (detection_dir / filename).write_bytes(content)
+    permanent_model_file = detection_dir / "user-owned-note.txt"
+    permanent_model_file.write_text("keep", encoding="utf-8")
+
+    recognition_dir = resources._model_cache_root(config_path) / "PP-OCRv6_small_rec"
+    recognition_dir.mkdir(parents=True, exist_ok=True)
+    for filename, content in model_payloads.items():
+        if invalid_payload == "missing_file" and filename == "inference.yml":
+            continue
+        if invalid_payload == "wrong_hash" and filename == "inference.pdiparams":
+            content = b"wrong model weights"
+        (recognition_dir / filename).write_bytes(content)
+
+    download_root = config_path.parent / resources.DOWNLOAD_RELATIVE_PATH
+    download_root.mkdir(parents=True, exist_ok=True)
+    archives: dict[str, Path] = {}
+    for model_name in artifacts:
+        archive = download_root / f"{model_name}_infer.tar"
+        archive.write_bytes(b"temporary model archive")
+        archive.with_name(archive.name + ".part").write_bytes(b"resume fragment")
+        archives[model_name] = archive
+    unknown_file = download_root / "keep-unknown.bin"
+    unknown_file.write_bytes(b"unknown cache data")
+
+    resources.cleanup_prepared_downloads(config_path, wheels=())
+
+    detection_archive = archives["PP-OCRv6_small_det"]
+    assert resources._model_is_ready(config_path, "PP-OCRv6_small_det")
+    assert not detection_archive.exists()
+    assert not detection_archive.with_name(detection_archive.name + ".part").exists()
+    assert all(
+        (detection_dir / filename).read_bytes() == content
+        for filename, content in model_payloads.items()
+    )
+    assert permanent_model_file.read_text(encoding="utf-8") == "keep"
+
+    recognition_archive = archives["PP-OCRv6_small_rec"]
+    assert not resources._model_is_ready(config_path, "PP-OCRv6_small_rec")
+    assert recognition_archive.read_bytes() == b"temporary model archive"
+    recognition_part = recognition_archive.with_name(recognition_archive.name + ".part")
+    assert recognition_part.read_bytes() == b"resume fragment"
+    assert unknown_file.read_bytes() == b"unknown cache data"
+
+
+def test_prepare_keeps_archive_when_extracted_model_fails_hash_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path / "data")
+    manifest_path = tmp_path / "manifest.json"
+    _write_manifest(manifest_path)
+    monkeypatch.setenv("REFRATRANSLATOR_OCR_MANIFEST_PATH", str(manifest_path))
+    model_name = "PP-OCRv6_small_det"
+    expected_payloads = {
+        "inference.json": b'{"model":"expected"}',
+        "inference.pdiparams": b"expected weights",
+        "inference.yml": b"Global:\n  model_name: expected\n",
+    }
+    artifacts = dict(resources.MODEL_ARTIFACTS)
+    artifacts[model_name] = (
+        "https://example.invalid/PP-OCRv6_small_det_infer.tar",
+        32,
+        "0" * 64,
+        {
+            filename: hashlib.sha256(content).hexdigest()
+            for filename, content in expected_payloads.items()
+        },
+    )
+    monkeypatch.setattr(resources, "MODEL_ARTIFACTS", artifacts)
+    monkeypatch.setattr(resources, "_wheel_is_installed", lambda _wheel: True)
+    monkeypatch.setattr(resources, "_ocr_packages_are_ready", lambda _wheels: True)
+
+    archive_path = resources._model_archive_path(config_path, model_name)
+    partial_path = archive_path.with_name(archive_path.name + ".part")
+
+    def fake_download(
+        _url: str,
+        destination: Path,
+        _expected_size: int,
+        **_kwargs: object,
+    ) -> Path:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"downloaded model archive")
+        partial_path.write_bytes(b"resumable fragment")
+        return destination
+
+    def fake_extract(
+        _archive_path: Path,
+        destination: Path,
+        _model_name: str,
+    ) -> None:
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / "inference.json").write_bytes(b"wrong hash")
+
+    monkeypatch.setattr(resources, "_download_file", fake_download)
+    monkeypatch.setattr(resources, "_safe_extract_model", fake_extract)
+
+    with pytest.raises(resources.OcrPreparationError, match="运行文件检查未通过"):
+        resources.prepare_ocr_resources(
+            config_path,
+            http_transport=httpx.MockTransport(
+                lambda request: pytest.fail(
+                    f"mocked download must not use HTTP: {request!r}"
+                )
+            ),
+        )
+
+    assert not resources._model_is_ready(config_path, model_name)
+    assert archive_path.read_bytes() == b"downloaded model archive"
+    assert partial_path.read_bytes() == b"resumable fragment"
 
 
 def test_interrupted_real_wheel_install_is_repaired_on_retry(
@@ -370,6 +644,11 @@ def test_quiet_pip_process_responds_to_cancellation(
         1,
         2,
     )
+    wheel_path = resources._wheel_path(config_path, wheel)
+    wheel_path.parent.mkdir(parents=True, exist_ok=True)
+    wheel_path.write_bytes(b"downloaded wheel")
+    wheel_part = wheel_path.with_name(wheel_path.name + ".part")
+    wheel_part.write_bytes(b"partial retry data")
 
     class QuietPipe:
         def __init__(self) -> None:
@@ -425,6 +704,8 @@ def test_quiet_pip_process_responds_to_cancellation(
     assert process.terminated
     assert time.monotonic() - started < 2
     assert not (config_path.parent / resources.PIP_TEMP_RELATIVE_PATH).exists()
+    assert wheel_path.read_bytes() == b"downloaded wheel"
+    assert wheel_part.read_bytes() == b"partial retry data"
 
 
 def test_disk_preflight_rejects_insufficient_space_before_download(

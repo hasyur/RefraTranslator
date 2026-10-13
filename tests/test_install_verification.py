@@ -32,6 +32,7 @@ def test_verification_environment_cannot_use_development_python_or_user_data(
     monkeypatch.setenv("QT_PLUGIN_PATH", "C:/development/Qt")
     monkeypatch.setenv("REFRATRANSLATOR_OCR_MANIFEST_PATH", "C:/user/old-manifest.json")
     monkeypatch.setenv("REFRATRANSLATOR_INSTALL_DIR", "C:/user/existing-app")
+    monkeypatch.setenv("REFRATRANSLATOR_DATA_DIR", "C:/user/existing-data")
 
     environment = verifier._isolated_environment(tmp_path)
 
@@ -40,8 +41,9 @@ def test_verification_environment_cannot_use_development_python_or_user_data(
     assert "VIRTUAL_ENV" not in environment
     assert "REFRATRANSLATOR_OCR_MANIFEST_PATH" not in environment
     assert "REFRATRANSLATOR_INSTALL_DIR" not in environment
+    assert "REFRATRANSLATOR_DATA_DIR" not in environment
     assert environment["QT_PLUGIN_PATH"] == ""
-    for name in ("USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "REFRATRANSLATOR_DATA_DIR"):
+    for name in ("USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP"):
         assert Path(environment[name]).is_relative_to(tmp_path)
         assert Path(environment[name]).is_dir()
     assert os.environ["PYTHONPATH"] == "C:/development/src"

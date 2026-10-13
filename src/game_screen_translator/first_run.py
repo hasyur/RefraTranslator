@@ -24,6 +24,7 @@ from game_screen_translator.runtime_resources import (
     OcrPreparationCancelled,
     OcrPreparationError,
     OcrResourceInventory,
+    cleanup_prepared_downloads,
     inspect_ocr_resources,
     prepare_ocr_resources,
 )
@@ -328,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
 
     inventory = inspect_ocr_resources(args.config)
     if inventory.ready:
+        cleanup_prepared_downloads(args.config)
         return 0
     app = QApplication.instance() or QApplication([])
     window = OcrResourcesWindow(

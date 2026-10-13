@@ -11,6 +11,21 @@ RefraTranslator 是一款 Windows 游戏屏幕翻译工具：它自动识别画�
 
 普通用户使用 Windows x64 安装包 `RefraTranslator-Setup.exe`。双击后选择安装目录即可，不需要先安装 Python，也不需要手动运行 pip 或 PowerShell。安装完成后从开始菜单、桌面快捷方式，或直接双击安装目录中的 `RefraTranslator.exe` 打开程序。
 
+程序文件、配置、游戏档案、日志、模型和运行资源统一保存在你选择的安装目录中：
+
+```text
+安装目录/
+  RefraTranslator.exe
+  runtime/               内置 Python 和 OCR 运行依赖
+  config.toml            程序配置
+  .gui-settings.toml     界面偏好
+  profiles/              游戏档案、翻译缓存和快照
+  output/                启动和运行日志
+  .cache/                模型、运行资源及界面编译与渲染缓存
+```
+
+下载和解包中间文件也放在安装目录的 `.cache` 下。安装完成并通过资源校验后会自动清理已用完的下载包；中断或失败时保留已完成文件和 `.part` 续传文件。模型和可用运行时会长期保留。
+
 ### 安装前确认
 
 电脑需要满足以下条件：
@@ -83,10 +98,16 @@ nvidia-smi
 ### 安装中断或需要重装
 
 - 首次资源下载中断：重新打开安装版，资源清单会复用已完成和可续传的文件；可以点击 **重试**，也可以先选 **稍后准备**，不影响打开工作台；
-- 安装目录需要修复：关闭 RefraTranslator 后再次运行 `RefraTranslator-Setup.exe`，选择原安装目录。配置、游戏 Profile 和模型缓存保存在用户数据目录，不会随应用文件重装而清除；
-- 安装版启动失败：检查 `%LOCALAPPDATA%\RefraTranslator\output\launcher.log`；
+- 安装目录需要修复：关闭 RefraTranslator 后再次运行 `RefraTranslator-Setup.exe`，选择原安装目录。配置、游戏 Profile 和模型资源保存在安装目录，安装器更新程序文件时会保留这些数据；
+- 安装版启动失败：检查安装目录下的 `output\launcher.log`；
 - 开发安装失败：使用 `start_gui(debug).bat` 查看即时输出，并检查项目目录下的 `output\launcher.log`；虚拟环境损坏时关闭 RefraTranslator，只删除项目根目录中的 `.venv`，再运行 `install.bat`；
-- 实时翻译失败：安装版检查用户数据目录中的 `output\live.log`；开发安装检查项目目录下的 `output\live.log`。
+- 实时翻译失败：安装版检查安装目录下的 `output\live.log`；开发安装检查项目目录下的 `output\live.log`。
+
+### 从旧版用户目录手动迁移
+
+`v0.1.0-alpha.1` 和 `v0.1.0-alpha.2` 默认把用户数据保存在 `%LOCALAPPDATA%\RefraTranslator`。新版只使用安装目录中的数据，旧目录会保持原样，不自动搬移或清理。
+
+需要沿用旧数据时，先退出程序，再将旧目录中的 `config.toml`、`.gui-settings.toml`、`profiles`、`.cache` 和 `output` 搬到实际安装目录，然后启动新版。复制前保留已有数据的备份，遇到同名文件时由你选择保留的版本。默认配置使用相对路径，模型和续传文件可直接复用；自定义字体等外部文件也需要一并搬移。若旧配置使用绝对路径，需将它更新为安装目录内的对应路径。
 
 ### 开发环境（可选）
 
@@ -107,7 +128,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
 | --- | --- |
 | 开发安装无法读取 `WindowsApps\python.exe` 的版本 | 这通常是 Microsoft Store 执行别名，不是真正的 Python。安装 64 位 Python 3.11～3.13 并勾选 **Add python.exe to PATH**；若已安装，在 Windows“应用执行别名”中关闭 `python.exe` 和 `python3.exe` 的商店别名，再运行 `where.exe python` 与 `python --version` 确认 |
 | 没有检测到显卡 | 确认电脑使用 NVIDIA 显卡并已安装驱动；当前版本不能改用 CPU OCR |
-| 双击安装版后工作台没有打开 | 查看 `%LOCALAPPDATA%\RefraTranslator\output\launcher.log`；开发安装查看项目目录的 `output\launcher.log` |
+| 双击安装版后工作台没有打开 | 查看安装目录下的 `output\launcher.log`；开发安装查看项目目录的 `output\launcher.log` |
 | 点击开始后退出，或一直没有译文 | 查看 `output\live.log`，并确认框选区域内确实有日文或英文 |
 | 内置模型显存不足 | 先使用 1.8B 模型，并把高级设置中的并发槽位保持为 1 |
 | 看不到控制框或译文 | 先用本机有线显示器和窗口化游戏测试；部分无线投屏、虚拟显示器或捕获链路不兼容 |

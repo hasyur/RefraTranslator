@@ -41,14 +41,13 @@ def _isolated_environment(run_root: Path) -> dict[str, str]:
         "APPDATA": str(run_root / "user" / "AppData" / "Roaming"),
         "TEMP": str(run_root / "temp"),
         "TMP": str(run_root / "temp"),
-        "REFRATRANSLATOR_DATA_DIR": str(run_root / "data"),
         "PYTHONNOUSERSITE": "1",
         "PYTHONUTF8": "1",
         "QT_QPA_PLATFORM": "windows",
         "QT_PLUGIN_PATH": "",
         "QT_QPA_PLATFORM_PLUGIN_PATH": "",
     })
-    for key in ("USERPROFILE", "LOCALAPPDATA", "APPDATA", "TEMP", "REFRATRANSLATOR_DATA_DIR"):
+    for key in ("USERPROFILE", "LOCALAPPDATA", "APPDATA", "TEMP"):
         Path(environment[key]).mkdir(parents=True, exist_ok=True)
     return environment
 
@@ -187,10 +186,13 @@ def verify(installer: Path, work_dir: Path, *, duration: float = 1, timeout: flo
     install_root = run_root / "安装目录 with spaces"
     environment = _isolated_environment(run_root)
     report = {"status": "failed", "installer": str(installer), "run_root": str(run_root)}
+    install_command = [
+        str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+        f"/DIR={install_root}",
+    ]
     try:
         _run(
-            [str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
-             f"/DIR={install_root}", f"/LOG={run_root / 'install.log'}"],
+            [*install_command, f"/LOG={run_root / 'install.log'}"],
             cwd=run_root, environment=environment, timeout=timeout,
             log_path=run_root / "installer-output.log",
         )
@@ -218,10 +220,12 @@ def verify(installer: Path, work_dir: Path, *, duration: float = 1, timeout: flo
             cwd=run_root, environment=environment, timeout=timeout,
             log_path=run_root / "launcher-output.log",
         )
-        data_root = Path(environment["REFRATRANSLATOR_DATA_DIR"])
+        data_root = install_root
         config_path = data_root / "config.toml"
         if not config_path.is_file():
             raise VerificationError("Installed launcher did not prepare an isolated user configuration")
+        if (Path(environment["LOCALAPPDATA"]) / "RefraTranslator").exists():
+            raise VerificationError("Installed launcher unexpectedly wrote to the legacy user-data directory")
         _check_launcher_log(data_root / "output" / "launcher.log", runtime_python)
         # The first-run dialog was deferred. No model or GPU wheel download should have started.
         resource_directories = ("ocr-wheelhouse", "paddlex", "local-llm")
@@ -231,8 +235,29 @@ def verify(installer: Path, work_dir: Path, *, duration: float = 1, timeout: flo
             for path in (data_root / ".cache" / directory).rglob("*")
         ):
             raise VerificationError("Startup smoke test unexpectedly downloaded resources")
+
+        # User-created files must survive replacement of the application payload.
+        preserved = {
+            config_path: config_path.read_bytes() + b"\n# Reinstall preservation probe\n",
+            data_root / "output" / "launcher.log": (data_root / "output" / "launcher.log").read_bytes(),
+            data_root / "profiles" / "install-verification.keep": b"user profile data",
+            data_root / ".cache" / "local-llm" / "models" / "install-verification.keep": b"downloaded model data",
+            runtime_python.parent / "Lib" / "site-packages" / "install-verification.keep": b"first-run runtime payload",
+        }
+        for path, payload in preserved.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+        _run(
+            [*install_command, f"/LOG={run_root / 'reinstall.log'}"],
+            cwd=run_root, environment=environment, timeout=timeout,
+            log_path=run_root / "reinstaller-output.log",
+        )
+        for path, expected in preserved.items():
+            if not path.is_file() or path.read_bytes() != expected:
+                raise VerificationError(f"Reinstallation changed user data: {path}")
         report.update({"status": "passed", "runtime": probe, "install_root": str(install_root),
-                       "data_root": str(data_root), "duration_seconds": duration})
+                       "data_root": str(data_root), "duration_seconds": duration,
+                       "reinstall_preserved_paths": [str(path) for path in preserved]})
     except Exception as exc:
         report["error"] = str(exc)
         raise

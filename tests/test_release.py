@@ -476,7 +476,9 @@ def test_readme_installation_guide_documents_installer_contract() -> None:
     assert "再次安装时保留已有配置" in readme
     assert "安装成功后清理 `.cache\\pip`" in readme
     assert "只删除项目根目录中的 `.venv`" in readme
-    assert "`%LOCALAPPDATA%\\RefraTranslator\\output\\launcher.log`" in readme
+    assert "安装目录下的 `output\\launcher.log`" in readme
+    assert "程序文件、配置、游戏档案、日志、模型和运行资源统一保存在" in readme
+    assert "旧目录会保持原样，不自动搬移或清理" in readme
     assert "`output\\launcher.log`" in readme
     assert "`output\\live.log`" in readme
     assert "再次运行 `RefraTranslator-Setup.exe`" in readme
