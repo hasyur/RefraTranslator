@@ -58,6 +58,10 @@ To refresh OCR release data, use an explicit OCR-equipped development environmen
 
 The generator reads the installed OCR dependency graph and small PyPI JSON responses; it does not download OCR wheels. Review and commit the resulting complete manifest. Ordinary builds and CI reuse the tracked release manifest, avoiding GPU dependency downloads merely to package the application.
 
+## Release notes
+
+Archive published descriptions in `packaging/releases/<tag>.md`. Write them for end users: describe changes, requirements, installation and upgrades, and retain the checksum asset and source commit. Keep test counts, CI matrices and detailed verification records in CI and build reports.
+
 ## CI
 
 `.github/workflows/ci.yml` checks release metadata in the existing Python test matrix. A separate Windows installer job installs the exact core pins, downloads checksum-verified CPython 3.13.5 and [Inno Setup 6.7.3](https://jrsoftware.org/isdl.php) build tools, builds both EXEs and runs isolated installation verification. It uploads the build report, verification report and diagnostic logs even on failure. The job requires network access for the fixed core dependencies and build tools, but does not install/download the approximately 3.23 GB OCR wheel set.

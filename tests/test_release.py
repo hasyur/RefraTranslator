@@ -45,6 +45,7 @@ PACKAGING_RELEASE_FILES = (
     "packaging/requirements-core.txt",
     "packaging/ocr_wheel_manifest.json",
     "packaging/verify_windows_install.py",
+    "packaging/releases/v0.1.0-alpha.4.md",
 )
 PUBLIC_TEST_MANIFEST_ENTRIES = (
     "include tests/test_*.py",
@@ -500,6 +501,19 @@ def test_readme_keeps_the_exe_user_journey_before_source_development() -> None:
     for developer_entry in ("install.bat", "start_gui.bat", "bootstrap.ps1", "git pull"):
         assert developer_entry not in user_guide
         assert developer_entry in developer_guide
+
+
+def test_archived_release_notes_keep_user_instructions_without_validation_logs() -> None:
+    notes = (PROJECT_ROOT / "packaging/releases/v0.1.0-alpha.4.md").read_text(encoding="utf-8")
+
+    assert "## 本版改动" in notes
+    assert "## 安装与升级" in notes
+    assert "选择原安装目录" in notes
+    assert "SHA256SUMS.txt" in notes
+    assert re.search(r"发布源码提交：`[0-9a-f]{40}`", notes)
+    assert "## 验证" not in notes
+    assert "Windows CI" not in notes
+    assert "项通过" not in notes
 
 
 def test_readme_explains_exe_first_run_and_in_place_updates() -> None:

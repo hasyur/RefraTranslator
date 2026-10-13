@@ -18,6 +18,7 @@ include packaging/requirements-core.txt
 include packaging/ocr_wheel_manifest.json
 include packaging/verify_windows_install.py
 include packaging/README.md
+recursive-include packaging/releases *.md
 include tests/test_*.py
 include tests/integration/test_*.py
 include tests/manual/animated_ocr_scenes.py
