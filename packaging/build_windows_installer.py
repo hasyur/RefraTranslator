@@ -17,18 +17,18 @@ from pathlib import Path, PurePosixPath
 from pip._vendor.packaging.requirements import Requirement
 from pip._vendor.packaging.utils import canonicalize_name
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_metadata import (
+    ReleaseMetadataError,
+    check_release_metadata,
+    load_core_requirements,
+    read_version,
+    windows_file_version,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
-APP_VERSION = "0.1.0"
 PYTHON_EMBED_SHA256 = "7d2650fd9d1b9d002d4a315d5f354247fd6a44f30517c7ef577b08f57a0fb6d9"
-CORE_REQUIREMENTS = (
-    "httpx==0.28.1",
-    "Pillow==12.3.0",
-    "PySide6==6.9.3",
-    "dxcam[winrt]==0.3.0",
-    "numpy==2.3.5",
-    "pip==25.1.1",
-)
 
 
 class BuildError(RuntimeError):
@@ -42,10 +42,18 @@ def _installed_distribution(requirement: Requirement) -> metadata.Distribution:
         raise BuildError(
             f"Build environment is missing {requirement.name}; use the project .venv"
         ) from exc
-    if requirement.specifier and not requirement.specifier.contains(
-        distribution.version,
-        prereleases=True,
-    ):
+    exact_pins = tuple(requirement.specifier)
+    expected = (
+        exact_pins[0].version
+        if len(exact_pins) == 1 and exact_pins[0].operator == "=="
+        else None
+    )
+    if expected is not None and distribution.version != expected:
+        raise BuildError(
+            f"Build environment has {requirement.name} {distribution.version}, "
+            f"but the release requires exactly {expected}"
+        )
+    if requirement.specifier and not requirement.specifier.contains(distribution.version, prereleases=True):
         raise BuildError(
             f"Build environment has {requirement.name} {distribution.version}, "
             f"outside {requirement.specifier}"
@@ -54,16 +62,38 @@ def _installed_distribution(requirement: Requirement) -> metadata.Distribution:
 
 
 def _resolve_core_distributions() -> tuple[metadata.Distribution, ...]:
-    pending: deque[Requirement] = deque(Requirement(item) for item in CORE_REQUIREMENTS)
+    try:
+        locked_requirements = load_core_requirements(ROOT)
+    except ReleaseMetadataError as exc:
+        raise BuildError(str(exc)) from exc
+    locked_by_name = {
+        canonicalize_name(requirement.name): requirement
+        for requirement in locked_requirements
+    }
+    pending: deque[Requirement] = deque(locked_requirements)
     distributions: dict[str, metadata.Distribution] = {}
     active_extras: dict[str, set[str]] = {}
     processed_extras: dict[str, set[str]] = {}
     while pending:
-        requirement = pending.popleft()
-        name = canonicalize_name(requirement.name)
+        dependency = pending.popleft()
+        name = canonicalize_name(dependency.name)
+        requirement = locked_by_name.get(name)
+        if requirement is None:
+            raise BuildError(
+                f"Fixed core requirements are missing dependency {dependency}"
+            )
+        locked_version = next(iter(requirement.specifier)).version
+        if dependency.specifier and not dependency.specifier.contains(
+            locked_version,
+            prereleases=True,
+        ):
+            raise BuildError(
+                f"Locked {requirement.name}=={locked_version} is outside "
+                f"the dependency range {dependency.specifier}"
+            )
         distribution = _installed_distribution(requirement)
         distributions[name] = distribution
-        extras = set(requirement.extras)
+        extras = set(requirement.extras) | set(dependency.extras)
         known_extras = active_extras.setdefault(name, set())
         new_extras = extras - known_extras
         known_extras.update(extras)
@@ -79,6 +109,12 @@ def _resolve_core_distributions() -> tuple[metadata.Distribution, ...]:
             ):
                 continue
             pending.append(dependency)
+    if distributions.keys() != locked_by_name.keys():
+        unused = sorted(locked_by_name.keys() - distributions.keys())
+        raise BuildError(
+            "Fixed core requirements contain entries outside the active runtime closure: "
+            + ", ".join(unused)
+        )
     return tuple(
         distributions[name] for name in sorted(distributions)
     )
@@ -202,6 +238,7 @@ def _copy_application(
     *,
     python_embed: Path,
     ocr_manifest: Path,
+    core_distributions: tuple[metadata.Distribution, ...] | None = None,
 ) -> dict[str, object]:
     runtime = app_root / "runtime"
     app_site_packages = runtime / "Lib" / "site-packages"
@@ -209,7 +246,11 @@ def _copy_application(
     app_site_packages.mkdir(parents=True, exist_ok=True)
 
     site_packages = Path(sysconfig_path()).resolve()
-    distributions = _resolve_core_distributions()
+    distributions = (
+        _resolve_core_distributions()
+        if core_distributions is None
+        else core_distributions
+    )
     copied: list[dict[str, object]] = []
     license_root = app_root / "THIRD_PARTY_LICENSES"
     for distribution in distributions:
@@ -250,7 +291,7 @@ def _copy_application(
     metadata_path = app_root / "BUILD-INFO.txt"
     metadata_path.write_text(
         "RefraTranslator Windows x64\n"
-        f"Application version: {APP_VERSION}\n"
+        f"Application version: {read_version(ROOT)}\n"
         f"Embedded CPython: {sys.version.split()[0]}\n"
         f"OCR fixed wheel resources: {wheel_count}\n",
         encoding="utf-8",
@@ -269,6 +310,19 @@ def sysconfig_path() -> str:
     return sysconfig.get_paths()["purelib"]
 
 
+def _render_launcher_source(root: Path = ROOT) -> str:
+    template_path = root / "packaging" / "windows_launcher.cs"
+    source = template_path.read_text(encoding="utf-8")
+    version = read_version(root)
+    file_version = windows_file_version(version)
+    source = source.replace("@@ASSEMBLY_VERSION@@", file_version)
+    source = source.replace("@@FILE_VERSION@@", file_version)
+    source = source.replace("@@INFORMATIONAL_VERSION@@", version)
+    if "@@" in source:
+        raise BuildError("The C# launcher template contains an unresolved version placeholder")
+    return source
+
+
 def _build_launcher(app_root: Path, compiler: Path | None = None) -> Path:
     if compiler is None:
         windows_root = Path(os.environ.get("WINDIR", r"C:\Windows"))
@@ -278,6 +332,11 @@ def _build_launcher(app_root: Path, compiler: Path | None = None) -> Path:
         raise BuildError(f"Windows .NET Framework C# compiler not found: {compiler}; use --csc")
     app_root.mkdir(parents=True, exist_ok=True)
     output = app_root / "RefraTranslator.exe"
+    source_path = app_root.parent / "RefraTranslatorLauncher.versioned.cs"
+    try:
+        source_path.write_text(_render_launcher_source(), encoding="utf-8", newline="\n")
+    except (OSError, ReleaseMetadataError) as exc:
+        raise BuildError(f"Could not prepare the versioned C# launcher source: {exc}") from exc
     command = [
         str(compiler),
         "/nologo",
@@ -286,7 +345,7 @@ def _build_launcher(app_root: Path, compiler: Path | None = None) -> Path:
         "/optimize+",
         "/codepage:65001",
         f"/out:{output}",
-        str(ROOT / "packaging" / "windows_launcher.cs"),
+        str(source_path),
     ]
     try:
         result = subprocess.run(
@@ -300,6 +359,8 @@ def _build_launcher(app_root: Path, compiler: Path | None = None) -> Path:
         )
     except OSError as exc:
         raise BuildError(f"Could not run C# compiler {compiler}: {exc}") from exc
+    finally:
+        source_path.unlink(missing_ok=True)
     if result.returncode != 0:
         raise BuildError("Application launcher compilation failed:\n" + result.stdout + result.stderr)
     if not output.is_file():
@@ -321,6 +382,8 @@ def _run_inno(
     )
     command = [
         str(compiler),
+        f"/DAppVersion={read_version(ROOT)}",
+        f"/DWindowsVersion={windows_file_version(read_version(ROOT))}",
         f"/DAppSourceDir={app_root.as_posix()}",
         f"/DPortableBuild={1 if portable else 0}",
         f"/O{output_dir.as_posix()}",
@@ -366,6 +429,12 @@ def build(args: argparse.Namespace) -> dict[str, object]:
     output_dir = args.output_dir.expanduser().resolve()
     if not manifest.is_file():
         raise BuildError(f"Fixed OCR wheel manifest not found: {manifest}")
+    try:
+        check_release_metadata(ROOT, ocr_manifest=manifest)
+    except (ReleaseMetadataError, OSError, ValueError, TypeError, KeyError) as exc:
+        raise BuildError(str(exc)) from exc
+    # Validate every installed version before clearing or copying the staged payload.
+    core_distributions = _resolve_core_distributions()
     _remove_staging(app_root)
     stage_root.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -373,6 +442,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
         app_root,
         python_embed=embed_zip,
         ocr_manifest=manifest,
+        core_distributions=core_distributions,
     )
     launcher = _build_launcher(app_root, args.csc)
 
@@ -428,7 +498,7 @@ def main() -> int:
     parser.add_argument(
         "--ocr-manifest",
         type=Path,
-        default=ROOT / ".cache" / "exe-build-tools" / "ocr_wheel_manifest.json",
+        default=ROOT / "packaging" / "ocr_wheel_manifest.json",
     )
     parser.add_argument(
         "--output-dir",

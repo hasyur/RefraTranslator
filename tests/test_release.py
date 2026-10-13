@@ -36,10 +36,15 @@ MANUAL_RELEASE_FILES = (
     "tests/manual/README.md",
 )
 PACKAGING_RELEASE_FILES = (
+    "packaging/README.md",
     "packaging/build_windows_installer.py",
     "packaging/prepare_ocr_manifest.py",
     "packaging/windows_installer.iss",
     "packaging/windows_launcher.cs",
+    "packaging/release_metadata.py",
+    "packaging/requirements-core.txt",
+    "packaging/ocr_wheel_manifest.json",
+    "packaging/verify_windows_install.py",
 )
 PUBLIC_TEST_MANIFEST_ENTRIES = (
     "include tests/test_*.py",

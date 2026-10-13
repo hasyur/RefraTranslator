@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "RefraTranslator"
-version = "0.1.0"
+dynamic = ["version"]
 description = "RefraTranslator: real-time Windows game screen translation with a local LLM API"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -34,6 +34,7 @@ dev = [
 ocr-gpu = [
   "paddleocr>=3.3,<4",
   "paddlepaddle-gpu>=3.3.1,<3.4",
+  "paddlex[ocr-core]>=3.7.2,<3.8",
 ]
 gui = [
   "PySide6>=6.9,<6.10",
@@ -45,6 +46,9 @@ refra-translator = "game_screen_translator.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "game_screen_translator._version.__version__"}
 
 [tool.setuptools.package-data]
 "game_screen_translator.gui" = [

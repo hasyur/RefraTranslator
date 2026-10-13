@@ -8,8 +8,9 @@ using System.Text;
 [assembly: AssemblyTitle("RefraTranslator")]
 [assembly: AssemblyDescription("RefraTranslator Windows application launcher")]
 [assembly: AssemblyProduct("RefraTranslator")]
-[assembly: AssemblyVersion("0.1.0.0")]
-[assembly: AssemblyFileVersion("0.1.0.0")]
+[assembly: AssemblyVersion("@@ASSEMBLY_VERSION@@")]
+[assembly: AssemblyFileVersion("@@FILE_VERSION@@")]
+[assembly: AssemblyInformationalVersion("@@INFORMATIONAL_VERSION@@")]
 
 internal static class RefraTranslatorLauncher
 {

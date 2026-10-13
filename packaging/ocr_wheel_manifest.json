@@ -1,0 +1,604 @@
+{
+  "schema_version": 1,
+  "python": "3.13",
+  "platform": "win_amd64",
+  "requirements": [
+    "paddlepaddle-gpu==3.3.1",
+    "paddleocr==3.7.0",
+    "paddlex[ocr-core]==3.7.2"
+  ],
+  "wheels": [
+    {
+      "name": "aiohappyeyeballs",
+      "version": "2.7.1",
+      "url": "https://files.pythonhosted.org/packages/71/43/1947f06babed6b3f1d7f38b0c767f52df66bfb2bc10b468c4a7de9eceff2/aiohappyeyeballs-2.7.1-py3-none-any.whl",
+      "sha256": "9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472",
+      "size_bytes": 15038,
+      "installed_size_bytes": 62611
+    },
+    {
+      "name": "aiohttp",
+      "version": "3.14.3",
+      "url": "https://files.pythonhosted.org/packages/9d/69/3d876ac02659f271cf7f6769f14a8e3de5b6e888ed8b5a7e998086a4cec8/aiohttp-3.14.3-cp313-cp313-win_amd64.whl",
+      "sha256": "dff9461ec275f22135650d5ba4b4931a11f3958df7dfbb8db630000d4dee0883",
+      "size_bytes": 476518,
+      "installed_size_bytes": 2720739
+    },
+    {
+      "name": "aiosignal",
+      "version": "1.4.0",
+      "url": "https://files.pythonhosted.org/packages/fb/76/641ae371508676492379f16e2fa48f4e2c11741bd63c48be4b12a6b09cba/aiosignal-1.4.0-py3-none-any.whl",
+      "sha256": "053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e",
+      "size_bytes": 7490,
+      "installed_size_bytes": 20037
+    },
+    {
+      "name": "aistudio_sdk",
+      "version": "0.3.9",
+      "url": "https://files.pythonhosted.org/packages/c2/56/ce14f76c1892f335fbcd82568d347fd1652e1a4b0b76ac4a4cd90e1ae202/aistudio_sdk-0.3.9-py3-none-any.whl",
+      "sha256": "41621d052ddb7a58643438a7ca541f58ef0ab94a2acdfff0a71db81bf68dc027",
+      "size_bytes": 67186,
+      "installed_size_bytes": 591107
+    },
+    {
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "url": "https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8628a49c68ce14148cd9f6431094859a90/annotated_types-0.8.0-py3-none-any.whl",
+      "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
+      "size_bytes": 13427,
+      "installed_size_bytes": 67659
+    },
+    {
+      "name": "anyio",
+      "version": "4.14.2",
+      "url": "https://files.pythonhosted.org/packages/da/35/f2287558c17e29fafc8ef3daf819bb9834061cfa43bff8014f7df7f63bdc/anyio-4.14.2-py3-none-any.whl",
+      "sha256": "9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494",
+      "size_bytes": 125813,
+      "installed_size_bytes": 1220156
+    },
+    {
+      "name": "attrs",
+      "version": "26.1.0",
+      "url": "https://files.pythonhosted.org/packages/64/b4/17d4b0b2a2dc85a6df63d1157e028ed19f90d4cd97c36717afef2bc2f395/attrs-26.1.0-py3-none-any.whl",
+      "sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+      "size_bytes": 67548,
+      "installed_size_bytes": 439841
+    },
+    {
+      "name": "bce-python-sdk",
+      "version": "0.9.76",
+      "url": "https://files.pythonhosted.org/packages/b9/06/4d4a26c3dfcdb29599f563329b87eefe55b02b3c2b9d8f8c3aeaa38a33a6/bce_python_sdk-0.9.76-py3-none-any.whl",
+      "sha256": "e629181d060f4ed8f29749f47139bf08f1f9b0d8b15daedc956900785587e8d8",
+      "size_bytes": 435179,
+      "installed_size_bytes": 4864850
+    },
+    {
+      "name": "certifi",
+      "version": "2026.7.22",
+      "url": "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl",
+      "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
+      "size_bytes": 136983,
+      "installed_size_bytes": 253956
+    },
+    {
+      "name": "chardet",
+      "version": "7.5.1",
+      "url": "https://files.pythonhosted.org/packages/88/d4/ed3b7e5c882ba24b71df8554840898ebbbbc3a57844d218edd4a1f8770a4/chardet-7.5.1-cp313-cp313-win_amd64.whl",
+      "sha256": "71f152d66e7bd1faad615897d34765243cb567ad6aef07bf0d7c0cdd69bf6cce",
+      "size_bytes": 1034753,
+      "installed_size_bytes": 2222945
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.5.0",
+      "url": "https://files.pythonhosted.org/packages/fb/88/6018cc8d76ea2b7cb02918f37e23e86c261d1a102713d7e88d2cfb8b211c/charset_normalizer-3.5.0-cp313-cp313-win_amd64.whl",
+      "sha256": "72982d9958a42f8132bf2d6b90214ed66477295ef1188731f98ae3511c6eeb5a",
+      "size_bytes": 198896,
+      "installed_size_bytes": 843960
+    },
+    {
+      "name": "click",
+      "version": "8.4.2",
+      "url": "https://files.pythonhosted.org/packages/fb/e2/79c688af8b210d232694e31e59da9f6ec747bae31c3f5946e4e9b98860d5/click-8.4.2-py3-none-any.whl",
+      "sha256": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76",
+      "size_bytes": 119243,
+      "installed_size_bytes": 914210
+    },
+    {
+      "name": "colorama",
+      "version": "0.4.6",
+      "url": "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl",
+      "sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
+      "size_bytes": 25335,
+      "installed_size_bytes": 169919
+    },
+    {
+      "name": "colorlog",
+      "version": "6.12.0",
+      "url": "https://files.pythonhosted.org/packages/d4/19/0b6647bf5e331521e55d2b63bfbdc210bd9cd605189273f03614a05f702d/colorlog-6.12.0-py3-none-any.whl",
+      "sha256": "30d392604e9110045a2c2aeefc27d7a017abbab63f3a8aee594eac0801df784e",
+      "size_bytes": 12239,
+      "installed_size_bytes": 49450
+    },
+    {
+      "name": "crc32c",
+      "version": "2.8",
+      "url": "https://files.pythonhosted.org/packages/d0/db/fd0f698c15d1e21d47c64181a98290665a08fcbb3940cd559e9c15bda57e/crc32c-2.8-cp313-cp313-win_amd64.whl",
+      "sha256": "171ff0260d112c62abcce29332986950a57bddee514e0a2418bfde493ea06bb3",
+      "size_bytes": 66646,
+      "installed_size_bytes": 267379
+    },
+    {
+      "name": "filelock",
+      "version": "3.32.2",
+      "url": "https://files.pythonhosted.org/packages/c1/e8/72f8cef9fdfeffe06213fe8508039396ee48daa0e3259457ed766173bfd6/filelock-3.32.2-py3-none-any.whl",
+      "sha256": "87dd94cf281e586d135fa51132b8e3d9a598b316e90377a288663c9321036c82",
+      "size_bytes": 98830,
+      "installed_size_bytes": 744729
+    },
+    {
+      "name": "frozenlist",
+      "version": "1.8.0",
+      "url": "https://files.pythonhosted.org/packages/d8/cf/174c91dbc9cc49bc7b7aab74d8b734e974d1faa8f191c74af9b7e80848e6/frozenlist-1.8.0-cp313-cp313-win_amd64.whl",
+      "sha256": "878be833caa6a3821caf85eb39c5ba92d28e85df26d57afb06b35b2efd937231",
+      "size_bytes": 43882,
+      "installed_size_bytes": 113443
+    },
+    {
+      "name": "fsspec",
+      "version": "2026.7.0",
+      "url": "https://files.pythonhosted.org/packages/fd/3c/6a2bf344106328fd04963664a60b9bb6496fc25df8e962fcdc1367285fb9/fsspec-2026.7.0-py3-none-any.whl",
+      "sha256": "b57ddbafedfaef7018c1ecab32aa200a9d7ca26b77965f64e48b70061249d279",
+      "size_bytes": 206583,
+      "installed_size_bytes": 1704653
+    },
+    {
+      "name": "future",
+      "version": "1.0.0",
+      "url": "https://files.pythonhosted.org/packages/da/71/ae30dadffc90b9006d77af76b393cb9dfbfc9629f339fc1574a1c52e6806/future-1.0.0-py3-none-any.whl",
+      "sha256": "929292d34f5872e70396626ef385ec22355a1fae8ad29e1a734c3e43f9fbc216",
+      "size_bytes": 491326,
+      "installed_size_bytes": 3498381
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "url": "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl",
+      "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+      "size_bytes": 37515,
+      "installed_size_bytes": 185908
+    },
+    {
+      "name": "hf-xet",
+      "version": "1.6.0",
+      "url": "https://files.pythonhosted.org/packages/98/b7/8c59a66d15205024662f1d66968136f13893f96df1ddc5087e2e281fc95f/hf_xet-1.6.0-cp38-abi3-win_amd64.whl",
+      "sha256": "fb4fadde1b2b70bf4c0c14a6dccbe7194b1c28947fefd5bbe3fed9d940676c3b",
+      "size_bytes": 4033128,
+      "installed_size_bytes": 9805762
+    },
+    {
+      "name": "httpcore",
+      "version": "1.0.9",
+      "url": "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl",
+      "sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+      "size_bytes": 78784,
+      "installed_size_bytes": 630686
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "url": "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl",
+      "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
+      "size_bytes": 73517,
+      "installed_size_bytes": 744721
+    },
+    {
+      "name": "huggingface_hub",
+      "version": "1.27.0",
+      "url": "https://files.pythonhosted.org/packages/de/d8/95b735e183957c1f26d94c52977f09d466d55119cbbc1558ea4975e4c216/huggingface_hub-1.27.0-py3-none-any.whl",
+      "sha256": "7df6827c2f956c60fbaa64646e979e566db76f619dd0a9729dfb8c5a3eb4f68d",
+      "size_bytes": 784926,
+      "installed_size_bytes": 6555094
+    },
+    {
+      "name": "idna",
+      "version": "3.18",
+      "url": "https://files.pythonhosted.org/packages/1e/5e/d4e9f1a599fb8e573b7b87160658329fbf28d19eac2718f51fc3def3aa5a/idna-3.18-py3-none-any.whl",
+      "sha256": "7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2",
+      "size_bytes": 65455,
+      "installed_size_bytes": 599847
+    },
+    {
+      "name": "imagesize",
+      "version": "2.0.0",
+      "url": "https://files.pythonhosted.org/packages/5f/53/fb7122b71361a0d121b669dcf3d31244ef75badbbb724af388948de543e2/imagesize-2.0.0-py2.py3-none-any.whl",
+      "sha256": "5667c5bbb57ab3f1fa4bc366f4fbc971db3d5ed011fd2715fd8001f782718d96",
+      "size_bytes": 9441,
+      "installed_size_bytes": 76009
+    },
+    {
+      "name": "modelscope",
+      "version": "1.39.1",
+      "url": "https://files.pythonhosted.org/packages/ee/c5/ff578b44a7ba5d86edfaae1ce7db9082f95477bd22ccb2514c1aee4636b7/modelscope-1.39.1-py3-none-any.whl",
+      "sha256": "c1567b9d319b11d815832d13c11f71a6413b19cf6374cef6937c54d830552a97",
+      "size_bytes": 6038125,
+      "installed_size_bytes": 50329885
+    },
+    {
+      "name": "modelscope-hub",
+      "version": "0.2.0",
+      "url": "https://files.pythonhosted.org/packages/ab/be/3b0e14c296a622c920287fc6d2c1b5a8668c8e0d98662f7b2bd8f3fcc779/modelscope_hub-0.2.0-py3-none-any.whl",
+      "sha256": "84668c80c1d36d1fb1ea1ce17b707d77e044b92255288618c3b7de5b13834418",
+      "size_bytes": 156023,
+      "installed_size_bytes": 1373577
+    },
+    {
+      "name": "multidict",
+      "version": "6.7.1",
+      "url": "https://files.pythonhosted.org/packages/b2/35/e994121b0e90e46134673422dd564623f93304614f5d11886b1b3e06f503/multidict-6.7.1-cp313-cp313-win_amd64.whl",
+      "sha256": "960c83bf01a95b12b08fd54324a4eb1d5b52c88932b5cba5d6e712bb3ed12eb5",
+      "size_bytes": 45884,
+      "installed_size_bytes": 205539
+    },
+    {
+      "name": "networkx",
+      "version": "3.6.1",
+      "url": "https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl",
+      "sha256": "d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762",
+      "size_bytes": 2068504,
+      "installed_size_bytes": 15468788
+    },
+    {
+      "name": "numpy",
+      "version": "2.3.5",
+      "url": "https://files.pythonhosted.org/packages/0c/88/e2eaa6cffb115b85ed7c7c87775cb8bcf0816816bc98ca8dbfa2ee33fe6e/numpy-2.3.5-cp313-cp313-win_amd64.whl",
+      "sha256": "00dc4e846108a382c5869e77c6ed514394bdeb3403461d25a829711041217d5b",
+      "size_bytes": 12779090,
+      "installed_size_bytes": 54528575
+    },
+    {
+      "name": "nvidia-cublas-cu12",
+      "version": "12.9.0.13",
+      "url": "https://files.pythonhosted.org/packages/08/79/0cf1ed0ccea47067cc2140ab9bd38100de574824a6dc9e12151fb9b39c59/nvidia_cublas_cu12-12.9.0.13-py3-none-win_amd64.whl",
+      "sha256": "a525014e22b8adb79d04b70f69fd53d09c7b851002b3d332cd601da3a37276fd",
+      "size_bytes": 552611067,
+      "installed_size_bytes": 770863542
+    },
+    {
+      "name": "nvidia-cuda-runtime-cu12",
+      "version": "12.9.37",
+      "url": "https://files.pythonhosted.org/packages/b8/1c/c6352858f84e5203279300a9fb4f9d7613cbab5fd4afd78613bb9bcdc64c/nvidia_cuda_runtime_cu12-12.9.37-py3-none-win_amd64.whl",
+      "sha256": "84a750e4d46a32e0b8adc4efdd4021fe49741b1cbbee72421c5400ff9865dd83",
+      "size_bytes": 3591221,
+      "installed_size_bytes": 11334837
+    },
+    {
+      "name": "nvidia-cudnn-cu12",
+      "version": "9.9.0.52",
+      "url": "https://files.pythonhosted.org/packages/6f/5c/f77147ce7e27a4e9087fb34b0539ff085c68e7093e96ee85576fe31fe064/nvidia_cudnn_cu12-9.9.0.52-py3-none-win_amd64.whl",
+      "sha256": "d53036b7edad1a85b5d59580defc91e30326746fde21ffc701eb8b4d4695eca1",
+      "size_bytes": 767785830,
+      "installed_size_bytes": 1108901676
+    },
+    {
+      "name": "nvidia-cufft-cu12",
+      "version": "11.4.0.6",
+      "url": "https://files.pythonhosted.org/packages/4d/fe/b83d984f5f7420e2d43d148fe2379775d6f53d3e0a9057d998b16939ffc8/nvidia_cufft_cu12-11.4.0.6-py3-none-win_amd64.whl",
+      "sha256": "26cd694ef8472efac5e73466d05d5b356f80eafe849095eb6bf4d7f93390557d",
+      "size_bytes": 200095584,
+      "installed_size_bytes": 287550617
+    },
+    {
+      "name": "nvidia-curand-cu12",
+      "version": "10.3.10.19",
+      "url": "https://files.pythonhosted.org/packages/e5/98/1bd66fd09cbe1a5920cb36ba87029d511db7cca93979e635fd431ad3b6c0/nvidia_curand_cu12-10.3.10.19-py3-none-win_amd64.whl",
+      "sha256": "e8129e6ac40dc123bd948e33d3e11b4aa617d87a583fa2f21b3210e90c743cde",
+      "size_bytes": 68774847,
+      "installed_size_bytes": 81393345
+    },
+    {
+      "name": "nvidia-cusolver-cu12",
+      "version": "11.7.4.40",
+      "url": "https://files.pythonhosted.org/packages/b6/c6/0e3459479a34e7d7cde75b6990953b0873781eac05edfafcd761fe8918c2/nvidia_cusolver_cu12-11.7.4.40-py3-none-win_amd64.whl",
+      "sha256": "288993d2c3bd8167baa3f7b581e219175db576a54d2c36ad62b163a07de923c5",
+      "size_bytes": 320275500,
+      "installed_size_bytes": 462954931
+    },
+    {
+      "name": "nvidia-cusparse-cu12",
+      "version": "12.5.9.5",
+      "url": "https://files.pythonhosted.org/packages/4e/de/d771533939aeea1433a338825190453f9fcbf235370b8e7161522fd89a13/nvidia_cusparse_cu12-12.5.9.5-py3-none-win_amd64.whl",
+      "sha256": "228d7ee34c8e3622fa58aa7a53c6f5d05f5d0c6980173c46e308129b66910c88",
+      "size_bytes": 362510485,
+      "installed_size_bytes": 477922430
+    },
+    {
+      "name": "nvidia-nvjitlink-cu12",
+      "version": "12.9.86",
+      "url": "https://files.pythonhosted.org/packages/dd/7e/2eecb277d8a98184d881fb98a738363fd4f14577a4d2d7f8264266e82623/nvidia_nvjitlink_cu12-12.9.86-py3-none-win_amd64.whl",
+      "sha256": "cc6fcec260ca843c10e34c936921a1c426b351753587fdd638e8cff7b16bb9db",
+      "size_bytes": 35584936,
+      "installed_size_bytes": 87479656
+    },
+    {
+      "name": "opencv-contrib-python",
+      "version": "4.10.0.84",
+      "url": "https://files.pythonhosted.org/packages/a7/9e/7110d2c5d543ab03b9581dbb1f8e2429863e44e0c9b4960b766f230c1279/opencv_contrib_python-4.10.0.84-cp37-abi3-win_amd64.whl",
+      "sha256": "47ec3160dae75f70e099b286d1a2e086d20dac8b06e759f60eaf867e6bdecba7",
+      "size_bytes": 45541421,
+      "installed_size_bytes": 127094576
+    },
+    {
+      "name": "opt-einsum",
+      "version": "3.3.0",
+      "url": "https://files.pythonhosted.org/packages/bc/19/404708a7e54ad2798907210462fd950c3442ea51acc8790f3da48d2bee8b/opt_einsum-3.3.0-py3-none-any.whl",
+      "sha256": "2455e59e3947d3c275477df7f5205b30635e266fe6dc300e3d9f9646bfcea147",
+      "size_bytes": 65486,
+      "installed_size_bytes": 505025
+    },
+    {
+      "name": "packaging",
+      "version": "26.3",
+      "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl",
+      "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+      "size_bytes": 129956,
+      "installed_size_bytes": 995024
+    },
+    {
+      "name": "paddleocr",
+      "version": "3.7.0",
+      "url": "https://files.pythonhosted.org/packages/d2/79/2ade66cf72074a3d2a013e2ba1f256d6116fec797b908fc1b4f9c320d8c4/paddleocr-3.7.0-py3-none-any.whl",
+      "sha256": "c0f0a81ad4112727f30c6fcf986ac0ef6a120d31ee0991a01fae0357ee32d338",
+      "size_bytes": 146750,
+      "installed_size_bytes": 1145978
+    },
+    {
+      "name": "paddlepaddle-gpu",
+      "version": "3.3.1",
+      "url": "https://paddle-whl.cdn.bcebos.com/stable/cu129/paddlepaddle-gpu/paddlepaddle_gpu-3.3.1-cp313-cp313-win_amd64.whl",
+      "sha256": "71aed9d3d77f571eeee2e2deb6b33a06d18d82424bb04a81435480b7418fdab4",
+      "size_bytes": 809978141,
+      "installed_size_bytes": 1440581796
+    },
+    {
+      "name": "paddlex",
+      "version": "3.7.2",
+      "url": "https://files.pythonhosted.org/packages/40/52/9bbb9cd5f4fbbbefc7391c7d1ee61df8d511017a31e6933f6744b063fdab/paddlex-3.7.2-py3-none-any.whl",
+      "sha256": "f1678bf650bbaccfd8f0d4e49d0ae631b4685c829fdae6e802ccd90d4fcb9a7f",
+      "size_bytes": 2239708,
+      "installed_size_bytes": 14396849
+    },
+    {
+      "name": "pandas",
+      "version": "3.0.5",
+      "url": "https://files.pythonhosted.org/packages/9c/ba/18c4ec8a746e177da05a9e7a7963781d8ea195780724f854601b6ebd6b78/pandas-3.0.5-cp313-cp313-win_amd64.whl",
+      "sha256": "0d298e951f23016ce4699951d044ae6418dbc91bf68cefca0f77666fcbb4e5c6",
+      "size_bytes": 9826896,
+      "installed_size_bytes": 63545458
+    },
+    {
+      "name": "pillow",
+      "version": "12.3.0",
+      "url": "https://files.pythonhosted.org/packages/a6/9b/7a58e61d62be561da3a356fe2384d4059a6345fc130e23ef1c36a5b81d24/pillow-12.3.0-cp313-cp313-win_amd64.whl",
+      "sha256": "1cca606cd25738df4ed873d5ad46bbdb3d83b5cbca291f6b4ff13a4df6b0bbe8",
+      "size_bytes": 7239691,
+      "installed_size_bytes": 16155769
+    },
+    {
+      "name": "prettytable",
+      "version": "3.18.0",
+      "url": "https://files.pythonhosted.org/packages/fe/be/2e6798ace5cc036f5d05d36b7b2fd85346f1a708c87060890b070d0ec607/prettytable-3.18.0-py3-none-any.whl",
+      "sha256": "b3346e0e6f79180833aebaac088ae926340586cf6d7d991b9eb125b65f72313a",
+      "size_bytes": 37357,
+      "installed_size_bytes": 319087
+    },
+    {
+      "name": "propcache",
+      "version": "0.5.2",
+      "url": "https://files.pythonhosted.org/packages/1c/fd/3f0f10dba4dabad3bf53102be007abf55481067952bde0fdddff439e7c61/propcache-0.5.2-cp313-cp313-win_amd64.whl",
+      "sha256": "dfed59d0a5aeb01e242e66ff0300bc4a265a7c05f612d30016f0b60b1017d757",
+      "size_bytes": 41649,
+      "installed_size_bytes": 105546
+    },
+    {
+      "name": "protobuf",
+      "version": "7.35.1",
+      "url": "https://files.pythonhosted.org/packages/0a/19/8d0cb6f20a1ef7b18f1c8986ad5783f22f84cce39c6ce9a6e645ea55192e/protobuf-7.35.1-cp310-abi3-win_amd64.whl",
+      "sha256": "230a75ddfc2de4806e56696ce9640c1cdfdb6543b7cfce98d42a4c0a0e7bdb87",
+      "size_bytes": 439996,
+      "installed_size_bytes": 2638178
+    },
+    {
+      "name": "psutil",
+      "version": "7.2.2",
+      "url": "https://files.pythonhosted.org/packages/b4/90/e2159492b5426be0c1fef7acba807a03511f97c5f86b3caeda6ad92351a7/psutil-7.2.2-cp37-abi3-win_amd64.whl",
+      "sha256": "eb7e81434c8d223ec4a219b5fc1c47d0417b12be7ea866e24fb5ad6e84b3d988",
+      "size_bytes": 137737,
+      "installed_size_bytes": 835399
+    },
+    {
+      "name": "py-cpuinfo",
+      "version": "9.0.0",
+      "url": "https://files.pythonhosted.org/packages/e0/a9/023730ba63db1e494a271cb018dcd361bd2c917ba7004c3e49d5daf795a2/py_cpuinfo-9.0.0-py3-none-any.whl",
+      "sha256": "859625bc251f64e21f077d099d4162689c762b5d6a4c3c97553d56241c9674d5",
+      "size_bytes": 22335,
+      "installed_size_bytes": 307232
+    },
+    {
+      "name": "pyclipper",
+      "version": "1.4.0",
+      "url": "https://files.pythonhosted.org/packages/ba/42/0a1920d276a0e1ca21dc0d13ee9e3ba10a9a8aa3abac76cd5e5a9f503306/pyclipper-1.4.0-cp313-cp313-win_amd64.whl",
+      "sha256": "d4b2d7c41086f1927d14947c563dfc7beed2f6c0d9af13c42fe3dcdc20d35832",
+      "size_bytes": 104007,
+      "installed_size_bytes": 235147
+    },
+    {
+      "name": "pycryptodome",
+      "version": "3.23.0",
+      "url": "https://files.pythonhosted.org/packages/54/2f/e97a1b8294db0daaa87012c24a7bb714147c7ade7656973fd6c736b484ff/pycryptodome-3.23.0-cp37-abi3-win_amd64.whl",
+      "sha256": "c75b52aacc6c0c260f204cbdd834f76edc9fb0d8e0da9fbf8352ef58202564e2",
+      "size_bytes": 1799636,
+      "installed_size_bytes": 6914960
+    },
+    {
+      "name": "pydantic",
+      "version": "2.13.4",
+      "url": "https://files.pythonhosted.org/packages/fd/7b/122376b1fd3c62c1ed9dc80c931ace4844b3c55407b6fb2d199377c9736f/pydantic-2.13.4-py3-none-any.whl",
+      "sha256": "45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba",
+      "size_bytes": 472262,
+      "installed_size_bytes": 3788026
+    },
+    {
+      "name": "pydantic_core",
+      "version": "2.46.4",
+      "url": "https://files.pythonhosted.org/packages/7e/e8/cff247591966f2d22ec8c003cd7587e27b7ba7b81ab2fb888e3ab75dc285/pydantic_core-2.46.4-cp313-cp313-win_amd64.whl",
+      "sha256": "6b3ace8194b0e5204818c92802dcdca7fc6d88aabbb799d7c795540d9cd6d292",
+      "size_bytes": 2071819,
+      "installed_size_bytes": 5757651
+    },
+    {
+      "name": "pypdfium2",
+      "version": "5.12.1",
+      "url": "https://files.pythonhosted.org/packages/a9/c3/08b62718faf2f6b6aa49207626e3113ff3ec1b3cd076c0ef8fd852f0e57c/pypdfium2-5.12.1-py3-none-win_amd64.whl",
+      "sha256": "9609be73a6701a68f29dffe0335f7a2e4b3ba581542ed65d35d49f761a4600ca",
+      "size_bytes": 3859845,
+      "installed_size_bytes": 8318342
+    },
+    {
+      "name": "python-bidi",
+      "version": "0.6.11",
+      "url": "https://files.pythonhosted.org/packages/85/0a/7ac8da3629ca8d93a419f5250c240fc13f7d34b7c04f279c8f9a474a2be9/python_bidi-0.6.11-cp313-cp313-win_amd64.whl",
+      "sha256": "f563d20481f7d316adf605bb94d5b7182acecdbc4d431d60473e9b1d526d0210",
+      "size_bytes": 160888,
+      "installed_size_bytes": 515991
+    },
+    {
+      "name": "python-dateutil",
+      "version": "2.9.0.post0",
+      "url": "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+      "sha256": "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427",
+      "size_bytes": 229892,
+      "installed_size_bytes": 743222
+    },
+    {
+      "name": "PyYAML",
+      "version": "6.0.2",
+      "url": "https://files.pythonhosted.org/packages/fa/de/02b54f42487e3d3c6efb3f89428677074ca7bf43aae402517bc7cca949f3/PyYAML-6.0.2-cp313-cp313-win_amd64.whl",
+      "sha256": "8388ee1976c416731879ac16da0aff3f63b286ffdd57cdeb95f3f2e085687563",
+      "size_bytes": 156446,
+      "installed_size_bytes": 747145
+    },
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "url": "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl",
+      "sha256": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
+      "size_bytes": 73075,
+      "installed_size_bytes": 477939
+    },
+    {
+      "name": "ruamel.yaml",
+      "version": "0.19.1",
+      "url": "https://files.pythonhosted.org/packages/b8/0c/51f6841f1d84f404f92463fc2b1ba0da357ca1e3db6b7fbda26956c3b82a/ruamel_yaml-0.19.1-py3-none-any.whl",
+      "sha256": "27592957fedf6e0b62f281e96effd28043345e0e66001f97683aa9a40c667c93",
+      "size_bytes": 118102,
+      "installed_size_bytes": 1213379
+    },
+    {
+      "name": "safetensors",
+      "version": "0.8.0",
+      "url": "https://files.pythonhosted.org/packages/1b/6d/3fba214c1e5e0f69991677ec3bc17023f0421776975e1de0c682dca475e2/safetensors-0.8.0-cp310-abi3-win_amd64.whl",
+      "sha256": "096ec1a98435df7beb08853bb5aa9081a84f23d0adc67ed1a0a10550f608373f",
+      "size_bytes": 355540,
+      "installed_size_bytes": 909512
+    },
+    {
+      "name": "setuptools",
+      "version": "84.0.0",
+      "url": "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl",
+      "sha256": "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670",
+      "size_bytes": 818216,
+      "installed_size_bytes": 5455829
+    },
+    {
+      "name": "shapely",
+      "version": "2.1.2",
+      "url": "https://files.pythonhosted.org/packages/41/47/3647fe7ad990af60ad98b889657a976042c9988c2807cf322a9d6685f462/shapely-2.1.2-cp313-cp313-win_amd64.whl",
+      "sha256": "ca2591bff6645c216695bdf1614fca9c82ea1144d4a7591a466fef64f28f0715",
+      "size_bytes": 1722151,
+      "installed_size_bytes": 6403835
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl",
+      "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+      "size_bytes": 11050,
+      "installed_size_bytes": 80185
+    },
+    {
+      "name": "tqdm",
+      "version": "4.70.0",
+      "url": "https://files.pythonhosted.org/packages/f9/1c/01bfd571a64e7f270e6bab5e33777debe0edc56759233ce84f27dec92d14/tqdm-4.70.0-py3-none-any.whl",
+      "sha256": "7f585706bfddbdebf89daac705b2dfcc16890130727d3197ca62c732b4310953",
+      "size_bytes": 80184,
+      "installed_size_bytes": 556690
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "size_bytes": 45571,
+      "installed_size_bytes": 348647
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.4",
+      "url": "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl",
+      "sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
+      "size_bytes": 14750,
+      "installed_size_bytes": 90113
+    },
+    {
+      "name": "tzdata",
+      "version": "2026.3",
+      "url": "https://files.pythonhosted.org/packages/e5/6d/b53b99a9f2766d095985947a5782f1702cabb129a34f7a802d7197af832f/tzdata-2026.3-py2.py3-none-any.whl",
+      "sha256": "dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931",
+      "size_bytes": 348168,
+      "installed_size_bytes": 587996
+    },
+    {
+      "name": "ujson",
+      "version": "5.13.0",
+      "url": "https://files.pythonhosted.org/packages/b4/b5/1fe203bc294e98fdd65606883692ad8dc0aaac73838b89c99c3513404424/ujson-5.13.0-cp313-cp313-win_amd64.whl",
+      "sha256": "17a59d5cf23ef98f7c9314524976b4b288374d83200add01d953024fb06404f9",
+      "size_bytes": 41098,
+      "installed_size_bytes": 86800
+    },
+    {
+      "name": "urllib3",
+      "version": "2.7.0",
+      "url": "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl",
+      "sha256": "9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897",
+      "size_bytes": 131087,
+      "installed_size_bytes": 897708
+    },
+    {
+      "name": "wcwidth",
+      "version": "0.8.2",
+      "url": "https://files.pythonhosted.org/packages/96/42/3e5985a0a7e57de470b320c6d6a1a67c844f6737a587f3d44dd13d1819e7/wcwidth-0.8.2-py3-none-any.whl",
+      "sha256": "d63947694a0539a1d51e01eda7caf800c291020e6cdd7e28ad7b14dd33ad4f85",
+      "size_bytes": 323166,
+      "installed_size_bytes": 4402735
+    },
+    {
+      "name": "yarl",
+      "version": "1.24.5",
+      "url": "https://files.pythonhosted.org/packages/86/e4/62a06b7e87c4246ac76b7c2da136f972eb4a3a1fc94abb07e7022d6fdb0a/yarl-1.24.5-cp313-cp313-win_amd64.whl",
+      "sha256": "2dbe06fc16bc91502bca713704022182e5729861ae00277c3a23354b40929740",
+      "size_bytes": 97454,
+      "installed_size_bytes": 397706
+    }
+  ]
+}

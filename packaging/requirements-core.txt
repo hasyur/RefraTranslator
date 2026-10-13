@@ -1,0 +1,27 @@
+# Exact Windows x64 CPython 3.13 application runtime closure.
+# Install with: python -m pip install -r packaging/requirements-core.txt
+anyio==4.14.2
+certifi==2026.7.22
+comtypes==1.4.16
+dxcam[winrt]==0.3.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.18
+numpy==2.3.5
+Pillow==12.3.0
+pip==25.1.1
+PySide6==6.9.3
+PySide6_Addons==6.9.3
+PySide6_Essentials==6.9.3
+shiboken6==6.9.3
+typing_extensions==4.16.0
+winrt-runtime==3.2.1
+winrt-Windows.Foundation==3.2.1
+winrt-Windows.Foundation.Collections==3.2.1
+winrt-Windows.Graphics==3.2.1
+winrt-Windows.Graphics.Capture==3.2.1
+winrt-Windows.Graphics.Capture.Interop==3.2.1
+winrt-Windows.Graphics.DirectX==3.2.1
+winrt-Windows.Graphics.DirectX.Direct3D11==3.2.1
+winrt-Windows.Graphics.DirectX.Direct3D11.Interop==3.2.1

@@ -17,22 +17,11 @@ from pip._vendor.packaging.requirements import Requirement
 from pip._vendor.packaging.tags import sys_tags
 from pip._vendor.packaging.utils import canonicalize_name, parse_wheel_filename
 
+from release_metadata import ROOT as PROJECT_ROOT
+from release_metadata import validate_ocr_manifest
 
-ROOT_REQUIREMENTS = (
-    "paddlepaddle-gpu==3.3.1",
-    "paddleocr==3.7.0",
-    "paddlex[ocr-core]==3.7.2",
-)
-PADDLE_GPU_WHEEL = {
-    "name": "paddlepaddle-gpu",
-    "version": "3.3.1",
-    "url": (
-        "https://paddle-whl.cdn.bcebos.com/stable/cu129/paddlepaddle-gpu/"
-        "paddlepaddle_gpu-3.3.1-cp313-cp313-win_amd64.whl"
-    ),
-    "sha256": "71aed9d3d77f571eeee2e2deb6b33a06d18d82424bb04a81435480b7418fdab4",
-    "size_bytes": 809_978_141,
-}
+
+DEFAULT_SOURCE_MANIFEST = PROJECT_ROOT / "packaging" / "ocr_wheel_manifest.json"
 PYPI_JSON = "https://pypi.org/pypi/{name}/{version}/json"
 _WHEEL_SUFFIX = re.compile(r"\.whl(?:$|#)", re.IGNORECASE)
 
@@ -76,11 +65,13 @@ def _installed_size_bytes(distribution: metadata.Distribution) -> int:
     return total
 
 
-def _resolve_installed_closure() -> tuple[metadata.Distribution, ...]:
+def _resolve_installed_closure(
+    root_requirements: tuple[str, ...],
+) -> tuple[metadata.Distribution, ...]:
     active_extras: dict[str, set[str]] = {}
     distributions: dict[str, metadata.Distribution] = {}
     pending: deque[tuple[Requirement, str]] = deque()
-    for raw in ROOT_REQUIREMENTS:
+    for raw in root_requirements:
         pending.append((Requirement(raw), "root"))
     processed_extras: dict[str, set[str]] = {}
 
@@ -175,12 +166,28 @@ def _select_pypi_wheel(
     return candidates[0][1]
 
 
-def build_manifest(output: Path) -> None:
+def build_manifest(output: Path, source_manifest: Path = DEFAULT_SOURCE_MANIFEST) -> None:
     if sys.version_info[:2] != (3, 13) or os.name != "nt" or sys.maxsize <= 2**32:
         raise ManifestError("Build the OCR manifest with 64-bit Windows CPython 3.13")
-    distributions = _resolve_installed_closure()
+    try:
+        source = validate_ocr_manifest(source_manifest, PROJECT_ROOT)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise ManifestError(str(exc)) from exc
+    root_requirements = tuple(str(item) for item in source["requirements"])
+    distributions = _resolve_installed_closure(root_requirements)
     tags = tuple(sys_tags())
-    paddle_name = canonicalize_name(PADDLE_GPU_WHEEL["name"])
+    paddle_name = canonicalize_name("paddlepaddle-gpu")
+    source_wheels = source["wheels"]
+    paddle_gpu_wheel = next(
+        (
+            dict(entry)
+            for entry in source_wheels
+            if canonicalize_name(str(entry["name"])) == paddle_name
+        ),
+        None,
+    )
+    if paddle_gpu_wheel is None:
+        raise ManifestError("The formal OCR manifest is missing its Paddle GPU wheel metadata")
     entries: list[dict[str, object]] = []
     timeout = httpx.Timeout(connect=20.0, read=45.0, write=20.0, pool=30.0)
     with httpx.Client(
@@ -194,7 +201,7 @@ def build_manifest(output: Path) -> None:
         ):
             name = canonicalize_name(distribution.metadata["Name"])
             if name == paddle_name:
-                entry = dict(PADDLE_GPU_WHEEL)
+                entry = dict(paddle_gpu_wheel)
             else:
                 entry = _select_pypi_wheel(client, distribution, tags)
             entry["installed_size_bytes"] = _installed_size_bytes(distribution)
@@ -209,7 +216,7 @@ def build_manifest(output: Path) -> None:
         "schema_version": 1,
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
         "platform": "win_amd64",
-        "requirements": list(ROOT_REQUIREMENTS),
+        "requirements": list(root_requirements),
         "wheels": entries,
     }
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -221,9 +228,15 @@ def build_manifest(output: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--source-manifest",
+        type=Path,
+        default=DEFAULT_SOURCE_MANIFEST,
+        help="formal OCR manifest supplying fixed roots and Paddle GPU wheel metadata",
+    )
     args = parser.parse_args()
     try:
-        build_manifest(args.output)
+        build_manifest(args.output, args.source_manifest)
     except (ManifestError, OSError) as exc:
         parser.error(str(exc))
     return 0

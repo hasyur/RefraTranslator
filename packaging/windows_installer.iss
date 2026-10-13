@@ -2,6 +2,14 @@
   #error AppSourceDir must point to the staged application directory
 #endif
 
+#ifndef AppVersion
+  #error AppVersion must be passed by build_windows_installer.py
+#endif
+
+#ifndef WindowsVersion
+  #error WindowsVersion must be passed by build_windows_installer.py
+#endif
+
 #ifndef PortableBuild
   #define PortableBuild "0"
 #endif
@@ -17,7 +25,8 @@
 [Setup]
 AppId={{69A2D263-38BE-4B62-A105-1A6DDBEA7602}
 AppName=RefraTranslator
-AppVersion=0.1.0
+AppVersion={#AppVersion}
+VersionInfoVersion={#WindowsVersion}
 AppPublisher=RefraTranslator
 DefaultDirName={localappdata}\Programs\RefraTranslator
 DefaultGroupName=RefraTranslator

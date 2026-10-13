@@ -11,6 +11,11 @@ include packaging/build_windows_installer.py
 include packaging/prepare_ocr_manifest.py
 include packaging/windows_installer.iss
 include packaging/windows_launcher.cs
+include packaging/release_metadata.py
+include packaging/requirements-core.txt
+include packaging/ocr_wheel_manifest.json
+include packaging/verify_windows_install.py
+include packaging/README.md
 include tests/test_*.py
 include tests/integration/test_*.py
 include tests/manual/animated_ocr_scenes.py

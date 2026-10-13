@@ -84,6 +84,8 @@ def test_inno_script_preserves_supported_windows_and_portable_smoke_modes() -> N
     assert '#if PortableBuild == "1"' in script
     assert 'Compression=lzma2/max' in script
     assert 'Uninstallable={#InstallUninstaller}' in script
+    assert 'AppVersion={#AppVersion}' in script
+    assert 'VersionInfoVersion={#WindowsVersion}' in script
     launch_entries = [
         line for line in script.splitlines() if 'Filename: "{app}\\' in line
     ]
@@ -95,6 +97,52 @@ def test_inno_script_preserves_supported_windows_and_portable_smoke_modes() -> N
 def test_launcher_build_reports_a_missing_compiler(tmp_path: Path) -> None:
     with pytest.raises(builder.BuildError, match="compiler not found"):
         builder._build_launcher(tmp_path / "app", tmp_path / "missing-csc.exe")
+
+
+def test_launcher_source_uses_the_single_project_version(tmp_path: Path) -> None:
+    fixture_root = tmp_path / "project"
+    packaging_dir = fixture_root / "packaging"
+    version_dir = fixture_root / "src" / "game_screen_translator"
+    packaging_dir.mkdir(parents=True)
+    version_dir.mkdir(parents=True)
+    shutil.copy2(_BUILDER_PATH.parent / "windows_launcher.cs", packaging_dir)
+    (version_dir / "_version.py").write_text('__version__ = "4.5.6"\n', encoding="utf-8")
+
+    source = builder._render_launcher_source(fixture_root)
+
+    assert '[assembly: AssemblyVersion("4.5.6.0")]' in source
+    assert '[assembly: AssemblyFileVersion("4.5.6.0")]' in source
+    assert '[assembly: AssemblyInformationalVersion("4.5.6")]' in source
+    assert "@@" not in source
+
+
+def test_inno_compile_receives_project_and_windows_versions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture_root = tmp_path / "project"
+    packaging_dir = fixture_root / "packaging"
+    version_dir = fixture_root / "src" / "game_screen_translator"
+    packaging_dir.mkdir(parents=True)
+    version_dir.mkdir(parents=True)
+    shutil.copy2(_BUILDER_PATH.parent / "windows_installer.iss", packaging_dir)
+    (version_dir / "_version.py").write_text('__version__ = "4.5.6"\n', encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    captured: list[str] = []
+
+    def fake_run(command, **_kwargs):
+        captured.extend(command)
+        (output_dir / "RefraTranslator-Setup.exe").write_bytes(b"setup")
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(builder, "ROOT", fixture_root)
+    monkeypatch.setattr(builder.subprocess, "run", fake_run)
+
+    builder._run_inno(Path("fake-iscc.exe"), tmp_path / "app", output_dir, portable=False)
+
+    assert "/DAppVersion=4.5.6" in captured
+    assert "/DWindowsVersion=4.5.6.0" in captured
 
 
 @pytest.fixture(scope="module")
