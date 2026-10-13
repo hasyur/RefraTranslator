@@ -9,7 +9,7 @@ RefraTranslator 是一款 Windows 游戏屏幕翻译工具：它自动识别画�
 
 ## 安装与启动
 
-普通用户使用 Windows x64 安装包 `RefraTranslator-Setup.exe`。双击后选择安装目录即可，不需要先安装 Python，也不需要手动运行 pip 或 PowerShell。安装完成后从开始菜单或桌面快捷方式打开程序。
+普通用户使用 Windows x64 安装包 `RefraTranslator-Setup.exe`。双击后选择安装目录即可，不需要先安装 Python，也不需要手动运行 pip 或 PowerShell。安装完成后从开始菜单、桌面快捷方式，或直接双击安装目录中的 `RefraTranslator.exe` 打开程序。
 
 ### 安装前确认
 

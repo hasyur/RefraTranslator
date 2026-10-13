@@ -4,6 +4,8 @@ Builds the Windows x64 installer from the current source tree and the project `.
 
 Prepare the build environment with the existing developer install (`install.bat`) and provide the official CPython 3.13.5 embeddable ZIP and Inno Setup 6 compiler as local build tools. The CPython ZIP is checked against SHA-256 `7d2650fd9d1b9d002d4a315d5f354247fd6a44f30517c7ef577b08f57a0fb6d9`.
 
+The build also compiles `windows_launcher.cs` into the application-root `RefraTranslator.exe`, using the Windows .NET Framework C# compiler (`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe` by default, or `--csc` to override it). The small GUI launcher uses the .NET Framework already included in Windows 10/11. It resolves `runtime\pythonw.exe` relative to its own location, sets the working directory to the installation root, and invokes the existing installed GUI entry point. It can be double-clicked directly; installer shortcuts and post-install launch also use this same EXE.
+
 Generate the fixed OCR manifest, then build both installers:
 
 ```powershell
@@ -23,7 +25,7 @@ For an isolated installation smoke test:
 & .\dist\windows-installer\RefraTranslator-Portable-Smoke.exe /VERYSILENT /DIR="$PWD\.local-tools\output\exe-smoke-app"
 $env:REFRATRANSLATOR_DATA_DIR = "$PWD\.local-tools\output\exe-smoke-data"
 $env:QT_QPA_PLATFORM = "windows"
-& .\.local-tools\output\exe-smoke-app\runtime\pythonw.exe -s -X utf8 -m game_screen_translator.gui_entry --installed --duration 1
+& .\.local-tools\output\exe-smoke-app\RefraTranslator.exe --duration 1
 ```
 
 The data-root override isolates `config.toml`, profiles, caches and logs. The installed launcher runs the resource inventory before the normal workbench. It only begins downloads after the user confirms in the first-run window; `--duration` closes the inventory and workbench during smoke tests.

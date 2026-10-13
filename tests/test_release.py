@@ -35,6 +35,12 @@ MANUAL_RELEASE_FILES = (
     "tests/manual/animated_ocr_scenes.py",
     "tests/manual/README.md",
 )
+PACKAGING_RELEASE_FILES = (
+    "packaging/build_windows_installer.py",
+    "packaging/prepare_ocr_manifest.py",
+    "packaging/windows_installer.iss",
+    "packaging/windows_launcher.cs",
+)
 PUBLIC_TEST_MANIFEST_ENTRIES = (
     "include tests/test_*.py",
     "include tests/integration/test_*.py",
@@ -177,6 +183,7 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
     assert set(SOURCE_RELEASE_FILES) <= sdist_files
     assert set(PUBLIC_TEST_FILES) <= sdist_files
     assert set(MANUAL_RELEASE_FILES) <= sdist_files
+    assert set(PACKAGING_RELEASE_FILES) <= sdist_files
     assert {"update.bat", "update.ps1"}.isdisjoint(sdist_files)
     assert not any(
         name == "scripts" or name.startswith("scripts/") for name in sdist_files

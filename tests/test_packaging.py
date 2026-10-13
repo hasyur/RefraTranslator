@@ -3,8 +3,14 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import shutil
+import struct
+import subprocess
 import zipfile
 from pathlib import Path
+
+import pytest
 
 
 _BUILDER_PATH = Path(__file__).resolve().parents[1] / "packaging" / "build_windows_installer.py"
@@ -78,3 +84,118 @@ def test_inno_script_preserves_supported_windows_and_portable_smoke_modes() -> N
     assert '#if PortableBuild == "1"' in script
     assert 'Compression=lzma2/max' in script
     assert 'Uninstallable={#InstallUninstaller}' in script
+    launch_entries = [
+        line for line in script.splitlines() if 'Filename: "{app}\\' in line
+    ]
+    assert len(launch_entries) == 3
+    assert all('Filename: "{app}\\RefraTranslator.exe"' in line for line in launch_entries)
+    assert all('pythonw.exe' not in line and 'Parameters:' not in line for line in launch_entries)
+
+
+def test_launcher_build_reports_a_missing_compiler(tmp_path: Path) -> None:
+    with pytest.raises(builder.BuildError, match="compiler not found"):
+        builder._build_launcher(tmp_path / "app", tmp_path / "missing-csc.exe")
+
+
+@pytest.fixture(scope="module")
+def compiled_launcher(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    if os.name != "nt":
+        pytest.skip("The application launcher runs on Windows")
+    app_root = tmp_path_factory.mktemp("launcher") / "安装目录 with spaces"
+    launcher = builder._build_launcher(app_root)
+    runtime = app_root / "runtime"
+    runtime.mkdir()
+    probe_source = app_root / "runtime-probe.cs"
+    probe_source.write_text(
+        """using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+internal static class RuntimeProbe
+{
+    private static int Main(string[] arguments)
+    {
+        List<string> lines = new List<string>();
+        lines.Add(Convert.ToBase64String(Encoding.UTF8.GetBytes(Environment.CurrentDirectory)));
+        foreach (string argument in arguments)
+            lines.Add(Convert.ToBase64String(Encoding.UTF8.GetBytes(argument)));
+        File.WriteAllLines(Environment.GetEnvironmentVariable("REFRA_TEST_RECORD"), lines);
+        return Int32.Parse(Environment.GetEnvironmentVariable("REFRA_TEST_EXIT_CODE"));
+    }
+}
+""",
+        encoding="utf-8",
+    )
+    compiler = Path(os.environ.get("WINDIR", r"C:\Windows")) / (
+        "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    )
+    result = subprocess.run(
+        [str(compiler), "/nologo", "/target:winexe", "/platform:x64",
+         f"/out:{runtime / 'pythonw.exe'}", str(probe_source)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return launcher
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [],
+        ["--duration", "0.5"],
+        ["", "字幕路径 with spaces", 'quoted "value"', "C:\\trailing path\\",
+         'slashes\\\\"end', "literal & %PATH%"],
+    ],
+)
+def test_compiled_launcher_uses_its_own_runtime_and_preserves_arguments(
+    compiled_launcher: Path,
+    tmp_path: Path,
+    arguments: list[str],
+) -> None:
+    import base64
+
+    record = tmp_path / "runtime-record.txt"
+    environment = os.environ.copy()
+    environment.update({
+        "REFRA_TEST_RECORD": str(record),
+        "REFRA_TEST_EXIT_CODE": "37",
+        # No Python or development environment is available through PATH.
+        "PATH": str(Path(environment.get("WINDIR", r"C:\Windows")) / "System32"),
+    })
+    (tmp_path / "config.toml").write_text("unrelated config", encoding="utf-8")
+    result = subprocess.run(
+        [str(compiled_launcher), *arguments],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 37
+    assert result.stdout == result.stderr == b""
+    decoded = [base64.b64decode(line).decode("utf-8")
+               for line in record.read_text(encoding="utf-8-sig").splitlines()]
+    assert Path(decoded[0]) == compiled_launcher.parent
+    assert decoded[1:] == [
+        "-s", "-X", "utf8", "-m", "game_screen_translator.gui_entry", "--installed",
+        *arguments,
+    ]
+
+
+def test_compiled_launcher_is_a_gui_executable_and_survives_relocation(
+    compiled_launcher: Path,
+    tmp_path: Path,
+) -> None:
+    payload = compiled_launcher.read_bytes()
+    pe_offset = struct.unpack_from("<I", payload, 0x3C)[0]
+    assert payload[pe_offset:pe_offset + 4] == b"PE\0\0"
+    assert struct.unpack_from("<H", payload, pe_offset + 4)[0] == 0x8664  # AMD64
+    assert struct.unpack_from("<H", payload, pe_offset + 24 + 68)[0] == 2  # Windows GUI
+
+    relocated = tmp_path / "另一目录 relocated app"
+    shutil.copytree(compiled_launcher.parent, relocated)
+    test_compiled_launcher_uses_its_own_runtime_and_preserves_arguments(
+        relocated / "RefraTranslator.exe", tmp_path, [],
+    )

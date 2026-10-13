@@ -10,6 +10,7 @@ include start_test_scenes.bat
 include packaging/build_windows_installer.py
 include packaging/prepare_ocr_manifest.py
 include packaging/windows_installer.iss
+include packaging/windows_launcher.cs
 include tests/test_*.py
 include tests/integration/test_*.py
 include tests/manual/animated_ocr_scenes.py

@@ -46,9 +46,9 @@ Source: "{#AppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加快捷方式："; Flags: unchecked
 
 [Icons]
-Name: "{autoprograms}\RefraTranslator"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-s -X utf8 -m game_screen_translator.gui_entry --installed"; WorkingDir: "{app}"
-Name: "{autodesktop}\RefraTranslator"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-s -X utf8 -m game_screen_translator.gui_entry --installed"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\RefraTranslator"; Filename: "{app}\RefraTranslator.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\RefraTranslator"; Filename: "{app}\RefraTranslator.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\runtime\pythonw.exe"; Parameters: "-s -X utf8 -m game_screen_translator.gui_entry --installed"; WorkingDir: "{app}"; Description: "启动 RefraTranslator"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\RefraTranslator.exe"; WorkingDir: "{app}"; Description: "启动 RefraTranslator"; Flags: postinstall nowait skipifsilent
 #endif

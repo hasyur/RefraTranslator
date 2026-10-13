@@ -269,6 +269,44 @@ def sysconfig_path() -> str:
     return sysconfig.get_paths()["purelib"]
 
 
+def _build_launcher(app_root: Path, compiler: Path | None = None) -> Path:
+    if compiler is None:
+        windows_root = Path(os.environ.get("WINDIR", r"C:\Windows"))
+        compiler = windows_root / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
+    compiler = compiler.expanduser().resolve()
+    if not compiler.is_file():
+        raise BuildError(f"Windows .NET Framework C# compiler not found: {compiler}; use --csc")
+    app_root.mkdir(parents=True, exist_ok=True)
+    output = app_root / "RefraTranslator.exe"
+    command = [
+        str(compiler),
+        "/nologo",
+        "/target:winexe",
+        "/platform:x64",
+        "/optimize+",
+        "/codepage:65001",
+        f"/out:{output}",
+        str(ROOT / "packaging" / "windows_launcher.cs"),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError as exc:
+        raise BuildError(f"Could not run C# compiler {compiler}: {exc}") from exc
+    if result.returncode != 0:
+        raise BuildError("Application launcher compilation failed:\n" + result.stdout + result.stderr)
+    if not output.is_file():
+        raise BuildError(f"C# compiler did not create {output}")
+    return output
+
+
 def _run_inno(
     compiler: Path,
     app_root: Path,
@@ -336,6 +374,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
         python_embed=embed_zip,
         ocr_manifest=manifest,
     )
+    launcher = _build_launcher(app_root, args.csc)
 
     runtime_python = app_root / "runtime" / "python.exe"
     probe = subprocess.run(
@@ -369,6 +408,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             "portable_smoke_setup": str(smoke),
             "embedded_runtime": str(runtime_python),
             "embedded_runtime_probe": probe.stdout.strip(),
+            "application_launcher": str(launcher),
         }
     )
     report = stage_root / "build-report.json"
@@ -380,6 +420,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--iscc", required=True, type=Path)
     parser.add_argument("--python-embed", required=True, type=Path)
+    parser.add_argument(
+        "--csc",
+        type=Path,
+        help="C# compiler override; defaults to the Windows .NET Framework compiler",
+    )
     parser.add_argument(
         "--ocr-manifest",
         type=Path,
