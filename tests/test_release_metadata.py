@@ -4,6 +4,8 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -11,7 +13,6 @@ import pytest
 from pip._vendor.packaging.requirements import Requirement
 from pip._vendor.packaging.utils import canonicalize_name
 from pip._vendor.packaging.version import Version
-from setuptools import build_meta
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -361,7 +362,6 @@ def builder_module():
 
 def test_setuptools_wheel_metadata_reads_changed_version_fixture(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     fixture_root = _copy_release_inputs(tmp_path)
     package_dir = fixture_root / "src" / "game_screen_translator"
@@ -371,9 +371,23 @@ def test_setuptools_wheel_metadata_reads_changed_version_fixture(
     (package_dir / "_version.py").write_text('__version__ = "4.5.6"\n', encoding="utf-8")
     metadata_dir = tmp_path / "metadata"
     metadata_dir.mkdir()
-    monkeypatch.chdir(fixture_root)
 
-    dist_info = build_meta.prepare_metadata_for_build_wheel(str(metadata_dir))
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from setuptools import build_meta; "
+            "build_meta.prepare_metadata_for_build_wheel(sys.argv[1])",
+            str(metadata_dir),
+        ],
+        cwd=fixture_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
-    metadata_text = (metadata_dir / dist_info / "METADATA").read_text(encoding="utf-8")
+    dist_info_directories = list(metadata_dir.glob("*.dist-info"))
+    assert len(dist_info_directories) == 1
+    metadata_text = (dist_info_directories[0] / "METADATA").read_text(encoding="utf-8")
     assert "Version: 4.5.6\n" in metadata_text
