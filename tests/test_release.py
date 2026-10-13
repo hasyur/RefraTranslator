@@ -485,3 +485,34 @@ def test_readme_installation_guide_documents_installer_contract() -> None:
     assert "-WithGui -WithDev" in readme
     assert "WindowsApps\\python.exe" in readme
     assert "where.exe python" in readme
+
+
+def test_readme_keeps_the_exe_user_journey_before_source_development() -> None:
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    user_guide, developer_guide = readme.split("\n## 源码安装与开发（可选）\n", 1)
+
+    assert "https://github.com/hasyur/RefraTranslator/releases)" in user_guide
+    assert "Assets / 附件" in user_guide
+    assert "普通用户推荐使用 EXE 安装版" in user_guide
+    assert "`RefraTranslator-Setup.exe`" in user_guide
+    assert "`RefraTranslator.exe`" in user_guide
+    assert "勾选 **创建桌面快捷方式**" in user_guide
+    for developer_entry in ("install.bat", "start_gui.bat", "bootstrap.ps1", "git pull"):
+        assert developer_entry not in user_guide
+        assert developer_entry in developer_guide
+
+
+def test_readme_explains_exe_first_run_and_in_place_updates() -> None:
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    user_guide = readme.split("\n## 源码安装与开发（可选）\n", 1)[0]
+    update_guide = user_guide.split("\n## 更新\n", 1)[1].split("\n## 常见问题\n", 1)[0]
+
+    assert "首次使用屏幕识别还需下载约 **3 GiB**" in user_guide
+    assert "13 GiB 可用磁盘空间" in user_guide
+    assert "总下载进度" in user_guide and "当前文件进度" in user_guide
+    assert "**TRANSLATION / 翻译 → 下载并使用** 单独准备" in user_guide
+    assert "### EXE 安装版" in update_guide
+    assert "关闭 RefraTranslator，包括仍在托盘中运行的程序" in update_guide
+    assert "选择原安装目录" in update_guide
+    assert "无需先卸载" in update_guide
+    assert "保留安装目录中的配置、游戏档案、日志、模型和已准备的运行资源" in update_guide
