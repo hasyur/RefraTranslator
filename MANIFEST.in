@@ -8,6 +8,8 @@ include start_gui.bat
 include start_gui(debug).bat
 include start_test_scenes.bat
 include packaging/build_windows_installer.py
+include packaging/ChineseSimplified.isl
+include packaging/ChineseSimplified.LICENSE
 include packaging/prepare_ocr_manifest.py
 include packaging/windows_installer.iss
 include packaging/windows_launcher.cs

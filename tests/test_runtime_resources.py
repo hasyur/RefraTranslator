@@ -11,6 +11,7 @@ import os
 import queue
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import venv
@@ -185,6 +186,99 @@ def test_complete_partial_download_is_hash_checked_and_reused_without_http(
     assert target.read_bytes() == body
     assert not partial.exists()
     assert progress[-1] == ("ready", "artifact", len(body), len(body))
+
+
+@pytest.mark.parametrize("ignore_range", [False, True])
+def test_preparation_reports_combined_bytes_for_resumed_wheels_and_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ignore_range: bool,
+) -> None:
+    config = _write_config(tmp_path)
+    bodies = [b"wheel-one-data", b"wheel-two-data"]
+    wheels = tuple(
+        resources.WheelResource(
+            f"wheel-{index}", "1.0", f"https://example.invalid/wheel-{index}.whl",
+            hashlib.sha256(body).hexdigest(), len(body),
+        )
+        for index, body in enumerate(bodies)
+    )
+    existing = resources.WheelResource(
+        "existing", "1.0", "https://example.invalid/existing.whl", "0" * 64, 999,
+    )
+    installed = {"existing"}
+    monkeypatch.setattr(resources, "_read_wheel_manifest", lambda: (*wheels, existing))
+    monkeypatch.setattr(resources, "_wheel_is_installed", lambda wheel: wheel.name in installed)
+
+    first = resources._wheel_path(config, wheels[0])
+    first.parent.mkdir(parents=True, exist_ok=True)
+    first.with_name(first.name + ".part").write_bytes(bodies[0][:5])
+    resources._wheel_path(config, wheels[1]).write_bytes(bodies[1])
+
+    model_name = "PP-OCRv6_small_rec"
+    payloads = {
+        "inference.json": b"{}", "inference.yml": b"model: tiny",
+        "inference.pdiparams": b"tiny model weights",
+    }
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for filename, payload in payloads.items():
+            member = tarfile.TarInfo(f"{model_name}/{filename}")
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+    model_body = buffer.getvalue()
+    artifacts = dict(resources.MODEL_ARTIFACTS)
+    artifacts[model_name] = (
+        "https://example.invalid/model.tar", len(model_body),
+        hashlib.sha256(model_body).hexdigest(),
+        {filename: hashlib.sha256(payload).hexdigest() for filename, payload in payloads.items()},
+    )
+    monkeypatch.setattr(resources, "MODEL_ARTIFACTS", artifacts)
+    actual_model_ready = resources._model_is_ready
+    monkeypatch.setattr(
+        resources, "_model_is_ready",
+        lambda path, name: name == "PP-OCRv6_small_det" or actual_model_ready(path, name),
+    )
+    events: list[tuple[str, str, int, int]] = []
+
+    def install(_path, plan, *, all_wheels, progress, cancel):
+        assert plan == wheels
+        progress("install", "Installing collected packages", 0, 1)
+        installed.update(wheel.name for wheel in plan)
+        progress("ready", "Paddle GPU OCR 运行依赖", 1, 1)
+
+    monkeypatch.setattr(resources, "_install_wheelhouse", install)
+    requests: list[httpx.Request] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/model.tar":
+            return httpx.Response(200, content=model_body)
+        assert request.url.path == "/wheel-0.whl"
+        assert request.headers["Range"] == "bytes=5-"
+        body = bodies[0]
+        if ignore_range:
+            return httpx.Response(200, content=body)
+        return httpx.Response(
+            206, content=body[5:],
+            headers={"Content-Range": f"bytes 5-{len(body) - 1}/{len(body)}"},
+        )
+
+    result = resources.prepare_ocr_resources(
+        config, progress=lambda *values: events.append(values),
+        http_transport=httpx.MockTransport(serve),
+    )
+
+    total = sum(map(len, bodies)) + len(model_body)
+    overall = [event for event in events if event[0] == "overall"]
+    assert overall[0][2:] == (5 + len(bodies[1]), total)
+    assert overall[1][2:] == ((0 if ignore_range else 5) + len(bodies[1]), total)
+    assert overall[-1][2:] == (total, total)
+    assert all(event[3] == total and 0 <= event[2] <= total for event in overall)
+    install_index = next(index for index, event in enumerate(events) if event[0] == "install")
+    assert [event for event in events[:install_index] if event[0] == "overall"][-1][2:] == (
+        sum(map(len, bodies)), total,
+    )
+    assert len(requests) == 2
+    assert result.ready
 
 
 def test_bad_complete_partial_is_discarded_and_redownloaded(tmp_path: Path) -> None:

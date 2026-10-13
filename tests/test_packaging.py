@@ -86,12 +86,59 @@ def test_inno_script_preserves_supported_windows_and_portable_smoke_modes() -> N
     assert 'Uninstallable={#InstallUninstaller}' in script
     assert 'AppVersion={#AppVersion}' in script
     assert 'VersionInfoVersion={#WindowsVersion}' in script
+    assert '[Languages]' in script
+    assert 'Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"' in script
+    language_file = (
+        (_BUILDER_PATH.parent / "ChineseSimplified.isl")
+        .read_text(encoding="utf-8")
+    )
+    assert "LanguageName=简体中文" in language_file
+    assert "LanguageID=$0804" in language_file
+    assert "WizardInstalling=正在安装" in language_file
+    assert "ConfirmUninstall=您确认要完全移除 %1 及其所有组件吗？" in language_file
     launch_entries = [
         line for line in script.splitlines() if 'Filename: "{app}\\' in line
     ]
     assert len(launch_entries) == 3
     assert all('Filename: "{app}\\RefraTranslator.exe"' in line for line in launch_entries)
     assert all('pythonw.exe' not in line and 'Parameters:' not in line for line in launch_entries)
+
+
+def test_application_staging_includes_simplified_chinese_translation_license(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    embed_zip = tmp_path / "python-embed.zip"
+    with zipfile.ZipFile(embed_zip, "w") as archive:
+        archive.writestr("LICENSE.txt", "CPython license")
+        archive.writestr("python.exe", "not a real executable")
+    monkeypatch.setattr(
+        builder,
+        "PYTHON_EMBED_SHA256",
+        hashlib.sha256(embed_zip.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(builder, "_resolve_core_distributions", lambda: ())
+    monkeypatch.setattr(builder, "sysconfig_path", lambda: str(tmp_path / "site-packages"))
+    manifest = tmp_path / "ocr-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "platform": "win_amd64",
+                "wheels": [{"size_bytes": 1, "installed_size_bytes": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    app_root = tmp_path / "staged-app"
+
+    builder._copy_application(app_root, python_embed=embed_zip, ocr_manifest=manifest)
+
+    packaged_license = (
+        app_root
+        / "THIRD_PARTY_LICENSES"
+        / "InnoSetup-ChineseSimplified.LICENSE"
+    )
+    assert packaged_license.read_text(encoding="utf-8").startswith("MIT License")
 
 
 def test_launcher_build_reports_a_missing_compiler(tmp_path: Path) -> None:

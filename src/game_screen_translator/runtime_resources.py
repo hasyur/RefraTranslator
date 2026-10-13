@@ -468,6 +468,7 @@ def _download_file(
                 raise OcrPreparationError(f"{label} 下载源返回了无效续传响应")
             with partial.open(mode) as handle:
                 completed = offset
+                progress("download", label, completed, expected_size)
                 last_update = 0.0
                 for chunk in response.iter_bytes(chunk_size=1024 * 1024):
                     if cancel.is_set():
@@ -772,7 +773,7 @@ def prepare_ocr_resources(
     """Download, hash-check, install and extract every missing OCR resource."""
 
     config = load_config(config_path)
-    callback = progress or (lambda _phase, _label, _done, _total: None)
+    report = progress or (lambda _phase, _label, _done, _total: None)
     cancelled = cancel or threading.Event()
     if cancelled.is_set():
         raise OcrPreparationCancelled("OCR 资源准备已取消")
@@ -789,6 +790,35 @@ def prepare_ocr_resources(
         )
     )
     _check_disk_space(config_path, wheel_plan, model_plan)
+    # Keep each file's absolute byte count so resumed downloads and switching
+    # between wheels/models cannot double-count or reset the overall progress.
+    download_plan = {
+        f"{wheel.name} {wheel.version}": (
+            _wheel_path(config_path, wheel), wheel.size_bytes,
+        )
+        for wheel in wheel_plan
+    }
+    download_plan.update({
+        name: (_model_archive_path(config_path, name), _model_size(config_path, name))
+        for name in model_plan
+    })
+    downloaded = {
+        label: _cached_download_bytes(path, size)
+        for label, (path, size) in download_plan.items()
+    }
+    total_download = sum(size for _path, size in download_plan.values())
+
+    def report_overall() -> None:
+        report("overall", "已下载（含缓存）", sum(downloaded.values()), total_download)
+
+    def callback(phase: str, label: str, done: int, total: int) -> None:
+        report(phase, label, done, total)
+        planned = download_plan.get(label)
+        if phase in {"download", "ready"} and planned is not None and total == planned[1]:
+            downloaded[label] = min(total, max(0, done))
+            report_overall()
+
+    report_overall()
     if wheel_plan:
         timeout = httpx.Timeout(connect=15.0, read=60.0, write=30.0, pool=30.0)
         with httpx.Client(

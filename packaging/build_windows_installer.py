@@ -253,6 +253,11 @@ def _copy_application(
     )
     copied: list[dict[str, object]] = []
     license_root = app_root / "THIRD_PARTY_LICENSES"
+    license_root.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(
+        ROOT / "packaging" / "ChineseSimplified.LICENSE",
+        license_root / "InnoSetup-ChineseSimplified.LICENSE",
+    )
     for distribution in distributions:
         size, _files = _copy_distribution(
             distribution,

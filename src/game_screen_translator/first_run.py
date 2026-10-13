@@ -43,7 +43,8 @@ def _format_size(size_bytes: int | None) -> str:
 
 
 class _PreparationWorker(QThread):
-    progress = Signal(str, str, int, int)
+    # The complete GPU resource plan exceeds Qt's signed 32-bit int range.
+    progress = Signal(str, str, object, object)
     completed = Signal(object)
     failed = Signal(str, bool)
 
@@ -89,15 +90,15 @@ class OcrResourcesWindow(QDialog):
         self.preparation_complete = False
         self._closing_after_cancel = False
         self.setWindowTitle("RefraTranslator · 首次运行准备")
-        self.setMinimumSize(720, 500)
-        self.resize(820, 590)
+        self.setMinimumSize(720, 560)
+        self.resize(860, 660)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 26, 28, 24)
         layout.setSpacing(14)
 
         title = QLabel("准备 OCR 资源")
-        title.setStyleSheet("color: #1d2938; font-size: 24px; font-weight: 700;")
+        title.setStyleSheet("font-size: 24px; font-weight: 700;")
         layout.addWidget(title)
 
         description = QLabel(
@@ -105,7 +106,7 @@ class OcrResourcesWindow(QDialog):
             "NVIDIA GPU OCR 运行依赖，以及当前配置的检测和识别模型。"
         )
         description.setWordWrap(True)
-        description.setStyleSheet("color: #596579; font-size: 14px;")
+        description.setStyleSheet("font-size: 14px;")
         layout.addWidget(description)
 
         self.table = QTableWidget(0, 4, self)
@@ -124,21 +125,38 @@ class OcrResourcesWindow(QDialog):
         self.total_label.setStyleSheet("font-size: 13px; font-weight: 600;")
         layout.addWidget(self.total_label)
 
+        self.overall_progress_label = QLabel(self)
+        self.overall_progress_label.setWordWrap(True)
+        self.overall_progress_label.setStyleSheet("font-size: 14px; font-weight: 600;")
+        layout.addWidget(self.overall_progress_label)
+
+        self.overall_progress_bar = QProgressBar(self)
+        layout.addWidget(self.overall_progress_bar)
+
         self.progress_label = QLabel("资源通过固定版本、文件大小和 SHA-256 清单核对。")
         self.progress_label.setWordWrap(True)
-        self.progress_label.setStyleSheet("color: #596579;")
+        self.progress_label.setStyleSheet("font-size: 14px;")
+        self.progress_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.progress_label)
 
         self.progress_bar = QProgressBar(self)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(True)
+        for bar in (self.overall_progress_bar, self.progress_bar):
+            bar.setRange(0, 100)
+            bar.setValue(0)
+            # Put percentages in the labels so text never overlaps the fill.
+            bar.setTextVisible(False)
+            bar.setStyleSheet(
+                "QProgressBar { min-height: 14px; border: 1px solid palette(mid); "
+                "border-radius: 4px; background: palette(base); }"
+                "QProgressBar::chunk { background: palette(highlight); border-radius: 3px; }"
+            )
         layout.addWidget(self.progress_bar)
 
         self.error_label = QLabel()
         self.error_label.setWordWrap(True)
         self.error_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.error_label.setStyleSheet("color: #ff9d9d;")
+        error_color = "#ffb4ab" if self.palette().window().color().lightness() < 128 else "#b42318"
+        self.error_label.setStyleSheet(f"color: {error_color}; font-size: 14px;")
         self.error_label.hide()
         layout.addWidget(self.error_label)
 
@@ -197,6 +215,18 @@ class OcrResourcesWindow(QDialog):
             self.error_label.hide()
         self.prepare_button.setText("重新检查" if inventory.errors else "下载并准备")
         self.prepare_button.setEnabled(not inventory.ready)
+        pending = [resource for resource in inventory.resources if not resource.available]
+        if any(resource.size_bytes is None for resource in pending):
+            self.overall_progress_bar.setValue(0)
+            self.overall_progress_label.setText("总下载进度：等待完整资源清单")
+        else:
+            self._set_overall_progress(
+                sum(resource.downloaded_bytes for resource in pending),
+                sum(resource.size_bytes or 0 for resource in pending),
+            )
+        if inventory.ready:
+            self.overall_progress_bar.setValue(100)
+            self.overall_progress_label.setText("总下载进度：资源已就绪（100%）")
 
     @Slot()
     def _start_preparation(self) -> None:
@@ -234,19 +264,42 @@ class OcrResourcesWindow(QDialog):
         self.worker.failed.connect(self._finish_failure)
         self.worker.start()
 
-    @Slot(str, str, int, int)
+    def _set_overall_progress(self, done: int, total: int) -> None:
+        percentage = min(100, max(0, done * 100 // total)) if total else 100
+        self.overall_progress_bar.setRange(0, 100)
+        self.overall_progress_bar.setValue(percentage)
+        if total:
+            text = (
+                f"总下载进度：{percentage}% · 已下载（含缓存）"
+                f"{_format_size(done)} / {_format_size(total)}"
+            )
+            if done >= total:
+                text += "；下载完成，等待安装和校验"
+        else:
+            text = "总下载进度：无需下载，等待安装和校验"
+        self.overall_progress_label.setText(text)
+
+    @Slot(str, str, object, object)
     def _update_progress(self, phase: str, label: str, done: int, total: int) -> None:
-        if phase == "download" and total > 0:
+        if phase == "overall":
+            self._set_overall_progress(done, total)
+        elif phase == "download" and total > 0:
             self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(min(100, int(done * 100 / total)))
-            self.progress_label.setText(f"正在下载 {label} · {_format_size(done)} / {_format_size(total)}")
+            percentage = min(100, done * 100 // total)
+            self.progress_bar.setValue(percentage)
+            self.progress_label.setText(
+                f"当前文件：{label} · {percentage}% · {_format_size(done)} / {_format_size(total)}"
+            )
             row = self._row_for_label(label)
             if row is not None:
-                self.table.item(row, 2).setText(f"下载中 {min(100, int(done * 100 / total))}%")
+                self.table.item(row, 2).setText(f"下载中 {percentage}%")
         elif phase == "install":
             self.progress_bar.setRange(0, 0)
-            self.progress_label.setText(label or "正在安装 OCR 运行依赖……")
+            self.progress_label.setText("正在安装 OCR 运行依赖……")
+            self.progress_label.setToolTip(label)
         elif phase == "ready":
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(100)
             self.progress_label.setText(f"已就绪：{label}")
             row = self._row_for_label(label)
             if row is not None:
@@ -274,6 +327,7 @@ class OcrResourcesWindow(QDialog):
         self.progress_bar.setValue(0)
         if cancelled:
             self.progress_label.setText("已取消；已完成资源保留，未完成下载可续传。")
+            self.overall_progress_label.setText(self.overall_progress_label.text() + "；已取消，可续传")
         else:
             self.progress_label.setText("准备失败；修复连接或磁盘问题后可以重试。")
             self.error_label.setText(message)

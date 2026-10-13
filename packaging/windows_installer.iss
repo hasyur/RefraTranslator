@@ -22,6 +22,9 @@
   #define InstallUninstaller "yes"
 #endif
 
+[Languages]
+Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
+
 [Setup]
 AppId={{69A2D263-38BE-4B62-A105-1A6DDBEA7602}
 AppName=RefraTranslator
