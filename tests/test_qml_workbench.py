@@ -33,6 +33,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
 
 from game_screen_translator.branding import PRODUCT_NAME
+from game_screen_translator.capture_region import FULL_SCREEN_REGION, pixels_to_region_ratio
 from game_screen_translator.config import load_config
 from game_screen_translator.gui import qml_workbench as host_module
 from game_screen_translator.gui import runtime as runtime_module
@@ -56,6 +57,16 @@ from game_screen_translator.profiles import (
     save_profile_capture_settings,
     save_profile_runtime_settings,
 )
+
+
+@pytest.fixture(autouse=True)
+def _capture_device_size(monkeypatch):
+    # Keep capture scenarios independent of Qt's 800x800 offscreen screen.
+    monkeypatch.setattr(WorkbenchController, "_selected_display_size", lambda self: (1920, 1080))
+
+
+def _region_ratio(region):
+    return pixels_to_region_ratio(region, (1920, 1080))
 
 
 @pytest.fixture(autouse=True)
@@ -2066,7 +2077,7 @@ def test_real_profile_dropdown_switches_and_restores_runtime_state(
     )
     save_profile_capture_settings(
         profile_a,
-        ProfileCaptureSettings(monitor_index=0, region=(10, 20, 320, 140)),
+        ProfileCaptureSettings(monitor_index=0, region_ratio=_region_ratio((10, 20, 320, 140))),
     )
     save_profile_runtime_settings(
         profile_a,
@@ -2090,7 +2101,7 @@ def test_real_profile_dropdown_switches_and_restores_runtime_state(
     )
     save_profile_capture_settings(
         profile_b,
-        ProfileCaptureSettings(monitor_index=0, region=(40, 50, 520, 220)),
+        ProfileCaptureSettings(monitor_index=0, region_ratio=_region_ratio((40, 50, 520, 220))),
     )
     save_profile_runtime_settings(
         profile_b,
@@ -4139,11 +4150,12 @@ def test_real_dohna_number_stepper_uses_one_frame_at_bounds_and_input(
     assert group_surface.property("visible") is True
 
     editor.forceActiveFocus()
-    editor.setProperty("text", "32768")
+    maximum_left = controller.captureDisplayWidth - controller.captureWidth
+    editor.setProperty("text", str(maximum_left))
     QTest.keyClick(window, Qt.Key.Key_Return)
     app.processEvents()
-    assert controller.captureLeft == 32768
-    assert stepper.property("value") == 32768
+    assert controller.captureLeft == maximum_left
+    assert stepper.property("value") == maximum_left
     assert increase.property("enabled") is False
     assert group_surface.property("visible") is True
 
@@ -4152,7 +4164,7 @@ def test_real_dohna_number_stepper_uses_one_frame_at_bounds_and_input(
     ).toPoint()
     QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=maximum_point)
     app.processEvents()
-    assert controller.captureLeft == 32768
+    assert controller.captureLeft == maximum_left
 
     controller.setPage("SETTINGS")
     app.processEvents()
@@ -4517,6 +4529,9 @@ def test_real_ocr_quality_slider_snaps_three_presets_and_keeps_merge_guard(
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setDetectionQualityIndex(1)
+    assert controller.saveRuntimeSettings() is True
+    assert controller.settingsDirty is False
     controller.setPage("OCR")
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
@@ -5882,7 +5897,7 @@ def test_capture_custom_action_preserves_cancel_and_applies_boundary_edits(
         controller.captureHeight,
     ) == (10, 20, 640, 180)
     saved_profile = load_game_profile(config_path, load_config(config_path), "game")
-    assert saved_profile.capture_settings.region == (10, 20, 640, 180)
+    assert saved_profile.capture_settings.region_ratio == _region_ratio((10, 20, 640, 180))
 
     desired_values = {
         "捕获区域左边界": 30,
@@ -5918,7 +5933,7 @@ def test_capture_custom_action_preserves_cancel_and_applies_boundary_edits(
     app.processEvents()
     assert controller.settingsDirty is False
     saved_profile = load_game_profile(config_path, load_config(config_path), "game")
-    assert saved_profile.capture_settings.region == (30, 40, 800, 400)
+    assert saved_profile.capture_settings.region_ratio == _region_ratio((30, 40, 800, 400))
     host.shutdown()
 
 

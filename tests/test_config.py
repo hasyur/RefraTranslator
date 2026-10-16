@@ -28,6 +28,26 @@ max_concurrency = 3
     )
 
 
+def test_load_config_uses_ratios_and_discards_legacy_pixel_regions(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, '\n[live]\nleft="obsolete"\nwidth=-100\nchange_poll_fps=9\n')
+    legacy = load_config(path)
+    assert legacy.live.region_ratio == (0.0, 0.0, 1.0, 1.0)
+    assert legacy.live.change_poll_fps == 9
+    assert not hasattr(legacy.live, "left")
+
+    _write(path, '\n[live]\nregion_ratio=[0.1, 0.7, 0.8, 0.25]\n')
+    assert load_config(path).live.region_ratio == (0.1, 0.7, 0.8, 0.25)
+
+
+@pytest.mark.parametrize("value", ['[0, 0, 0, 1]', '[0.8, 0, 0.3, 1]', '[0, 0, nan, 1]', '"pixels"'])
+def test_config_rejects_invalid_region_ratios(tmp_path: Path, value: str) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, f'\n[live]\nregion_ratio={value}\n')
+    with pytest.raises(ConfigError, match="region_ratio"):
+        load_config(path)
+
+
 def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     _write(path)

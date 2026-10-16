@@ -13,6 +13,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from game_screen_translator.capture_region import (
+    FULL_SCREEN_REGION,
+    LEGACY_REGION_FIELDS,
+    RegionRatio,
+    validate_region_ratio,
+)
 from game_screen_translator.config import (
     AppConfig,
     ConfigError,
@@ -54,19 +60,16 @@ class ProfileDeletionCleanupError(ProfileError):
 @dataclass(frozen=True, slots=True)
 class ProfileCaptureSettings:
     monitor_index: int | None = None
-    region: tuple[int, int, int, int] | None = None
+    region_ratio: RegionRatio = FULL_SCREEN_REGION
 
     def __post_init__(self) -> None:
         if self.monitor_index is not None:
             if type(self.monitor_index) is not int or self.monitor_index < 0:
                 raise ProfileError("Profile 显示器索引必须是非负整数")
-        if self.region is not None:
-            if (
-                len(self.region) != 4
-                or any(type(value) is not int for value in self.region)
-                or any(value < 0 for value in self.region)
-            ):
-                raise ProfileError("Profile 捕获区域必须是四个非负整数")
+        try:
+            object.__setattr__(self, "region_ratio", validate_region_ratio(self.region_ratio))
+        except ValueError as exc:
+            raise ProfileError(f"Profile 捕获区域比例无效：{exc}") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,7 +235,7 @@ _OCR_SETTING_FIELDS = tuple(
 _PREVIEW_SETTING_FIELDS = tuple(field.name for field in fields(PreviewConfig))
 _RECORDING_SETTING_FIELDS = tuple(field.name for field in fields(RecordingConfig))
 _LIVE_CAPTURE_FIELDS = frozenset(
-    {"left", "top", "width", "height", "monitor_index"}
+    {"region_ratio", "monitor_index"}
 )
 _LIVE_SETTING_FIELDS = tuple(
     field.name for field in fields(LiveConfig)
@@ -300,30 +303,14 @@ def _load_profile_settings(
     capture = _settings_section(
         data,
         "capture",
-        ("monitor_index", "left", "top", "width", "height"),
+        ("monitor_index", "region_ratio", *LEGACY_REGION_FIELDS),
     )
     monitor_index = capture.get("monitor_index", base_config.live.monitor_index)
     if type(monitor_index) is not int:
         raise ProfileError("capture.monitor_index 必须是整数")
-    region_keys = ("left", "top", "width", "height")
-    present = [key in capture for key in region_keys]
-    if any(present) and not all(present):
-        raise ProfileError("capture.left/top/width/height 必须同时提供")
-    raw_region = (
-        tuple(capture[key] for key in region_keys)
-        if all(present)
-        else (
-            base_config.live.left,
-            base_config.live.top,
-            base_config.live.width,
-            base_config.live.height,
-        )
-    )
-    if any(type(value) is not int for value in raw_region):
-        raise ProfileError("Profile 捕获区域必须是整数")
     capture_settings = ProfileCaptureSettings(
         monitor_index=monitor_index,
-        region=raw_region,
+        region_ratio=capture.get("region_ratio", FULL_SCREEN_REGION),
     )
 
     translation = _settings_section(
@@ -387,7 +374,8 @@ def _load_profile_settings(
         live=live_config,
     )
     complete = (
-        set(capture) >= {"monitor_index", *region_keys}
+        set(capture) >= {"monitor_index", "region_ratio"}
+        and not (set(capture) & LEGACY_REGION_FIELDS)
         and set(translation) >= {*_TRANSLATION_SETTING_FIELDS, "custom_prompt"}
         and set(ocr) >= set(_OCR_SETTING_FIELDS)
         and set(preview) >= set(_PREVIEW_SETTING_FIELDS)
@@ -416,18 +404,14 @@ def _serialize_profile_settings(
         for field_name in names:
             lines.append(f"{field_name} = {literal(getattr(value, field_name))}")
 
-    if capture.monitor_index is None or capture.region is None:
+    if capture.monitor_index is None:
         raise ProfileError("完整 Profile 必须保存显示器和捕获区域")
-    left, top, width, height = capture.region
     lines = [
         "# 当前 Profile 的完整运行设置；不同 Profile 之间互不共享。",
         "",
         "[capture]",
         f"monitor_index = {capture.monitor_index}",
-        f"left = {left}",
-        f"top = {top}",
-        f"width = {width}",
-        f"height = {height}",
+        f"region_ratio = {list(capture.region_ratio)!r}",
     ]
     add_section(
         "translation",
@@ -565,12 +549,7 @@ def create_game_profile(
     (directory / "glossary.toml").write_text(glossary, encoding="utf-8")
     capture_settings = ProfileCaptureSettings(
         monitor_index=config.live.monitor_index,
-        region=(
-            config.live.left,
-            config.live.top,
-            config.live.width,
-            config.live.height,
-        ),
+        region_ratio=config.live.region_ratio,
     )
     (directory / "settings.toml").write_text(
         _serialize_profile_settings(
@@ -756,16 +735,7 @@ def apply_profile_capture_settings(
     updated = live
     if settings.monitor_index is not None:
         updated = replace(updated, monitor_index=settings.monitor_index)
-    if settings.region is not None:
-        left, top, width, height = settings.region
-        updated = replace(
-            updated,
-            left=left,
-            top=top,
-            width=width,
-            height=height,
-        )
-    return updated
+    return replace(updated, region_ratio=settings.region_ratio)
 
 
 def apply_profile_runtime_settings(

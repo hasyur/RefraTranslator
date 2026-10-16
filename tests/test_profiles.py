@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from game_screen_translator.capture_region import FULL_SCREEN_REGION, pixels_to_region_ratio
 from game_screen_translator.config import AppConfig, LiveConfig, TranslationConfig
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.profiles import (
@@ -26,6 +27,11 @@ from game_screen_translator.profiles import (
     save_profile_runtime_settings,
     validate_profile_id,
 )
+
+
+
+def _region_ratio(region):
+    return pixels_to_region_ratio(region, (1920, 1080))
 
 
 def _config() -> AppConfig:
@@ -210,38 +216,62 @@ def test_profile_must_be_initialized_explicitly(tmp_path: Path) -> None:
         load_game_profile(tmp_path / "config.toml", _config(), "missing")
 
 
+def test_legacy_pixel_region_resets_even_with_partial_or_invalid_values(tmp_path: Path) -> None:
+    machine = replace(_config(), live=LiveConfig(region_ratio=(0.1, 0.7, 0.8, 0.25)))
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, machine, "game")
+    profile.settings_path.write_text(
+        '[capture]\nmonitor_index=0\nleft="obsolete"\nwidth=-1\n'
+        '[translation]\nmodel="keep-model"\ncustom_prompt="keep-prompt"\n',
+        encoding="utf-8",
+    )
+    loaded = load_game_profile(config_path, machine, "game")
+    assert loaded.capture_settings.region_ratio == FULL_SCREEN_REGION
+    assert loaded.runtime_settings.translation.model == "keep-model"
+    assert loaded.custom_prompt == "keep-prompt"
+    saved = loaded.settings_path.read_text(encoding="utf-8")
+    assert "left =" not in saved
+    assert "width =" not in saved
+    assert "region_ratio = [0.0, 0.0, 1.0, 1.0]" in saved
+
+    save_profile_capture_settings(loaded, ProfileCaptureSettings(monitor_index=0, region_ratio=(0.1, 0.7, 0.8, 0.25)))
+    reloaded = load_game_profile(config_path, machine, "game")
+    assert reloaded.capture_settings.region_ratio == (0.1, 0.7, 0.8, 0.25)
+    assert reloaded.custom_prompt == "keep-prompt"
+
+
+@pytest.mark.parametrize("ratio", [(0, 0, 0, 1), (0.9, 0, 0.2, 1), (0, 0, float("nan"), 1)])
+def test_profile_rejects_invalid_new_region_ratios(tmp_path: Path, ratio) -> None:
+    with pytest.raises(ProfileError, match="比例"):
+        ProfileCaptureSettings(monitor_index=0, region_ratio=ratio)
+    profile = create_game_profile(tmp_path / "config.toml", _config(), "game")
+    profile.settings_path.write_text(f"[capture]\nregion_ratio={list(ratio)!r}\n", encoding="utf-8")
+    with pytest.raises(ProfileError, match="比例"):
+        load_game_profile(tmp_path / "config.toml", _config(), "game")
+
+
 def test_profile_capture_settings_are_explicit_and_override_other_values(
     tmp_path: Path,
 ) -> None:
     config_path = tmp_path / "config.toml"
     profile = create_game_profile(config_path, _config(), "game")
-    original = LiveConfig(left=5, top=6, width=700, height=200, monitor_index=0)
+    original = LiveConfig(region_ratio=_region_ratio((5, 6, 700, 200)), monitor_index=0)
 
     initial = apply_profile_capture_settings(original, profile.capture_settings)
-    assert (
-        initial.left,
-        initial.top,
-        initial.width,
-        initial.height,
-        initial.monitor_index,
-    ) == (0, 0, 0, 0, 0)
+    assert initial.region_ratio == FULL_SCREEN_REGION
+    assert initial.monitor_index == 0
 
     saved = ProfileCaptureSettings(
         monitor_index=1,
-        region=(100, 700, 1800, 350),
+        region_ratio=_region_ratio((100, 700, 1800, 350)),
     )
     save_profile_capture_settings(profile, saved)
     loaded = load_game_profile(config_path, _config(), "game")
     applied = apply_profile_capture_settings(original, loaded.capture_settings)
 
     assert loaded.capture_settings == saved
-    assert (
-        applied.left,
-        applied.top,
-        applied.width,
-        applied.height,
-        applied.monitor_index,
-    ) == (100, 700, 1800, 350, 1)
+    assert applied.region_ratio == _region_ratio((100, 700, 1800, 350))
+    assert applied.monitor_index == 1
 
 
 def test_profile_runtime_settings_are_isolated_from_other_profiles(
@@ -355,7 +385,7 @@ custom_prompt = "保持角色口吻。"
     assert effective.ocr.cache_dir == "machine-cache"
     assert reloaded.capture_settings == ProfileCaptureSettings(
         monitor_index=1,
-        region=(10, 20, 800, 300),
+        region_ratio=FULL_SCREEN_REGION,
     )
     assert reloaded.custom_prompt == "保持角色口吻。"
 
@@ -449,7 +479,7 @@ def test_profile_custom_prompt_round_trips_and_survives_capture_updates(
     with_prompt = load_game_profile(config_path, _config(), "game")
     assert with_prompt.custom_prompt == prompt
 
-    capture = ProfileCaptureSettings(monitor_index=1, region=(10, 20, 800, 300))
+    capture = ProfileCaptureSettings(monitor_index=1, region_ratio=_region_ratio((10, 20, 800, 300)))
     save_profile_capture_settings(with_prompt, capture)
     loaded = load_game_profile(config_path, _config(), "game")
     assert loaded.capture_settings == capture

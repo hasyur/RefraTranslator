@@ -7,6 +7,13 @@ from typing import Any
 
 import numpy as np
 
+from game_screen_translator.capture_region import (
+    FULL_SCREEN_REGION,
+    RegionRatio,
+    region_to_pixels,
+    validate_region_ratio,
+)
+
 
 class CaptureDependencyError(RuntimeError):
     """Raised when DXcam is unavailable or cannot initialize capture."""
@@ -15,7 +22,7 @@ class CaptureDependencyError(RuntimeError):
 @dataclass(slots=True)
 class DxcamCapture:
     monitor_index: int = 0
-    region_spec: tuple[int, int, int, int] = (0, 0, 0, 0)
+    region_ratio: RegionRatio = FULL_SCREEN_REGION
     target_fps: int = 15
     backend: str = "dxgi"
     max_buffer_len: int = 4
@@ -35,6 +42,7 @@ class DxcamCapture:
     _geometry_pending: bool = field(init=False, default=False, repr=False)
 
     def __post_init__(self) -> None:
+        self.region_ratio = validate_region_ratio(self.region_ratio)
         if self.monitor_index < 0:
             raise ValueError("monitor_index 不能为负数")
         if self.target_fps < 1:
@@ -92,7 +100,7 @@ class DxcamCapture:
                 errors.append(f"{backend}: {exc}")
                 self.close()
         raise CaptureDependencyError(
-            f"无法启动 DXcam（monitor={self.monitor_index}, region={self.region_spec}）："
+            f"无法启动 DXcam（monitor={self.monitor_index}, region_ratio={self.region_ratio}）："
             + "；".join(errors)
             + "。如果游戏使用独占全屏，请切换为无边框窗口。"
         )
@@ -201,24 +209,11 @@ class DxcamCapture:
         current_size = self._camera_output_size(camera)
         if current_size is None:
             return
-        expected_region: tuple[int, int, int, int] | None = None
-        try:
-            expected_region = self._resolve_region(*current_size)
-        except ValueError:
-            # Preserve the existing bounds error when rebuilding a fixed
-            # region against a smaller output. The main path uses the
-            # zero-sized full-screen region, which remains resolvable.
-            pass
+        expected_region = self._resolve_region(*current_size)
         camera_region = self._camera_region(camera)
         region_changed = (
-            expected_region is not None
-            and (
-                self.region != expected_region
-                or (
-                    camera_region is not None
-                    and camera_region != expected_region
-                )
-            )
+            self.region != expected_region
+            or (camera_region is not None and camera_region != expected_region)
         )
         size_changed = current_size != self.output_size
         with self._frame_lock:
@@ -232,17 +227,11 @@ class DxcamCapture:
         current_size = self._camera_output_size(camera)
         if current_size is None:
             return
-        expected_region: tuple[int, int, int, int] | None = None
-        try:
-            expected_region = self._resolve_region(*current_size)
-        except ValueError:
-            pass
+        expected_region = self._resolve_region(*current_size)
         camera_region = self._camera_region(camera)
-        changed = current_size != self.output_size
-        if expected_region is not None:
-            changed = changed or self.region != expected_region
-            if camera_region is not None:
-                changed = changed or camera_region != expected_region
+        changed = current_size != self.output_size or self.region != expected_region
+        if camera_region is not None:
+            changed = changed or camera_region != expected_region
         if changed:
             self._mark_geometry_changed()
 
@@ -344,11 +333,4 @@ class DxcamCapture:
         return region  # type: ignore[return-value]
 
     def _resolve_region(self, output_width: int, output_height: int) -> tuple[int, int, int, int]:
-        left, top, width, height = self.region_spec
-        right = output_width if width == 0 else left + width
-        bottom = output_height if height == 0 else top + height
-        if not (0 <= left < right <= output_width and 0 <= top < bottom <= output_height):
-            raise ValueError(
-                f"捕获区域 {self.region_spec} 超出显示器 {output_width}x{output_height}"
-            )
-        return left, top, right, bottom
+        return region_to_pixels(self.region_ratio, (output_width, output_height))

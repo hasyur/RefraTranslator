@@ -161,7 +161,7 @@ Item {
                             anchors.left: parent.left
                             anchors.bottom: parent.bottom
                             anchors.margins: 12
-                            text: "仅显示已配置的几何关系，不是实时画面"
+                            text: "按比例保存，随分辨率换算 · 非实时画面"
                             color: root.theme.textDim
                             font.family: root.theme.uiFontFor(text)
                             font.pixelSize: 13
@@ -246,7 +246,7 @@ Item {
                             objectName: "captureCustomAction"
                             theme: root.theme
                             text: "自定义区域"
-                            settingDescription: "框选或编辑四个边界来设置自定义捕获区域。"
+                            settingDescription: "框选或编辑像素值来设置区域，按显示器比例保存并随分辨率换算。"
                             settingKey: "capture-custom"
                             primary: root.workbench.customRegion
                             enabled: root.workbench.hasProfile
@@ -286,7 +286,7 @@ Item {
                                 settingKey: "capture-left"
                                 value: root.workbench.captureLeft
                                 minimum: 0
-                                maximum: 32768
+                                maximum: Math.max(0, root.workbench.captureDisplayWidth - root.workbench.captureWidth)
                                 stepSize: 10
                                 suffix: "px"
                                 enabled: root.workbench.hasProfile && root.workbench.customRegion
@@ -314,7 +314,7 @@ Item {
                                 settingKey: "capture-top"
                                 value: root.workbench.captureTop
                                 minimum: 0
-                                maximum: 32768
+                                maximum: Math.max(0, root.workbench.captureDisplayHeight - root.workbench.captureHeight)
                                 stepSize: 10
                                 suffix: "px"
                                 enabled: root.workbench.hasProfile && root.workbench.customRegion
@@ -342,7 +342,7 @@ Item {
                                 settingKey: "capture-width"
                                 value: root.workbench.captureWidth
                                 minimum: 1
-                                maximum: 32768
+                                maximum: Math.max(1, root.workbench.captureDisplayWidth - root.workbench.captureLeft)
                                 stepSize: 10
                                 suffix: "px"
                                 enabled: root.workbench.hasProfile && root.workbench.customRegion
@@ -370,7 +370,7 @@ Item {
                                 settingKey: "capture-height"
                                 value: root.workbench.captureHeight
                                 minimum: 1
-                                maximum: 32768
+                                maximum: Math.max(1, root.workbench.captureDisplayHeight - root.workbench.captureTop)
                                 stepSize: 10
                                 suffix: "px"
                                 enabled: root.workbench.hasProfile && root.workbench.customRegion

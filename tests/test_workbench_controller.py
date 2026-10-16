@@ -23,6 +23,7 @@ from game_screen_translator.branding import (
     LEGACY_API_KEY_ENV,
     PRODUCT_NAME,
 )
+from game_screen_translator.capture_region import FULL_SCREEN_REGION, pixels_to_region_ratio
 from game_screen_translator.config import load_config
 from game_screen_translator.domain import GlossaryEntry
 from game_screen_translator.gui import workbench_controller as controller_module
@@ -54,6 +55,19 @@ from game_screen_translator.profiles import (
 from game_screen_translator.translation.cache import CacheEnvironment, TranslationCache
 
 
+
+@pytest.fixture(autouse=True)
+def _capture_device_size(monkeypatch, request):
+    # Keep capture scenarios independent of Qt's 800x800 offscreen screen.
+    if request.node.name == "test_controller_exposes_selected_display_size_in_capture_pixels":
+        return
+    monkeypatch.setattr(WorkbenchController, "_selected_display_size", lambda self: (1920, 1080))
+
+
+def _region_ratio(region):
+    return pixels_to_region_ratio(region, (1920, 1080))
+
+
 def _write_config(path: Path) -> None:
     path.write_text(
         """
@@ -63,10 +77,7 @@ base_url = "http://127.0.0.1:1234/v1"
 model = "hy-mt1.5-7b"
 
 [live]
-left = 1
-top = 2
-width = 3
-height = 4
+region_ratio = [0.0005208333333333333, 0.001851851851851852, 0.0015625, 0.003703703703703704]
 """,
         encoding="utf-8",
     )
@@ -89,7 +100,7 @@ def test_restart_restores_last_profile_and_its_settings_but_starts_on_home(tmp_p
     controller, config_path = _controller_with_profile(tmp_path)
     second = create_game_profile(config_path, load_config(config_path), "second", display_name="ZZ last")
     save_profile_custom_prompt(second, "上次配置的提示词")
-    save_profile_capture_settings(second, ProfileCaptureSettings(monitor_index=0, region=(30, 40, 900, 250)))
+    save_profile_capture_settings(second, ProfileCaptureSettings(monitor_index=0, region_ratio=_region_ratio((30, 40, 900, 250))))
     controller.refreshProfiles()
     controller.selectProfile(controller.profileIds.index("second"))
     controller.setPage("OCR")
@@ -267,7 +278,7 @@ def test_controller_projects_real_profile_data_and_truthful_telemetry_empty_stat
     )
     save_profile_capture_settings(
         profile,
-        ProfileCaptureSettings(monitor_index=0, region=(100, 200, 800, 300)),
+        ProfileCaptureSettings(monitor_index=0, region_ratio=_region_ratio((100, 200, 800, 300))),
     )
     save_profile_glossary(profile, (GlossaryEntry("仕事", "委托"),))
     profile.cache.set_manual_correction(
@@ -449,6 +460,66 @@ def test_controller_reads_shared_finished_latency_log_on_refresh_and_profile_swi
         assert controller.lastRunAvailable is False
     finally:
         controller.shutdown()
+
+
+def test_region_save_reload_and_resolution_changes_keep_original_ratios(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_size = [1920, 1080]
+    monkeypatch.setattr(WorkbenchController, "_selected_display_size", lambda self: tuple(current_size))
+    controller, config_path = _controller_with_profile(tmp_path)
+    controller.acceptRegionSelection(192, 756, 1536, 270)
+    profile = load_game_profile(config_path, load_config(config_path), "game")
+    assert profile.capture_settings.region_ratio == (0.1, 0.7, 0.8, 0.25)
+    assert "region_ratio = [0.1, 0.7, 0.8, 0.25]" in profile.settings_path.read_text(encoding="utf-8")
+
+    current_size[:] = [3840, 2160]
+    controller._display_geometry_changed()
+    assert (controller.captureLeft, controller.captureTop, controller.captureWidth, controller.captureHeight) == (
+        384, 1512, 3072, 540,
+    )
+    assert controller.settingsDirty is False
+    assert controller.saveCapture() is True
+
+    # Viewing, saving and reopening on a different resolution must not round
+    # the saved fractions through the displayed pixel fields.
+    current_size[:] = [1365, 767]
+    controller._display_geometry_changed()
+    assert controller.saveCapture() is True
+    reloaded = WorkbenchController(config_path, probe_ocr_devices=False)
+    assert reloaded._live_candidate().region_ratio == (0.1, 0.7, 0.8, 0.25)
+    current_size[:] = [1920, 1080]
+    reloaded._display_geometry_changed()
+    assert (reloaded.captureLeft, reloaded.captureTop, reloaded.captureWidth, reloaded.captureHeight) == (
+        192, 756, 1536, 270,
+    )
+    controller.shutdown()
+    reloaded.shutdown()
+
+
+def test_switching_monitors_keeps_the_region_proportions(tmp_path: Path, monkeypatch) -> None:
+    controller, _ = _controller_with_profile(tmp_path)
+    controller._monitor_values = [0, 1]
+    monkeypatch.setattr(controller, "_selected_display_size", lambda: [(1920, 1080), (3840, 2160)][controller.monitorIndex])
+    controller.acceptRegionSelection(192, 756, 1536, 270)
+    controller.setMonitorIndex(1)
+    assert (controller.captureLeft, controller.captureTop, controller.captureWidth, controller.captureHeight) == (
+        384, 1512, 3072, 540,
+    )
+    assert controller._live_candidate().region_ratio == (0.1, 0.7, 0.8, 0.25)
+    controller.shutdown()
+
+
+def test_invalid_selection_does_not_save_the_previous_region(tmp_path: Path) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    profile = load_game_profile(config_path, load_config(config_path), "game")
+    before = profile.settings_path.read_bytes()
+    errors = []
+    controller.errorRaised.connect(lambda *args: errors.append(args))
+    controller.acceptRegionSelection(1900, 1000, 200, 200)
+    assert errors[-1][0] == "捕获区域无效"
+    assert profile.settings_path.read_bytes() == before
+    controller.shutdown()
 
 
 def test_controller_exposes_selected_display_size_in_capture_pixels(
@@ -734,11 +805,11 @@ def test_select_profile_reloads_owned_state_and_saves_only_selected_profile(
     save_profile_custom_prompt(web, "保持技术文档术语。")
     save_profile_capture_settings(
         game,
-        ProfileCaptureSettings(monitor_index=0, region=(10, 20, 800, 300)),
+        ProfileCaptureSettings(monitor_index=0, region_ratio=_region_ratio((10, 20, 800, 300))),
     )
     save_profile_capture_settings(
         web,
-        ProfileCaptureSettings(monitor_index=0, region=(30, 40, 900, 320)),
+        ProfileCaptureSettings(monitor_index=0, region_ratio=_region_ratio((30, 40, 900, 320))),
     )
     save_profile_runtime_settings(
         game,
@@ -831,7 +902,7 @@ def test_controller_preserves_runtime_prompt_and_capture_save_boundaries(
     assert effective.translation.model == "real-model"
     assert effective.live.debug_border is True
     assert saved_profile.custom_prompt == ""
-    assert saved_profile.capture_settings.region == (1, 2, 3, 4)
+    assert saved_profile.capture_settings.region_ratio == _region_ratio((1, 2, 3, 4))
     assert config_path.read_bytes() == machine_config_bytes
     assert saved_config.live.debug_border is False
     assert controller.settingsDirty is True
@@ -839,13 +910,13 @@ def test_controller_preserves_runtime_prompt_and_capture_save_boundaries(
     assert controller.saveCustomPrompt() is True
     saved_profile = load_game_profile(config_path, load_config(config_path), "game")
     assert saved_profile.custom_prompt == "保持角色口吻。"
-    assert saved_profile.capture_settings.region == (1, 2, 3, 4)
+    assert saved_profile.capture_settings.region_ratio == _region_ratio((1, 2, 3, 4))
     assert config_path.read_bytes() == machine_config_bytes
     assert controller.settingsDirty is True
 
     assert controller.saveCapture() is True
     saved_profile = load_game_profile(config_path, load_config(config_path), "game")
-    assert saved_profile.capture_settings.region == (10, 20, 800, 300)
+    assert saved_profile.capture_settings.region_ratio == _region_ratio((10, 20, 800, 300))
     assert config_path.read_bytes() == machine_config_bytes
     assert controller.settingsDirty is False
 
@@ -1259,7 +1330,7 @@ def test_region_selector_stays_in_the_native_host_boundary(tmp_path: Path) -> No
 
     controller.acceptRegionSelection(20, 30, 900, 320)
     profile = load_game_profile(config_path, load_config(config_path), "game")
-    assert profile.capture_settings.region == (20, 30, 900, 320)
+    assert profile.capture_settings.region_ratio == _region_ratio((20, 30, 900, 320))
 
     controller.shutdown()
 
@@ -1279,7 +1350,7 @@ def test_use_full_screen_clears_and_persists_profile_region(tmp_path: Path) -> N
         controller.captureHeight,
     ) == (0, 0, 0, 0)
     profile = load_game_profile(config_path, load_config(config_path), "game")
-    assert profile.capture_settings.region == (0, 0, 0, 0)
+    assert profile.capture_settings.region_ratio == FULL_SCREEN_REGION
     controller.shutdown()
 
 
@@ -1297,7 +1368,7 @@ def test_missing_profile_monitor_falls_back_without_resaving_stale_index(
     )
     save_profile_capture_settings(
         profile,
-        ProfileCaptureSettings(monitor_index=99, region=(1, 2, 300, 200)),
+        ProfileCaptureSettings(monitor_index=99, region_ratio=_region_ratio((1, 2, 300, 200))),
     )
 
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
@@ -1335,7 +1406,7 @@ def test_model_download_saves_only_runtime_scope(
     assert machine.translation.model == "hy-mt1.5-7b"
     assert effective.translation.model == "runtime-model"
     assert profile.custom_prompt == ""
-    assert profile.capture_settings.region == (1, 2, 3, 4)
+    assert profile.capture_settings.region_ratio == _region_ratio((1, 2, 3, 4))
     assert controller.settingsDirty is True
 
     controller.shutdown()
@@ -1404,7 +1475,7 @@ def test_controller_emits_live_ready_without_owning_window_visibility(
     )
     saved_profile = load_game_profile(config_path, load_config(config_path), "game")
     assert saved_profile.custom_prompt == "启动前保存的提示词"
-    assert saved_profile.capture_settings.region == (20, 30, 800, 300)
+    assert saved_profile.capture_settings.region_ratio == _region_ratio((20, 30, 800, 300))
 
     controller._live_process = None
     controller.shutdown()

@@ -67,11 +67,9 @@ browser_overlay_port = 47831
 root_dir = "profiles"
 
 [live]
-# 相对于所选显示器左上角的捕获区域；width/height 为 0 表示延伸至显示器边缘。
-left = 0
-top = 0
-width = 0
-height = 0
+# 相对于所选显示器的左、上、宽、高比例（0 到 1）；运行时按当前分辨率换算像素。
+# [0.0, 0.0, 1.0, 1.0] 表示整个显示器；旧像素区域会重置为全屏，请重新框选保存。
+region_ratio = [0.0, 0.0, 1.0, 1.0]
 monitor_index = 0
 # 屏幕捕获频率自动为 change_poll_fps 的 2 倍（默认 12 FPS）。
 # 两条调度路径共用的轻量变化检测频率；动态 ROI 开启时即热图频率。

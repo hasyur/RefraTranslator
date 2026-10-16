@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from game_screen_translator.branding import API_KEY_ENV, LEGACY_API_KEY_ENV
+from game_screen_translator.capture_region import (
+    FULL_SCREEN_REGION,
+    LEGACY_REGION_FIELDS,
+    RegionRatio,
+    validate_region_ratio,
+)
 
 
 class ConfigError(ValueError):
@@ -261,10 +267,7 @@ class RecordingConfig:
 
 @dataclass(frozen=True, slots=True)
 class LiveConfig:
-    left: int = 0
-    top: int = 0
-    width: int = 0
-    height: int = 0
+    region_ratio: RegionRatio = FULL_SCREEN_REGION
     monitor_index: int = 0
     change_poll_fps: int = 6
     change_threshold: float = 3.0
@@ -282,10 +285,10 @@ class LiveConfig:
     dynamic_roi_response_target_ms: int = 350
 
     def __post_init__(self) -> None:
-        if self.left < 0 or self.top < 0:
-            raise ConfigError("live.left/top 不能为负数")
-        if self.width < 0 or self.height < 0:
-            raise ConfigError("live.width/height 不能为负数")
+        try:
+            object.__setattr__(self, "region_ratio", validate_region_ratio(self.region_ratio))
+        except ValueError as exc:
+            raise ConfigError(f"live.region_ratio 无效：{exc}") from exc
         if self.monitor_index < 0:
             raise ConfigError("live.monitor_index 不能为负数")
         if (
@@ -395,6 +398,9 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         )
 
     live_values = dict(_section(data, "live"))
+    # Old pixel regions have no reference resolution: discard them, never guess.
+    for field_name in LEGACY_REGION_FIELDS:
+        live_values.pop(field_name, None)
     # `capture_fps` was formerly stored in config.toml, but its effective
     # value has always been derived from change_poll_fps.  Ignore the legacy
     # key regardless of its value instead of validating dead state.

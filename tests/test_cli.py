@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from game_screen_translator.cli import _parse_region, _parser, main
+from game_screen_translator.capture_region import pixels_to_region_ratio
 from game_screen_translator.config import load_config
 from game_screen_translator.ocr.types import OcrText
 from game_screen_translator.profiles import (
@@ -18,6 +19,11 @@ from game_screen_translator.profiles import (
     save_profile_capture_settings,
     save_profile_runtime_settings,
 )
+
+
+
+def _region_ratio(region):
+    return pixels_to_region_ratio(region, (1920, 1080))
 
 
 def test_cli_configures_openblas_before_command_specific_imports() -> None:
@@ -60,7 +66,7 @@ assert not unexpected, sorted(unexpected)
 
 
 def test_parse_region() -> None:
-    assert _parse_region("10, 20, 800, 300") == (10, 20, 800, 300)
+    assert _parse_region("0.1, 0.7, 0.8, 0.25") == (0.1, 0.7, 0.8, 0.25)
 
 
 def test_cli_uses_refra_translator_name() -> None:
@@ -90,7 +96,7 @@ def test_translation_commands_require_a_profile(arguments: list[str]) -> None:
         _parser().parse_args(arguments)
 
 
-@pytest.mark.parametrize("value", ["1,2,3", "1,2,no,4", "-1,2,3,4"])
+@pytest.mark.parametrize("value", ["1,2,3", "1,2,no,4", "-1,2,3,4", "10,20,800,300", "0,0,0,1", "0,0,nan,1", "0.8,0,0.3,1"])
 def test_parse_region_rejects_invalid_value(value: str) -> None:
     with pytest.raises(argparse.ArgumentTypeError):
         _parse_region(value)
@@ -470,7 +476,7 @@ model = "hy-mt1.5-7b"
     profile = create_game_profile(config_path, config, "game")
     save_profile_capture_settings(
         profile,
-        ProfileCaptureSettings(monitor_index=2, region=(10, 20, 800, 240)),
+        ProfileCaptureSettings(monitor_index=2, region_ratio=_region_ratio((10, 20, 800, 240))),
     )
     save_profile_runtime_settings(
         profile,
@@ -502,13 +508,8 @@ model = "hy-mt1.5-7b"
         ]
     ) == 0
     live = received[0][0].live
-    assert (live.monitor_index, live.left, live.top, live.width, live.height) == (
-        2,
-        10,
-        20,
-        800,
-        240,
-    )
+    assert live.monitor_index == 2
+    assert live.region_ratio == _region_ratio((10, 20, 800, 240))
     runtime_config = received[0][0]
     assert runtime_config.translation.model == "profile-model"
     assert runtime_config.ocr.device == "gpu:2"
@@ -518,3 +519,11 @@ model = "hy-mt1.5-7b"
     assert runtime_config.live.debug_border is True
     assert received[0][2]["debug_border"] is None
     assert received[0][2]["profile"].profile_id == "game"
+    settings_before = profile.settings_path.read_bytes()
+    assert main([
+        "--config", str(config_path), "live", "--profile", "game",
+        "--region", "0.1,0.7,0.8,0.25", "--monitor", "1",
+    ]) == 0
+    assert received[-1][0].live.region_ratio == (0.1, 0.7, 0.8, 0.25)
+    assert received[-1][0].live.monitor_index == 1
+    assert profile.settings_path.read_bytes() == settings_before

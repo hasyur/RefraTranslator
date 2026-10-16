@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Sequence
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 from game_screen_translator.branding import PRODUCT_NAME, PROJECT_SLUG
+from game_screen_translator.capture_region import RegionRatio, validate_region_ratio
 from game_screen_translator.config import load_config
 
 if TYPE_CHECKING:
@@ -78,7 +79,7 @@ def _parser() -> argparse.ArgumentParser:
         "--region",
         type=_parse_region,
         metavar="LEFT,TOP,WIDTH,HEIGHT",
-        help="临时覆盖当前 Profile 的捕获区域；宽高为 0 表示延伸到屏幕边缘",
+        help="临时覆盖捕获区域比例：LEFT,TOP,WIDTH,HEIGHT（0 到 1），例如 0.1,0.7,0.8,0.25",
     )
     live.add_argument("--monitor", type=int, help="临时覆盖显示器索引")
     live.add_argument(
@@ -127,14 +128,11 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _parse_region(value: str) -> tuple[int, int, int, int]:
+def _parse_region(value: str) -> RegionRatio:
     try:
-        values = tuple(int(part.strip()) for part in value.split(","))
+        return validate_region_ratio(tuple(float(part.strip()) for part in value.split(",")))
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("区域必须是四个整数：LEFT,TOP,WIDTH,HEIGHT") from exc
-    if len(values) != 4 or any(part < 0 for part in values):
-        raise argparse.ArgumentTypeError("区域必须是四个非负整数：LEFT,TOP,WIDTH,HEIGHT")
-    return values  # type: ignore[return-value]
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 async def _doctor(config_path: Path, profile_id: str) -> int:
@@ -362,11 +360,10 @@ def _profile_command(config_path: Path, args: argparse.Namespace) -> int:
         print(
             f"人工修订：{stats.manual_corrections} 条（命中 {stats.manual_hits} 次）"
         )
-        if profile.capture_settings.region is not None:
-            print(
-                "捕获区域："
-                + ",".join(str(value) for value in profile.capture_settings.region)
-            )
+        print(
+            "捕获区域比例："
+            + ",".join(str(value) for value in profile.capture_settings.region_ratio)
+        )
         if profile.capture_settings.monitor_index is not None:
             print(f"显示器：{profile.capture_settings.monitor_index}")
         return 0
@@ -436,14 +433,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 config = apply_profile_runtime_settings(config, profile)
                 live_config = config.live
             if args.region is not None:
-                left, top, width, height = args.region
-                live_config = replace(
-                    live_config,
-                    left=left,
-                    top=top,
-                    width=width,
-                    height=height,
-                )
+                live_config = replace(live_config, region_ratio=args.region)
             if args.monitor is not None:
                 live_config = replace(live_config, monitor_index=args.monitor)
             return run_live(

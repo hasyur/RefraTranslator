@@ -6,26 +6,30 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from game_screen_translator.capture_region import FULL_SCREEN_REGION, pixels_to_region_ratio
 from game_screen_translator.capture.dxcam_capture import DxcamCapture
 
 
-def test_capture_region_zero_size_extends_to_output_edge() -> None:
-    capture = DxcamCapture(region_spec=(100, 200, 0, 0))
+
+def _region_ratio(region):
+    return pixels_to_region_ratio(region, (1920, 1080))
+
+
+def test_capture_region_fraction_extends_to_output_edge() -> None:
+    capture = DxcamCapture(region_ratio=_region_ratio((100, 200, 1820, 880)))
 
     assert capture._resolve_region(1920, 1080) == (100, 200, 1920, 1080)
 
 
 def test_capture_region_uses_width_and_height() -> None:
-    capture = DxcamCapture(region_spec=(100, 200, 800, 400))
+    capture = DxcamCapture(region_ratio=_region_ratio((100, 200, 800, 400)))
 
     assert capture._resolve_region(1920, 1080) == (100, 200, 900, 600)
 
 
 def test_capture_region_rejects_out_of_bounds() -> None:
-    capture = DxcamCapture(region_spec=(1800, 100, 200, 200))
-
-    with pytest.raises(ValueError, match="超出显示器"):
-        capture._resolve_region(1920, 1080)
+    with pytest.raises(ValueError, match="显示器范围"):
+        DxcamCapture(region_ratio=(0.9, 0.1, 0.2, 0.2))
 
 
 def test_dxgi_failure_falls_back_to_winrt(monkeypatch) -> None:
@@ -72,7 +76,7 @@ def test_dxgi_failure_falls_back_to_winrt(monkeypatch) -> None:
         return camera
 
     monkeypatch.setitem(sys.modules, "dxcam", SimpleNamespace(create=create))
-    capture = DxcamCapture(region_spec=(10, 20, 200, 100), backend="dxgi")
+    capture = DxcamCapture(region_ratio=_region_ratio((10, 20, 200, 100)), backend="dxgi")
 
     capture.start()
 
@@ -90,8 +94,15 @@ def test_dxgi_failure_falls_back_to_winrt(monkeypatch) -> None:
     assert camera.released
 
 
-def test_full_screen_region_rebuilds_from_original_spec_after_output_resize(
-    monkeypatch,
+@pytest.mark.parametrize(
+    ("ratio", "large", "small"),
+    [
+        (FULL_SCREEN_REGION, (0, 0, 2560, 1440), (0, 0, 1280, 1024)),
+        ((0.1, 0.7, 0.8, 0.25), (256, 1008, 2304, 1368), (128, 717, 1152, 973)),
+    ],
+)
+def test_capture_region_rebuilds_from_original_ratio_after_output_resize(
+    monkeypatch, ratio, large, small,
 ) -> None:
     class ResizingCamera:
         width = 2560
@@ -134,8 +145,9 @@ def test_full_screen_region_rebuilds_from_original_spec_after_output_resize(
         "dxcam",
         SimpleNamespace(create=lambda **kwargs: camera),
     )
-    capture = DxcamCapture(region_spec=(0, 0, 0, 0))
+    capture = DxcamCapture(region_ratio=ratio)
     capture.start()
+    assert capture.region == large
 
     camera.width, camera.height = 1280, 1024
     frame = None
@@ -144,9 +156,9 @@ def test_full_screen_region_rebuilds_from_original_spec_after_output_resize(
         frame = capture.latest_frame()
         time.sleep(0.005)
     assert frame is not None
-    assert frame.shape == (1024, 1280, 3)
+    assert frame.shape == (small[3] - small[1], small[2] - small[0], 3)
     assert capture.output_size == (1280, 1024)
-    assert capture.region == (0, 0, 1280, 1024)
+    assert capture.region == small
 
     camera.width, camera.height = 2560, 1440
     frame = None
@@ -155,14 +167,13 @@ def test_full_screen_region_rebuilds_from_original_spec_after_output_resize(
         frame = capture.latest_frame()
         time.sleep(0.005)
     assert frame is not None
-    assert frame.shape == (1440, 2560, 3)
+    assert frame.shape == (large[3] - large[1], large[2] - large[0], 3)
     assert capture.output_size == (2560, 1440)
-    assert capture.region == (0, 0, 2560, 1440)
+    assert capture.region == large
     assert camera.started_regions == [
-        (0, 0, 2560, 1440),
-        (0, 0, 1280, 1024),
-        (0, 0, 2560, 1440),
+        large, small, large,
     ]
+    assert capture.region_ratio == ratio
     assert capture.geometry_generation == 2
 
     capture.close()

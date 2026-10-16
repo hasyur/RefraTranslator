@@ -29,6 +29,11 @@ from game_screen_translator.branding import (
     LEGACY_API_KEY_ENV,
     PRODUCT_NAME,
 )
+from game_screen_translator.capture_region import (
+    FULL_SCREEN_REGION,
+    pixels_to_region_ratio,
+    region_to_pixels,
+)
 from game_screen_translator.config import (
     AppConfig,
     BUILTIN_CONTEXT_PER_SLOT,
@@ -427,11 +432,8 @@ class WorkbenchController(QObject):
         self._monitor_names: list[str] = []
         self._monitor_index = self._config.live.monitor_index
 
-        self._capture_left = self._config.live.left
-        self._capture_top = self._config.live.top
-        self._capture_width = self._config.live.width
-        self._capture_height = self._config.live.height
-        self._custom_region = self._capture_width > 0 and self._capture_height > 0
+        self._capture_region_ratio = self._config.live.region_ratio
+        self._custom_region = self._capture_region_ratio != FULL_SCREEN_REGION
         self._detection_quality_index = 1
 
         self._ocr_device = self._config.ocr.device
@@ -490,6 +492,9 @@ class WorkbenchController(QObject):
             )
 
         if app is not None:
+            for screen in app.screens():
+                screen.geometryChanged.connect(self._display_geometry_changed)
+                screen.logicalDotsPerInchChanged.connect(self._display_geometry_changed)
             try:
                 app.styleHints().colorSchemeChanged.connect(self._system_theme_changed)
             except AttributeError:
@@ -769,19 +774,19 @@ class WorkbenchController(QObject):
 
     @Property(int, notify=stateChanged)
     def captureLeft(self) -> int:
-        return self._capture_left
+        return self._capture_pixels()[0]
 
     @Property(int, notify=stateChanged)
     def captureTop(self) -> int:
-        return self._capture_top
+        return self._capture_pixels()[1]
 
     @Property(int, notify=stateChanged)
     def captureWidth(self) -> int:
-        return self._capture_width
+        return self._capture_pixels()[2]
 
     @Property(int, notify=stateChanged)
     def captureHeight(self) -> int:
-        return self._capture_height
+        return self._capture_pixels()[3]
 
     @Property(int, notify=stateChanged)
     def captureDisplayWidth(self) -> int:
@@ -797,8 +802,8 @@ class WorkbenchController(QObject):
             return f"显示器 {self._monitor_index} · 整个显示器"
         return (
             f"显示器 {self._monitor_index} · "
-            f"{self._capture_width}×{self._capture_height} · "
-            f"左 {self._capture_left} · 上 {self._capture_top}"
+            f"{self.captureWidth}×{self.captureHeight} · "
+            f"左 {self.captureLeft} · 上 {self.captureTop}"
         )
 
     @Property(list, notify=stateChanged)
@@ -1117,14 +1122,14 @@ class WorkbenchController(QObject):
         if self._profile is None:
             return "暂无真实 Profile 数据。请从 HOME 新建或选择一个配置。"
         capture = self._profile.capture_settings
-        region = ",".join(map(str, capture.region)) if capture.region is not None else "未设置"
+        region = ", ".join(f"{value:.2%}" for value in capture.region_ratio)
         monitor = str(capture.monitor_index) if capture.monitor_index is not None else "未设置"
         return (
             f"配置：{self._profile.display_name}\n"
             f"内部 ID：{self._profile.profile_id}\n"
             f"目录：{self._profile.directory}\n"
             f"显示器：{monitor}\n"
-            f"字幕区域：{region}\n"
+            f"字幕区域比例（左、上、宽、高）：{region}\n"
             f"配置提示词：{'已设置' if self._profile.custom_prompt else '未设置'}\n"
             f"术语：{len(self._profile.glossary)} 条\n"
             f"模型缓存：{self.automaticEntries} 条，命中 {self.automaticHits} 次\n"
@@ -1260,10 +1265,7 @@ class WorkbenchController(QObject):
             if self._config.live.monitor_index in self._monitor_values
             else (0 if self._monitor_values else self._config.live.monitor_index)
         )
-        self._capture_left = 0
-        self._capture_top = 0
-        self._capture_width = 0
-        self._capture_height = 0
+        self._capture_region_ratio = FULL_SCREEN_REGION
         self._custom_region = False
         self._automatic_entries = 0
         self._automatic_hits = 0
@@ -1364,14 +1366,8 @@ class WorkbenchController(QObject):
         configured_monitor = self._config.live.monitor_index
         monitor_warning = configured_monitor not in self._monitor_values
         self._monitor_index = 0 if monitor_warning and self._monitor_values else configured_monitor
-        region = capture.region or (
-            self._config.live.left,
-            self._config.live.top,
-            self._config.live.width,
-            self._config.live.height,
-        )
-        self._capture_left, self._capture_top, self._capture_width, self._capture_height = region
-        self._custom_region = self._capture_width > 0 and self._capture_height > 0
+        self._capture_region_ratio = capture.region_ratio
+        self._custom_region = self._capture_region_ratio != FULL_SCREEN_REGION
         translation = self._config.translation
         ocr = self._config.ocr
         live = self._config.live
@@ -1616,6 +1612,17 @@ class WorkbenchController(QObject):
 
     # ----- capture and OCR --------------------------------------------
 
+    def _display_geometry_changed(self, *_args: Any) -> None:
+        self._refresh_monitors()
+        self._emit_state()
+
+    def _capture_pixels(self) -> tuple[int, int, int, int]:
+        size = self._selected_display_size()
+        if not self._custom_region or min(size) <= 0:
+            return 0, 0, 0, 0
+        left, top, right, bottom = region_to_pixels(self._capture_region_ratio, size)
+        return left, top, right - left, bottom - top
+
     def _refresh_monitors(self) -> None:
         app = QApplication.instance()
         screens = app.screens() if app is not None else []
@@ -1646,23 +1653,26 @@ class WorkbenchController(QObject):
             return
         self._custom_region = enabled
         if not self._custom_region:
-            self._capture_left = self._capture_top = self._capture_width = self._capture_height = 0
+            self._capture_region_ratio = FULL_SCREEN_REGION
         self._mark_capture_dirty()
 
-    @Slot(int, int, int, int)
-    def setCaptureRegion(self, left: int, top: int, width: int, height: int) -> None:
-        region = (
-            max(0, int(left)),
-            max(0, int(top)),
-            max(0, int(width)),
-            max(0, int(height)),
-        )
-        custom = region[2] > 0 and region[3] > 0
-        if region == (self._capture_left, self._capture_top, self._capture_width, self._capture_height) and custom == self._custom_region:
-            return
-        self._capture_left, self._capture_top, self._capture_width, self._capture_height = region
+    @Slot(int, int, int, int, result=bool)
+    def setCaptureRegion(self, left: int, top: int, width: int, height: int) -> bool:
+        custom = width > 0 and height > 0
+        try:
+            ratio = (
+                pixels_to_region_ratio((left, top, width, height), self._selected_display_size())
+                if custom else FULL_SCREEN_REGION
+            )
+        except ValueError as exc:
+            self._show_error("捕获区域无效", exc)
+            return False
+        if ratio == self._capture_region_ratio and custom == self._custom_region:
+            return True
+        self._capture_region_ratio = ratio
         self._custom_region = custom
         self._mark_capture_dirty()
+        return True
 
     @Slot()
     def selectRegion(self) -> None:
@@ -1682,8 +1692,8 @@ class WorkbenchController(QObject):
         width: int,
         height: int,
     ) -> None:
-        self.setCaptureRegion(left, top, width, height)
-        self.saveCapture()
+        if self.setCaptureRegion(left, top, width, height):
+            self.saveCapture()
 
     @Slot()
     def cancelRegionSelection(self) -> None:
@@ -1701,12 +1711,7 @@ class WorkbenchController(QObject):
         try:
             settings = ProfileCaptureSettings(
                 monitor_index=self._monitor_index,
-                region=(
-                    self._capture_left,
-                    self._capture_top,
-                    self._capture_width,
-                    self._capture_height,
-                ),
+                region_ratio=self._capture_region_ratio,
             )
             save_profile_capture_settings(self._profile, settings)
             self._profile = load_game_profile(
@@ -2096,10 +2101,7 @@ class WorkbenchController(QObject):
             change_poll_fps=self._change_poll_fps,
             dynamic_roi_response_target_ms=self._roi_response_target_ms,
             monitor_index=self._monitor_index,
-            left=self._capture_left if self._custom_region else 0,
-            top=self._capture_top if self._custom_region else 0,
-            width=self._capture_width if self._custom_region else 0,
-            height=self._capture_height if self._custom_region else 0,
+            region_ratio=self._capture_region_ratio,
         )
 
     def _save_runtime_settings(self, *, announce: bool) -> bool:

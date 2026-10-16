@@ -3371,17 +3371,11 @@ def _run_live_ready(
     _live_message(
         f"starting capture: monitor={config.live.monitor_index} "
         f"fps={config.live.capture_fps} "
-        f"region={config.live.left},{config.live.top},"
-        f"{config.live.width},{config.live.height}"
+        f"region_ratio={config.live.region_ratio}"
     )
     capture = DxcamCapture(
         monitor_index=config.live.monitor_index,
-        region_spec=(
-            config.live.left,
-            config.live.top,
-            config.live.width,
-            config.live.height,
-        ),
+        region_ratio=config.live.region_ratio,
         target_fps=config.live.capture_fps,
         backend=config.live.capture_backend,
     )
