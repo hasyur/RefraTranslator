@@ -53,6 +53,9 @@ _KEY_NAMES = {
 _NUMBER_ONLY_RE = re.compile(r"^[\d\s.,:/%+\-–—]+$")
 _KEY_PROMPT_RE = re.compile(r"^[A-Z]\d{0,2}$")
 _TOKEN_RE = re.compile(r"[A-Za-z]+|\d+")
+_ALPHANUMERIC_RUN_RE = _TOKEN_RE
+_TOP_EDGE_NOISE_MAX_PX = 2
+_TOP_EDGE_NOISE_MAX_CONFIDENCE = 0.70
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +121,11 @@ class OcrTextFilter:
         accepted: list[OcrText] = []
         rejected: list[RejectedOcrText] = []
         for observation in observations:
-            reason = self._rejection_reason(observation.text)
+            reason = (
+                "边缘疑似 OCR 噪声"
+                if _is_top_edge_fragmented_alphanumeric_noise(observation)
+                else self._rejection_reason(observation.text)
+            )
             recoverable_fragment = merge_enabled and (
                 (
                     reason == "纯汉字/中文"
@@ -234,3 +241,31 @@ def _is_hangul(character: str) -> bool:
 
 def _is_latin(character: str) -> bool:
     return "LATIN" in unicodedata.name(character, "")
+
+
+def _is_top_edge_fragmented_alphanumeric_noise(observation: OcrText) -> bool:
+    """Reject only low-confidence, fragmented alphanumeric tokens at the top edge."""
+
+    if (
+        observation.bounds[1] > _TOP_EDGE_NOISE_MAX_PX
+        or observation.confidence >= _TOP_EDGE_NOISE_MAX_CONFIDENCE
+    ):
+        return False
+
+    text = unicodedata.normalize("NFKC", observation.text)
+    if any(character.isalpha() and not character.isascii() for character in text):
+        return False
+    letter_count = sum(character.isascii() and character.isalpha() for character in text)
+    digit_count = sum(character.isascii() and character.isdigit() for character in text)
+    if not 2 <= letter_count <= 4 or digit_count < 3 or digit_count < letter_count:
+        return False
+
+    runs = _ALPHANUMERIC_RUN_RE.findall(text)
+    letter_runs = tuple(run for run in runs if run[0].isalpha())
+    digit_runs = tuple(run for run in runs if run[0].isdigit())
+    return (
+        len(letter_runs) >= 2
+        and max(map(len, letter_runs)) <= 2
+        and len(digit_runs) >= 2
+        and sum(map(len, digit_runs)) >= 3
+    )

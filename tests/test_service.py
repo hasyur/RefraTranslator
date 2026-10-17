@@ -51,11 +51,11 @@ async def test_late_old_revision_is_discarded() -> None:
     await _wait_for_calls(transport, 2)
 
     transport.calls[1][1].set_result(
-        f'<target><sn id="{new.wire_id}">新的</sn></target>'
+        '<target><sn id="1">新的</sn></target>'
     )
     new_outcome = await new_task
     transport.calls[0][1].set_result(
-        f'<target><sn id="{old.wire_id}">旧的</sn></target>'
+        '<target><sn id="1">旧的</sn></target>'
     )
     old_outcome = await old_task
 

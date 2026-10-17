@@ -10,7 +10,7 @@ from typing import Iterable, Sequence
 from game_screen_translator.domain import ContextPair, GlossaryEntry, TranslationBatch
 
 
-PROMPT_VERSION = "hy-mt1.5-batch-v4-progressive-correction"
+PROMPT_VERSION = "hy-mt1.5-batch-v5-strict-routing"
 _CODE_FENCE_RE = re.compile(r"^\s*```(?:xml)?\s*(.*?)\s*```\s*$", re.DOTALL | re.IGNORECASE)
 _TARGET_RE = re.compile(r"<target(?:\s[^>]*)?>.*?</target\s*>", re.DOTALL | re.IGNORECASE)
 _SN_RE = re.compile(r"<sn\b[^>]*>.*?</sn\s*>", re.DOTALL | re.IGNORECASE)
@@ -139,8 +139,8 @@ class HyMtResponseParser:
             root = ElementTree.fromstring(xml_text)
         except ElementTree.ParseError as exc:
             # A malformed <target> wrapper should not discard otherwise complete
-            # <sn> entries. Re-wrap only complete fragments, then validate their
-            # exact count before accepting them positionally.
+            # <sn> entries. Re-wrap complete fragments; they still pass the same
+            # strict ID-set validation as a well-formed target below.
             fragments = _SN_RE.findall(xml_text)
             if not fragments:
                 raise TranslationProtocolError(f"模型返回了无效 XML：{exc}") from exc
@@ -175,21 +175,16 @@ class HyMtResponseParser:
 
         request_ids = tuple(str(index) for index in range(1, len(expected) + 1))
         response_ids = tuple(response_id for response_id, _ in entries)
-        if len(set(response_ids)) == len(response_ids) and set(response_ids) == set(
+        if len(set(response_ids)) != len(response_ids) or set(response_ids) != set(
             request_ids
         ):
-            translated_by_request_id = dict(entries)
-            return {
-                wire_id: translated_by_request_id[request_id]
-                for wire_id, request_id in zip(expected, request_ids, strict=True)
-            }
-
-        # IDs are redundant routing hints. If the model corrupts them but still
-        # returns the exact number of non-empty entries, preserve the prompt's
-        # explicit ordering contract instead of issuing another LLM request.
+            raise TranslationProtocolError(
+                "返回的 <sn> id 缺失、重复或与请求编号不一致"
+            )
+        translated_by_request_id = dict(entries)
         return {
-            wire_id: translated
-            for wire_id, (_, translated) in zip(expected, entries, strict=True)
+            wire_id: translated_by_request_id[request_id]
+            for wire_id, request_id in zip(expected, request_ids, strict=True)
         }
 
     @staticmethod

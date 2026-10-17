@@ -3609,15 +3609,15 @@ def test_protocol_failure_splits_batch_and_recovers_every_visible_text(
 
     controller._collect_translations()
 
-    assert len(controller._translation_retries) == 2
-    assert [len(item.batch.items) for item in controller._translation_retries] == [1, 1]
+    # A deterministic protocol split is eligible immediately. The dispatcher
+    # still enforces max_concurrency when it starts the child requests.
+    assert controller._translation_retries == []
+    assert len(controller._translation_futures) == 2
     assert control.status == "翻译格式异常，正在自动恢复"
     assert control.detail == "缺少 id"
     captured = capsys.readouterr()
     assert "翻译协议偏差，正在自动恢复：缺少 id" in captured.err
     assert "翻译错误：" not in captured.err
-    clock[0] = 100.36
-    controller._submit_ready_translation_retries()
     for future in tuple(controller._translation_futures):
         future.result(timeout=2)
     controller._collect_translations()
@@ -3666,8 +3666,10 @@ def test_split_retries_share_the_configured_concurrency_limit(monkeypatch) -> No
     next(iter(controller._translation_futures)).exception(timeout=2)
     controller._collect_translations()
 
-    assert len(controller._translation_retries) == 2
-    clock[0] = 300.36
+    assert len(controller._translation_retries) == 1
+    assert len(controller._translation_futures) == 1
+    assert controller._translation_retries[0].ready_at == 300.0
+    clock[0] = 300.0
     controller._submit_ready_translation_retries()
     assert len(controller._translation_futures) == 1
     assert len(controller._translation_retries) == 1

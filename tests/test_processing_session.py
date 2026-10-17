@@ -379,3 +379,55 @@ def test_frozen_request_refills_shared_batch_queue_until_all_items_are_mapped(mo
         assert ocr.calls == count
     finally:
         session.close()
+
+
+@pytest.mark.parametrize("mode", ["live", "hover"])
+def test_footnote_tail_and_table_use_one_valid_batch_with_id_mapping(monkeypatch, mode):
+    app = QApplication.instance() or QApplication([])
+    countries = {"アンゴラ": "安哥拉", "アメリカ合衆国": "美国", "ベトナム": "越南"}
+    calls = []
+
+    class ProseAndTableOcr:
+        def recognize_frame(self, frame):
+            return (
+                observation("この国の主な輸入先は、英国、フランス、日", 4, 10, 390, 32),
+                observation("本である[66]。", 1, 35, 125, 67),
+                *(observation(text, 450, 12+i*35, 560, 35+i*35)
+                  for i, text in enumerate(countries)),
+                OcrText("–, 7K22RR", .65, ((516, 1), (596, 1), (596, 11), (516, 11))),
+            )
+
+    async def complete(transport, prompt):
+        source = ET.fromstring(prompt[prompt.index("<source>"):])
+        calls.append([element.text for element in source])
+        assert len(source) == 4
+        result = []
+        for element in reversed(source):
+            translated = countries.get(element.text, "该国的主要进口来源是英国、法国和日本[66]。")
+            result.append(f'<sn id="{element.attrib["id"]}">{translated}</sn>')
+        return "<target>" + "".join(result) + "</target>"
+
+    monkeypatch.setattr(OpenAICompatibleTransport, "complete", complete)
+    capture, ports = Capture(), Ports()
+    if mode == "live":
+        controller = LiveController(configuration(), capture=capture, ocr=ProseAndTableOcr(),
+                                    overlay=ports, control=ports, app=app)
+        session, tick = controller.processing_session, controller._tick
+    else:
+        session = create_processing_session(configuration(), app=app, ocr=ProseAndTableOcr(), profile=None,
+            capture_output_size=capture.output_size, capture_region=capture.region, capture_backend="test")
+        tick = None
+        session.submit_frame(capture.frame, 1)
+    try:
+        snapshot = wait_for(app, lambda: (s if (s := session.snapshot()).terminal and s.items else None), tick=tick)
+        assert len(snapshot.items) == 4 and len(calls) == 1
+        assert snapshot.statistics.retries == 0
+        mapped = {item.source.text: item.translated_text for item in snapshot.items}
+        for text, translated in countries.items():
+            assert mapped[text] == translated
+        bodies = [item for item in snapshot.items if item.source.text.startswith("この国")]
+        assert len(bodies) == 1
+        assert "日本である[66]。" in bodies[0].source.text.replace("\n", "")
+        assert "日本[66]" in bodies[0].translated_text
+    finally:
+        session.close()

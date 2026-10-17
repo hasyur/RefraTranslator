@@ -22,7 +22,7 @@ from game_screen_translator.profiles import (
 )
 from game_screen_translator.translation.cache import CacheEnvironment
 from game_screen_translator.translation.cached import CachedTranslationService
-from game_screen_translator.translation.hy_mt import HyMtPromptBuilder
+from game_screen_translator.translation.hy_mt import PROMPT_VERSION, HyMtPromptBuilder
 from game_screen_translator.translation.service import TranslationService
 
 
@@ -159,6 +159,56 @@ async def test_changed_profile_prompt_does_not_reuse_old_automatic_cache(
 
 
 @pytest.mark.asyncio
+async def test_strict_routing_prompt_version_skips_v4_cache_but_keeps_manual_correction(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    profile = create_game_profile(config_path, _config(), "game")
+    old_source = "待って。"
+    manual_source = "急げ。"
+    old_environment = CacheEnvironment(
+        profile_id=profile.profile_id,
+        source_language="japan",
+        target_language="简体中文",
+        model="hy-mt1.5-7b",
+        prompt_version="hy-mt1.5-batch-v4-progressive-correction",
+        glossary_revision=profile.glossary_revision,
+    )
+    profile.cache.store_automatic(
+        old_source,
+        "旧版自动缓存",
+        old_environment,
+        (),
+    )
+    profile.cache.set_manual_correction(
+        manual_source,
+        "人工固定译文",
+        source_language="japan",
+        target_language="简体中文",
+    )
+    transport = RecordingTransport()
+    service = _service(transport, profile)
+    batch = TranslationBatch(
+        (
+            SourceText("z", "old-cache", 1, old_source),
+            SourceText("z", "manual", 1, manual_source),
+        )
+    )
+
+    outcome = await service.translate(batch)
+
+    assert PROMPT_VERSION == "hy-mt1.5-batch-v5-strict-routing"
+    assert [item.translated_text for item in outcome.outcome.results] == [
+        "模型译文",
+        "人工固定译文",
+    ]
+    assert outcome.origins == ("model", "manual")
+    assert len(transport.prompts) == 1
+    assert old_source in transport.prompts[0]
+    assert manual_source not in transport.prompts[0]
+
+
+@pytest.mark.asyncio
 async def test_manual_correction_bypasses_model_and_context_version(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     profile = create_game_profile(config_path, _config(), "game")
@@ -230,7 +280,7 @@ async def test_concurrent_identical_cache_keys_share_one_model_call(
 
     assert len(transport.calls) == 1
     transport.calls[0][1].set_result(
-        f'<target><sn id="{first_source.wire_id}">等一下。</sn></target>'
+        '<target><sn id="1">等一下。</sn></target>'
     )
     first, second = await asyncio.gather(first_task, second_task)
 
@@ -344,7 +394,7 @@ async def test_inflight_result_survives_a_stale_owner_for_current_waiter(
 
     assert len(transport.calls) == 1
     transport.calls[0][1].set_result(
-        f'<target><sn id="{old.wire_id}">等一下。</sn></target>'
+        '<target><sn id="1">等一下。</sn></target>'
     )
     old_outcome, current_outcome = await asyncio.gather(old_task, current_task)
 

@@ -164,13 +164,12 @@ def test_parser_accepts_plain_translation_for_single_item_only() -> None:
         HyMtResponseParser().parse("甲\n乙", ("first", "second"))
 
 
-def test_parser_accepts_single_sn_without_id() -> None:
+def test_parser_rejects_single_sn_without_id() -> None:
     batch = TranslationBatch((SourceText("dialogue", "a", 1, "待って。"),))
     wire_id = batch.items[0].wire_id
 
-    assert HyMtResponseParser().parse("<sn>等等。</sn>", (wire_id,)) == {
-        wire_id: "等等。"
-    }
+    with pytest.raises(TranslationProtocolError, match="id"):
+        HyMtResponseParser().parse("<sn>等等。</sn>", (wire_id,))
 
 
 @pytest.mark.parametrize(
@@ -181,14 +180,12 @@ def test_parser_accepts_single_sn_without_id() -> None:
         '<target><sn id="screen-text">甲</sn><sn id="other-text">乙</sn></target>',
     ],
 )
-def test_parser_falls_back_to_order_when_ids_are_unusable(response: str) -> None:
+def test_parser_rejects_unusable_ids_even_when_entry_count_matches(response: str) -> None:
     batch = _batch()
     first, second = (item.wire_id for item in batch.items)
 
-    assert HyMtResponseParser().parse(response, (first, second)) == {
-        first: "甲",
-        second: "乙",
-    }
+    with pytest.raises(TranslationProtocolError, match="id"):
+        HyMtResponseParser().parse(response, (first, second))
 
 
 @pytest.mark.parametrize(

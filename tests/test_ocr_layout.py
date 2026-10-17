@@ -227,6 +227,100 @@ def test_merges_dense_multiline_prose_before_the_final_punctuation() -> None:
     assert ambiguities == []
 
 
+def test_merges_final_short_japanese_prose_line_without_merging_table_rows() -> None:
+    # Captured geometry from the fixed crop: the final paragraph line contains
+    # the sentence ending and footnote, but OCR gives it a taller box than the
+    # preceding 22 px lines. Table entries occupy a separate right-hand column.
+    raw_observations = (
+        _ocr(
+            "長期の保管に適していないため、自国における生産消費が大部分であり、貿易量は、世",
+            (5, 8, 784, 30),
+        ),
+        _ocr("–, 1J50JJ", (1016, 1, 1105, 11), 0.6508),
+        _ocr("1.9%0", (1132, 0, 1185, 13), 0.9049),
+        _ocr("アンゴラ", (842, 25, 930, 53)),
+        _ocr("1,680,146", (1013, 28, 1108, 52)),
+        _ocr("1.8%", (1130, 25, 1186, 51)),
+        _ocr(
+            "界総計で年間30万トン程度・総生産に対して約0.3%程度と極めて少ない[65]。主要な輸",
+            (4, 37, 784, 63),
+        ),
+        _ocr(
+            "出国は、アメリカ合衆国、ベトナム、ラオス、エジプトなどで、特に米国は総輸出量の",
+            (6, 73, 783, 95),
+        ),
+        _ocr("アメリカ合衆国", (843, 70, 990, 93)),
+        _ocr("1,450,250", (1012, 69, 1109, 96)),
+        _ocr("1.6%", (1131, 69, 1186, 95)),
+        _ocr(
+            "2/3程度を占めている。ー方主要な輸入国は、英国、オランダ、カナダ、フランス、日",
+            (4, 106, 775, 128),
+        ),
+        _ocr("ベトナム", (843, 108, 931, 137)),
+        _ocr("1,402,350", (1012, 109, 1109, 138)),
+        _ocr("1.5%", (1130, 109, 1186, 136)),
+        _ocr("本である[66]。", (1, 131, 125, 163)),
+        _ocr("世界計", (837, 150, 904, 178)),
+        _ocr("91,820,929", (1001, 151, 1108, 178)),
+    )
+
+    selected = OcrTextFilter("japan").select_layout_candidates(
+        raw_observations,
+        merge_enabled=True,
+    )
+    groups = build_translation_groups(
+        tuple(
+            _line(f"line-{index}", item.text, item.bounds)
+            for index, item in enumerate(selected.accepted)
+        ),
+        source_language="japan",
+    )
+
+    paragraphs = [group for group in groups if "長期の保管" in group.text]
+    assert len(paragraphs) == 1
+    assert paragraphs[0].text.endswith("本である[66]。")
+    assert paragraphs[0].member_ids == tuple(
+        f"line-{index}"
+        for index, item in enumerate(selected.accepted)
+        if item.text in {
+            "長期の保管に適していないため、自国における生産消費が大部分であり、貿易量は、世",
+            "界総計で年間30万トン程度・総生産に対して約0.3%程度と極めて少ない[65]。主要な輸",
+            "出国は、アメリカ合衆国、ベトナム、ラオス、エジプトなどで、特に米国は総輸出量の",
+            "2/3程度を占めている。ー方主要な輸入国は、英国、オランダ、カナダ、フランス、日",
+            "本である[66]。",
+        }
+    )
+    assert {
+        group.text for group in groups if group.text in {"アンゴラ", "アメリカ合衆国", "ベトナム"}
+    } == {"アンゴラ", "アメリカ合衆国", "ベトナム"}
+
+
+def test_merges_scaled_short_footnote_tail_by_relative_geometry() -> None:
+    upper_text = "2/3程度を占めている。ー方主要な輸入国は、英国、オランダ、カナダ、フランス、日"
+    lower_text = "本である[67]。"
+
+    for scale in (1, 2):
+        groups = build_translation_groups(
+            (
+                _line(
+                    "upper",
+                    upper_text,
+                    tuple(value * scale for value in (4, 106, 775, 128)),
+                ),
+                _line(
+                    "tail",
+                    lower_text,
+                    tuple(value * scale for value in (1, 131, 125, 163)),
+                ),
+            ),
+            source_language="japan",
+        )
+
+        assert len(groups) == 1
+        assert groups[0].member_ids == ("upper", "tail")
+        assert groups[0].text == f"{upper_text}\n{lower_text}"
+
+
 def test_reports_partial_chain_and_menu_sentence_conflict_as_one_block() -> None:
     ambiguities = []
     groups = build_translation_groups(

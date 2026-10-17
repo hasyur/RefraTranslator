@@ -3158,7 +3158,7 @@ class LiveController:
                     source_bounds=rebound_bounds[item_slice],
                     attempt=1,
                     quality_retry_count=submission.quality_retry_count,
-                    delay_seconds=_TRANSLATION_RETRY_BASE_SECONDS,
+                    delay_seconds=0.0,
                 )
             return True
 

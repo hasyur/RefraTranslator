@@ -42,6 +42,7 @@ _HORIZONTAL_MERGE_MIN_SCORE = 0.68
 _HORIZONTAL_MERGE_MIN_MARGIN = 0.06
 _COMPACT_LABEL_MAX_VISUAL_SPAN = 12.0
 _DENSE_PROSE_MIN_VISUAL_SPAN = 10.0
+_SHORT_COMPLETED_TAIL_MIN_HEIGHT_RATIO = 0.60
 _MENU_SHORT_MAX_VISUAL_SPAN = 12.0
 _MENU_REGULAR_MAX_VISUAL_SPAN = 18.0
 
@@ -600,7 +601,7 @@ def _horizontal_pair_evaluation(
     lower_height = _height(lower_bounds)
     line_height = max(upper_height, lower_height)
     height_ratio = min(upper_height, lower_height) / line_height
-    if height_ratio < 0.72:
+    if height_ratio < _SHORT_COMPLETED_TAIL_MIN_HEIGHT_RATIO:
         return None
     gap = _vertical_gap(upper_bounds, lower_bounds)
     if gap > line_height * 0.85:
@@ -615,6 +616,14 @@ def _horizontal_pair_evaluation(
 
     left_distance = abs(upper_bounds[0] - lower_bounds[0])
     center_distance = abs(_center_x(upper_bounds) - _center_x(lower_bounds))
+    if height_ratio < 0.72 and not _is_short_completed_tail(
+        upper.text,
+        lower.text,
+        upper_bounds,
+        lower_bounds,
+        line_height=line_height,
+    ):
+        return None
     left_quality = max(0.0, 1.0 - left_distance / max(1.0, line_height * 1.25))
     center_quality = max(0.0, 1.0 - center_distance / max(1.0, line_height * 1.25))
     alignment_quality = max(left_quality, center_quality)
@@ -708,6 +717,25 @@ def _looks_like_compact_label_pair(
         and height_ratio >= 0.80
         and gap <= line_height * 0.55
         and alignment_quality >= 0.65
+    )
+
+
+def _is_short_completed_tail(
+    upper_text: str,
+    lower_text: str,
+    upper_bounds: Bounds,
+    lower_bounds: Bounds,
+    *,
+    line_height: int,
+) -> bool:
+    """Allow a short, complete final prose row with slightly taller OCR bounds."""
+
+    return (
+        _has_sentence_ending(lower_text)
+        and _width(upper_bounds) / max(1, line_height) >= _DENSE_PROSE_MIN_VISUAL_SPAN
+        and _width(lower_bounds) <= _width(upper_bounds) * 0.45
+        and abs(upper_bounds[0] - lower_bounds[0]) <= line_height * 0.5
+        and not _has_hard_sentence_ending(upper_text)
     )
 
 
@@ -815,7 +843,7 @@ def _horizontal_geometry_edge(
         return False
     line_height = max(_height(upper_bounds), _height(lower_bounds))
     height_ratio = min(_height(upper_bounds), _height(lower_bounds)) / line_height
-    if height_ratio < 0.72:
+    if height_ratio < _SHORT_COMPLETED_TAIL_MIN_HEIGHT_RATIO:
         return False
     if _vertical_gap(upper_bounds, lower_bounds) > line_height * 0.85:
         return False
@@ -823,6 +851,14 @@ def _horizontal_geometry_edge(
         return False
     left_distance = abs(upper_bounds[0] - lower_bounds[0])
     center_distance = abs(_center_x(upper_bounds) - _center_x(lower_bounds))
+    if height_ratio < 0.72 and not _is_short_completed_tail(
+        upper.text,
+        lower.text,
+        upper_bounds,
+        lower_bounds,
+        line_height=line_height,
+    ):
+        return False
     left_quality = max(0.0, 1.0 - left_distance / max(1.0, line_height * 1.25))
     center_quality = max(
         0.0,
