@@ -33,6 +33,12 @@ from game_screen_translator.gui.theme import (
 )
 from game_screen_translator.live.change_detector import FrameChangeDetector
 from game_screen_translator.live.latency import LiveLatencyStats
+from game_screen_translator.live.processing_session import (
+    LiveProcessingSession,
+    ProcessingItemSnapshot,
+    ProcessingSnapshot,
+    ProcessingStatistics,
+)
 from game_screen_translator.live.snapshot import (
     CacheHit,
     MAX_SNAPSHOT_ENTRIES,
@@ -976,6 +982,14 @@ class LiveController:
         self._layout_arbitration_change_count = 0
         self._layout_arbitration_fallback_count = 0
         self._layout_arbitration_stale_count = 0
+        self._snapshot_mode = False
+        self._snapshot_running = False
+        self._snapshot_request_id: str | int | None = None
+        self._snapshot_frame: np.ndarray | None = None
+        self._snapshot_is_current: Callable[[], bool] | None = None
+        self._snapshot_error: str | None = None
+        self._snapshot_stale = False
+        self._snapshot_confirmation_count = 0
         self._timer = QTimer()
         self._timer.setInterval(max(10, round(1000 / config.live.change_poll_fps)))
         self._timer.timeout.connect(self._tick)
@@ -991,6 +1005,7 @@ class LiveController:
         if callable(set_coverage_count):
             set_coverage_count(0)
         self._control.set_latency(self._latency_stats.render_hud())
+        self.processing_session = LiveProcessingSession(self)
 
     def start(self) -> None:
         region = self._capture.region
@@ -1319,10 +1334,258 @@ class LiveController:
     def _collect_completed_work(self) -> None:
         if self._shutting_down:
             return
+        if self._snapshot_mode and self._snapshot_running and self._snapshot_is_current is not None:
+            try:
+                is_current = self._snapshot_is_current()
+            except Exception:
+                is_current = False
+            if not is_current:
+                self._invalidate_snapshot()
         self._observe_capture_geometry()
         self._collect_ocr()
         self._collect_layout_arbitrations()
         self._collect_translations()
+        self._advance_snapshot()
+
+    def _submit_snapshot_frame(
+        self,
+        frame: np.ndarray,
+        *,
+        request_id: str | int,
+        is_current: Callable[[], bool] | None,
+    ) -> None:
+        if self._shutting_down or self._finalizing:
+            raise RuntimeError("LiveController 已在关闭")
+        if self._snapshot_running:
+            raise RuntimeError("当前冻结帧处理尚未结束")
+        if frame is None or getattr(frame, "ndim", 0) < 2:
+            raise ValueError("冻结帧必须是二维或三维图像")
+        self._snapshot_mode = True
+        self._snapshot_running = True
+        self._snapshot_request_id = request_id
+        self._snapshot_frame = frame
+        self._snapshot_is_current = is_current
+        self._snapshot_error = None
+        self._snapshot_stale = False
+        self._latest_frame = frame
+        self._snapshot_confirmation_count = 0
+        self._submit_ocr(frame, triggered_at=time.monotonic(), scan_label="停留触发")
+        self._completion_timer.start()
+
+    def _advance_snapshot(self) -> None:
+        if (
+            not self._snapshot_mode
+            or not self._snapshot_running
+            or self._finalizing
+            or self._shutting_down
+        ):
+            return
+        if self._snapshot_is_current is not None:
+            try:
+                current = self._snapshot_is_current()
+            except Exception:
+                current = False
+            if not current:
+                self._invalidate_snapshot()
+
+        if self._snapshot_stale:
+            if not self._snapshot_has_pending_work():
+                self._snapshot_running = False
+                self._completion_timer.stop()
+            return
+
+        if self._snapshot_error is not None:
+            self._snapshot_running = False
+            self._completion_timer.stop()
+            return
+
+        # Live `_tick` retries this admission step on every poll. Translation
+        # admission can be bounded by max_concurrency/max_batch_size, so a
+        # frozen-frame session must drain that same queue before it can finish.
+        self._queue_untranslated_visible_sources()
+        self._dispatch_translation_work()
+        if self._snapshot_has_pending_work():
+            return
+
+        tracks = self._tracker.visible_tracks
+        needs_confirmation = (
+            self._tracker.has_pending_revisions
+            or self._layout_stabilizer.has_pending
+            or any(
+                track.missing_since is None and not track.stable_emitted
+                for track in tracks
+            )
+        )
+        arbitration_in_flight = bool(
+            self._pending_layout_arbitrations
+            or self._layout_arbitration_futures
+            or self._layout_arbitration_blocked_member_ids
+        )
+        if needs_confirmation and not arbitration_in_flight:
+            frame = self._snapshot_frame
+            if frame is not None and time.monotonic() >= self._next_ocr_allowed:
+                self._snapshot_confirmation_count += 1
+                self._submit_ocr(
+                    frame,
+                    triggered_at=time.monotonic(),
+                    change_started_at=time.monotonic(),
+                    scan_label="冻结帧确认",
+                )
+                return
+            return
+
+        self._snapshot_running = False
+        self._completion_timer.stop()
+
+    def _invalidate_snapshot(self) -> None:
+        if self._snapshot_stale:
+            return
+        self._snapshot_stale = True
+        self._stale_result_count += 1
+        self._session_epoch += 1
+        self._tracker.clear()
+        self._ocr_line_tracker.clear()
+        self._layout_stabilizer.reset()
+        self._revisions = RevisionRegistry()
+        self._context.clear()
+        self._pending_translations.clear()
+        self._translation_retries.clear()
+        self._completed_translations.clear()
+        self._early_context.clear()
+        self._pending_layout_arbitrations.clear()
+        self._active_layout_arbitration_keys.clear()
+        self._layout_arbitration_blocked_member_ids.clear()
+        self._translation_exhausted_keys.clear()
+        self._pending_ocr_frame = None
+        self._pending_ocr_triggered_at = None
+        self._pending_ocr_change_started_at = None
+
+    def _snapshot_has_pending_work(self) -> bool:
+        return bool(
+            self._ocr_future is not None
+            or self._pending_ocr_frame is not None
+            or self._translation_futures
+            or self._pending_translations
+            or self._translation_retries
+            or self._completed_translations
+            or self._layout_arbitration_futures
+            or self._pending_layout_arbitrations
+        )
+
+    def _processing_snapshot(self) -> ProcessingSnapshot:
+        items: list[ProcessingItemSnapshot] = []
+        for track in self._tracker.visible_tracks:
+            source = track.source(self._tracker.zone_id)
+            key = (source.track_id, source.revision)
+            translation = track.display_translation
+            if track.missing_since is not None:
+                state = "stale"
+            elif translation:
+                state = "translated"
+            elif key in self._translation_exhausted_keys:
+                state = "failed"
+            elif track.translation_suppressed or not track.stable_emitted:
+                state = "pending"
+            elif self._track_waits_for_layout_arbitration(track):
+                state = "pending"
+            else:
+                state = "pending"
+            items.append(
+                ProcessingItemSnapshot(
+                    source=source,
+                    translated_text=translation,
+                    bounds=track.bounds,
+                    state=state,
+                )
+            )
+        items.sort(key=lambda item: (item.bounds[1], item.bounds[0]))
+        pending = self._snapshot_has_pending_work() or any(
+            item.state == "pending" for item in items
+        ) or self._tracker.has_pending_revisions or self._layout_stabilizer.has_pending
+        terminal = not pending and not self._snapshot_running
+        return ProcessingSnapshot(
+            request_id=self._snapshot_request_id,
+            items=tuple(items),
+            pending=pending,
+            terminal=terminal,
+            error=self._snapshot_error,
+            stale=self._snapshot_stale,
+            statistics=ProcessingStatistics(
+                ocr_scans=self._ocr_scan_count,
+                model_results=self._model_result_count,
+                cache_hits=self._cache_hit_count,
+                retries=self._translation_retry_count,
+                failures=self._translation_failure_count,
+                stale_results=self._stale_result_count,
+            ),
+        )
+
+    def _reset_processing_attempt(self) -> None:
+        if self._shutting_down or self._finalizing:
+            raise RuntimeError("关闭中的 LiveController 不能重置")
+        if self._snapshot_running:
+            raise RuntimeError("冻结帧处理尚未结束，不能重置本次尝试")
+        self._collect_completed_work()
+        if (
+            self._ocr_future is not None
+            or self._translation_futures
+            or self._layout_arbitration_futures
+        ):
+            raise RuntimeError("处理工作仍在运行，不能重置本次尝试")
+
+        self._session_epoch += 1
+        self._tracker = StableTextTracker(
+            "live-zone-1",
+            stable_observations=self._config.live.stable_observations,
+            stable_seconds=self._config.live.stable_ms / 1000,
+            clear_after_seconds=self._config.live.clear_after_ms / 1000,
+        )
+        self._ocr_line_tracker = StableTextTracker(
+            "live-ocr-lines",
+            stable_observations=1,
+            stable_seconds=0,
+            clear_after_seconds=self._config.live.clear_after_ms / 1000,
+        )
+        self._layout_stabilizer = TranslationGroupStabilizer(confirmations=2)
+        self._revisions = RevisionRegistry()
+        self._context.clear()
+        self._source_latency_origins.clear()
+        self._pending_translations.clear()
+        self._translation_retries.clear()
+        self._completed_translations.clear()
+        self._early_context.clear()
+        self._pending_layout_arbitrations.clear()
+        self._layout_arbitration_cache.clear()
+        self._active_layout_arbitration_keys.clear()
+        self._layout_arbitration_blocked_member_ids.clear()
+        self._translation_exhausted_keys.clear()
+        self._next_translation_order_group = 0
+        self._latest_context_order_group = -1
+        self._last_effective_entries = ()
+        self._last_effective_canvas_size = None
+        self._snapshot_request_id = None
+        self._snapshot_frame = None
+        self._snapshot_is_current = None
+        self._snapshot_error = None
+        self._snapshot_stale = False
+        self._snapshot_running = False
+        self._snapshot_confirmation_count = 0
+        self._ocr_scan_count = 0
+        self._model_result_count = 0
+        self._cache_hit_count = 0
+        self._translation_retry_count = 0
+        self._translation_failure_count = 0
+        self._stale_result_count = 0
+        self._cancelled_stale_count = 0
+        self._layout_arbitration_stale_count = 0
+        self._translated_count = 0
+        self._manual_hit_count = 0
+        self._inflight_reuse_count = 0
+        self._cache_hit_ranking.clear()
+        self._latency_stats = LiveLatencyStats()
+        self._ocr_cost_stats = OcrComputeStats()
+        self._control.set_latency(self._latency_stats.render_hud())
+        self._overlay.set_scene(None, ())
 
     def _tick_dynamic_roi(self, frame: np.ndarray, now: float) -> None:
         scheduler = self._roi_scheduler
@@ -1801,6 +2064,8 @@ class LiveController:
         active_epoch = self._active_ocr_epoch
         roi_job = self._active_roi_job
         scheduler_was_primed = (
+            not self._snapshot_mode
+            and
             self._roi_scheduler is not None and self._roi_scheduler.primed
         )
         roi_plan = self._active_roi_plan
@@ -1851,7 +2116,11 @@ class LiveController:
                     completed_at_s=now,
                 )
                 retry_hint = "动态 ROI 已保留最新变化，等待空闲扫描槽重试"
-            elif self._roi_scheduler is not None and not self._roi_scheduler.primed:
+            elif (
+                not self._snapshot_mode
+                and self._roi_scheduler is not None
+                and not self._roi_scheduler.primed
+            ):
                 self._next_ocr_allowed = max(
                     self._next_ocr_allowed,
                     now + _ROI_INITIAL_RETRY_SECONDS,
@@ -1861,6 +2130,10 @@ class LiveController:
                 retry_hint = "等待画面变化或定时复查后重试"
             self._control.set_status(f"OCR 暂时失败，{retry_hint}", str(exc))
             print(f"OCR 错误：{exc}", file=sys.stderr)
+            if self._snapshot_mode:
+                self._snapshot_error = f"OCR 失败：{exc}"
+                self._snapshot_running = False
+                self._completion_timer.stop()
             if follow_up is not None and not self._finalizing:
                 self._submit_roi_ocr(follow_up)
             elif (
@@ -1870,6 +2143,15 @@ class LiveController:
             ):
                 self._observe_latest_dynamic_roi_frame(now)
             return
+
+        if self._snapshot_mode and self._snapshot_is_current is not None:
+            try:
+                snapshot_is_current = self._snapshot_is_current()
+            except Exception:
+                snapshot_is_current = False
+            if not snapshot_is_current:
+                self._invalidate_snapshot()
+                return
 
         raw_observations = task_result.observations
         raw_count = len(raw_observations)
@@ -1980,7 +2262,7 @@ class LiveController:
             ),
         )
 
-        scheduler = self._roi_scheduler
+        scheduler = None if self._snapshot_mode else self._roi_scheduler
         if scheduler is not None and ocr_latency_origin is not None:
             estimate_recorded_at = time.monotonic()
             if roi_job is not None:
