@@ -38,12 +38,40 @@ ComboBox {
         elide: Text.ElideRight
     }
 
-    indicator: Text {
+    indicator: Item {
         x: root.width - width - 12
         y: (root.height - height) / 2
-        text: "⌄"
-        color: root.theme.dohna ? root.theme.ink : root.theme.accentText
-        font.pixelSize: 18
+        implicitWidth: root.theme.dohna ? comboArrowText.implicitWidth : 16
+        implicitHeight: root.theme.dohna ? comboArrowText.implicitHeight : 16
+
+        Text {
+            id: comboArrowText
+            visible: root.theme.dohna
+            anchors.fill: parent
+            text: "⌄"
+            color: root.theme.ink
+            font.pixelSize: 18
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        Shape {
+            objectName: "prismComboBoxChevron"
+            visible: !root.theme.dohna
+            anchors.centerIn: parent
+            width: 9
+            height: 6
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.theme.accentText
+                strokeWidth: 1.6
+                fillColor: "transparent"
+                startX: 0
+                startY: 0
+                PathLine { x: 4.5; y: 4.5 }
+                PathLine { x: 9; y: 0 }
+            }
+        }
     }
 
     background: Rectangle {

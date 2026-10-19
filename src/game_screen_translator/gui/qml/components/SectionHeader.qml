@@ -22,9 +22,17 @@ RowLayout {
     }
 
     Rectangle {
+        visible: root.theme.dohna
         Layout.fillWidth: true
         Layout.preferredHeight: 1
         color: root.theme.line
+    }
+
+    PrismFoldRule {
+        visible: !root.theme.dohna
+        theme: root.theme
+        Layout.fillWidth: true
+        Layout.preferredHeight: implicitHeight
     }
 
     Text {

@@ -7,39 +7,42 @@ QtObject {
     property bool dohna: false
     property bool reducedMotion: false
 
-    // Prism keeps its original palette. Dohna is a fixed-light print palette;
-    // the controller still remembers the user's Prism light/dark preference.
-    readonly property color paper: dohna ? "#F7F3E8" : (dark ? "#07090b" : "#cbd4d7")
-    readonly property color white: dohna ? "#FFFDF7" : (dark ? "#0b0f13" : "#d7dde0")
-    readonly property color ink: dohna ? "#17151E" : (dark ? "#07090b" : "#cbd4d7")
-    readonly property color inkRaised: dohna ? "#FFFDF7" : (dark ? "#0b0f13" : "#d7dde0")
-    readonly property color panel: dohna ? "#FFFDF7" : (dark ? "#0e1318" : "#becace")
-    readonly property color line: dohna ? "#17151E" : (dark ? "#252d34" : "#9eacb3")
-    readonly property color lineStrong: dohna ? "#17151E" : (dark ? "#46545f" : "#687c86")
-    readonly property color text: dohna ? "#17151E" : (dark ? "#edf2f5" : "#111a1f")
-    readonly property color textSoft: dohna ? "#4F4653" : (dark ? "#a4afb8" : "#384a53")
-    readonly property color textDim: dohna ? "#766D77" : (dark ? "#66727c" : "#60727b")
-    readonly property color accent: dohna ? "#FF4384" : (dark ? "#62e1ff" : "#00758f")
-    readonly property color spectrum: dohna ? "#00DAD5" : (dark ? "#f27bd7" : "#992477")
+    // Dohna keeps its fixed-light print palette. Prism uses opaque surfaces
+    // and a restrained neutral palette in both theme modes.
+    readonly property color paper: dohna ? "#F7F3E8" : (dark ? "#14191d" : "#f2f3ed")
+    readonly property color white: dohna ? "#FFFDF7" : (dark ? "#1c2429" : "#e5e9e4")
+    readonly property color ink: dohna ? "#17151E" : "#14191d"
+    readonly property color inkRaised: dohna ? "#FFFDF7" : (dark ? "#1c2429" : "#e5e9e4")
+    readonly property color panel: dohna ? "#FFFDF7" : (dark ? "#1c2429" : "#e5e9e4")
+    readonly property color line: dohna ? "#17151E" : (dark ? "#354147" : "#bbc4bf")
+    readonly property color lineStrong: dohna ? "#17151E" : (dark ? "#536168" : "#88948e")
+    readonly property color text: dohna ? "#17151E" : (dark ? "#edf0ec" : "#182126")
+    readonly property color textSoft: dohna ? "#4F4653" : (dark ? "#b2bbb8" : "#46534f")
+    readonly property color textDim: dohna ? "#766D77" : (dark ? "#87938f" : "#65716c")
+    readonly property color accent: dohna ? "#FF4384" : (dark ? "#62cbd0" : "#177780")
+    readonly property color spectrum: dohna ? "#00DAD5" : (dark ? "#62cbd0" : "#177780")
+    readonly property color refractionSpectrum: dohna ? "#00DAD5" : (dark ? "#8ca9a6" : "#718783")
     readonly property color accentText: dohna ? "#B51F59" : accent
     readonly property color spectrumText: dohna ? "#007A78" : spectrum
-    readonly property color violet: dohna ? "#F5F044" : (dark ? "#8f7cff" : "#6655cf")
+    readonly property color violet: dohna ? "#F5F044" : (dark ? "#92a9a7" : "#526b69")
     readonly property color amber: dohna ? "#8D7600" : (dark ? "#ffc857" : "#9b6800")
-    readonly property color electric: dohna ? "#00DAD5" : (dark ? "#4d8dff" : "#2f67c7")
-    readonly property color glass: dohna ? "#FFFDF7" : (dark ? "#99121a22" : "#bfd3dde0")
-    readonly property color glassRaised: dohna ? "#FFFDF7" : (dark ? "#c4182430" : "#dce7ecee")
+    readonly property color electric: dohna ? "#00DAD5" : (dark ? "#62cbd0" : "#177780")
+    readonly property color glass: dohna ? "#FFFDF7" : (dark ? "#1c2429" : "#e5e9e4")
+    readonly property color glassRaised: dohna ? "#FFFDF7" : (dark ? "#1c2429" : "#e5e9e4")
     readonly property color stageShadow: dohna ? "#4017151E" : (dark ? "#6b000000" : "#3d253d47")
     readonly property color danger: dohna ? "#D62855" : (dark ? "#ff7f8f" : "#a62d43")
-    readonly property color backgroundTop: dohna ? paper : ink
-    readonly property color backgroundBottom: dohna ? paper : (dark ? "#0b1118" : "#b8c5ca")
-    readonly property color navigationSurface: dohna ? ink : (dark ? "#d4070a0d" : "#c8d1dade")
+    readonly property color backgroundTop: dohna ? paper : paper
+    readonly property color backgroundBottom: dohna ? paper : paper
+    readonly property color navigationSurface: dohna ? ink : (dark ? "#1c2429" : "#e5e9e4")
     readonly property color navigationText: dohna ? white : text
     readonly property color navigationTextDim: dohna ? "#F5F044" : textDim
-    readonly property color headerSurface: dohna ? paper : (dark ? "#c20b0f13" : "#d8d7dde0")
-    readonly property color inputSurface: dohna ? white : (dark ? "#8f0b1016" : "#b8eef2f3")
-    readonly property color inputTrack: dohna ? paper : (dark ? "#7a182333" : "#b8e3e9eb")
-    readonly property color previewSurface: dohna ? white : (dark ? "#141b24" : "#edf2f4")
+    readonly property color headerSurface: dohna ? paper : paper
+    readonly property color inputSurface: dohna ? white : (dark ? "#252f34" : "#f2f3ed")
+    readonly property color inputTrack: dohna ? paper : (dark ? "#303a3f" : "#d1d8d2")
+    readonly property color previewSurface: dohna ? white : (dark ? "#14191d" : "#f2f3ed")
     readonly property color selectionEdge: dohna ? "#F5F044" : accent
+    readonly property color buttonPrimary: dohna ? white : (dark ? "#e5e9e4" : "#1c2429")
+    readonly property color buttonPrimaryText: dohna ? ink : (dark ? "#14191d" : "#f2f3ed")
 
     readonly property var displayFonts: dohna ? [
         "Arial Black",
@@ -96,14 +99,10 @@ QtObject {
     function displayTitleSize(viewportWidth) {
         return dohna
                 ? Math.max(48, Math.min(68, viewportWidth * 0.052))
-                : Math.max(52, Math.min(80, viewportWidth * 0.0625))
+                : Math.max(40, Math.min(54, viewportWidth * 0.042))
     }
 
-    readonly property real opticalStageOpacity: dohna ? 0 : (dark ? 0.64 : 0.56)
-    readonly property real sweepAccentAlpha: dohna ? 0 : (dark ? 0.48 : 0.34)
-    readonly property real sweepSpectrumAlpha: dohna ? 0 : (dark ? 0.42 : 0.3)
-    readonly property real tertiaryRailOpacity: dohna ? 0 : (dark ? 0.58 : 0.5)
-    readonly property real feedbackLineWidth: 3
+    readonly property real tertiaryRailOpacity: dohna ? 0 : 0.16
 
     readonly property int fast: reducedMotion ? 0 : 100
     readonly property int ui: reducedMotion ? 0 : 150

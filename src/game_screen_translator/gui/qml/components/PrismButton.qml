@@ -11,6 +11,8 @@ Button {
     property string settingKey: ""
     property bool quiet: false
     property bool navigation: false
+    property string navigationNumber: ""
+    property string navigationCode: ""
     property string tone: "neutral"
     property real dohnaImpact: 0
     // NumberStepper embeds its two actions in one shared Dohna surface.  The
@@ -28,7 +30,8 @@ Button {
 
     implicitWidth: Math.max(112, contentItem.implicitWidth + 30)
     implicitHeight: root.theme.dohna && root.navigation
-                    ? Math.ceil(navigationTextMetrics.tightBoundingRect.height / 0.85) : 42
+                    ? Math.ceil(navigationTextMetrics.tightBoundingRect.height / 0.85)
+                    : root.navigation ? 52 : 42
     verticalPadding: root.theme.dohna && root.navigation ? 0 : padding
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
@@ -74,28 +77,86 @@ Button {
         text: buttonLabel.text
     }
 
-    contentItem: Text {
-        id: buttonLabel
-        objectName: "prismButtonLabel"
-        text: root.text
-        color: !root.enabled ? root.theme.textDim
-              : root.tone === "danger" ? root.theme.danger
-              : root.theme.dohna && root.navigation
-                && (root.primary || root.hovered || root.down || root.activeFocus) ? root.theme.ink
-              : root.theme.dohna && root.quiet ? root.theme.navigationText
-              : root.primary ? (root.theme.dohna ? root.theme.ink : root.theme.text)
-              : root.theme.text
-        font.family: root.theme.monoFontFor(text)
-        font.pixelSize: root.theme.dohna && root.navigation ? 24 : 13
-        font.weight: root.theme.dohna && root.navigation ? Font.Bold : Font.DemiBold
-        font.letterSpacing: root.theme.dohna && root.navigation ? 0.4 : 0.9
-        fontSizeMode: Text.FixedSize
-        leftPadding: root.theme.dohna && root.navigation ? 10 : 0
-        rightPadding: leftPadding
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
-        wrapMode: Text.NoWrap
-        elide: Text.ElideRight
+    contentItem: Item {
+        implicitWidth: root.navigation && !root.theme.dohna ? 150 : buttonLabel.implicitWidth
+        implicitHeight: root.navigation && !root.theme.dohna ? 42 : buttonLabel.implicitHeight
+
+        Text {
+            id: buttonLabel
+            objectName: "prismButtonLabel"
+            anchors.fill: parent
+            visible: !root.navigation || root.theme.dohna
+            text: root.text
+            color: !root.enabled ? root.theme.textDim
+                  : root.tone === "danger" ? root.theme.danger
+                  : root.theme.dohna && root.navigation
+                    && (root.primary || root.hovered || root.down || root.activeFocus) ? root.theme.ink
+                  : root.theme.dohna && root.quiet ? root.theme.navigationText
+                  : root.primary ? (root.theme.dohna ? root.theme.ink : root.theme.buttonPrimaryText)
+                  : root.theme.text
+            font.family: root.theme.dohna
+                         ? root.theme.monoFontFor(text)
+                         : root.theme.uiFontFor(text)
+            font.pixelSize: root.theme.dohna && root.navigation ? 24 : 13
+            font.weight: root.theme.dohna && root.navigation ? Font.Bold : Font.DemiBold
+            font.letterSpacing: root.theme.dohna
+                                ? (root.navigation ? 0.4 : 0.9)
+                                : 0.2
+            fontSizeMode: Text.FixedSize
+            leftPadding: root.theme.dohna && root.navigation ? 10 : 0
+            rightPadding: leftPadding
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            wrapMode: Text.NoWrap
+            elide: Text.ElideRight
+        }
+
+        Text {
+            objectName: "navigationNumberLabel"
+            visible: root.navigation && !root.theme.dohna
+            x: 7
+            y: 8
+            width: 24
+            height: 18
+            text: root.navigationNumber
+            color: root.primary ? root.theme.accent : root.theme.textDim
+            font.family: root.theme.monoFontFor(text)
+            font.pixelSize: 12
+            font.weight: Font.DemiBold
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        Text {
+            objectName: "navigationTitleLabel"
+            visible: root.navigation && !root.theme.dohna
+            x: 37
+            y: 3
+            width: Math.max(0, parent.width - x - 5)
+            height: 24
+            text: root.text
+            color: !root.enabled ? root.theme.textDim : root.theme.text
+            font.family: root.theme.displayFontFor(text)
+            font.pixelSize: 15
+            font.weight: root.primary ? Font.Bold : Font.DemiBold
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+        Text {
+            objectName: "navigationCodeLabel"
+            visible: root.navigation && !root.theme.dohna
+            x: 37
+            y: 26
+            width: Math.max(0, parent.width - x - 5)
+            height: 13
+            text: root.navigationCode
+            color: root.theme.textDim
+            font.family: root.theme.displayFontFor(text)
+            font.pixelSize: 12
+            font.letterSpacing: 0.1
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
     }
 
     background: Rectangle {
@@ -105,20 +166,20 @@ Button {
             y: root.theme.dohna ? root.dohnaImpact * 2 : 0
         }
         color: !root.enabled ? "transparent"
-              : root.theme.dohna && root.navigation ? "transparent"
+              : root.navigation ? "transparent"
               : root.theme.dohna ? "transparent"
-              : root.primary ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, root.theme.dark ? 0.22 : 0.14)
+              : root.primary ? root.theme.buttonPrimary
               : root.down ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.12)
               : root.hovered ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.065)
               : root.quiet ? "transparent"
               : root.theme.glassRaised
-        border.color: root.theme.dohna ? "transparent"
+        border.color: root.theme.dohna || root.navigation ? "transparent"
                     : root.activeFocus ? root.theme.accent
                     : root.tone === "danger" ? root.theme.danger
                     : root.primary && root.theme.dohna ? root.theme.selectionEdge
                     : root.primary ? root.theme.accent
                     : root.theme.lineStrong
-        border.width: root.theme.dohna ? 0 : (root.activeFocus ? 2 : root.primary ? 1.5 : 1)
+        border.width: root.theme.dohna || root.navigation ? 0 : (root.activeFocus ? 2 : root.primary ? 1.5 : 1)
         opacity: root.dohnaGroupFrame
                  ? (root.dohnaGroupEnabled ? 1 : 0.55)
                  : root.enabled ? 1 : 0.55
@@ -137,6 +198,26 @@ Button {
                  : root.primary ? root.theme.accent : root.theme.lineStrong
             opacity: root.enabled ? (root.primary || root.hovered || root.activeFocus ? 0.9 : 0.24) : 0.15
             Behavior on opacity { NumberAnimation { duration: root.theme.ui } }
+        }
+
+        Shape {
+            objectName: "prismButtonPrimaryFacet"
+            visible: !root.theme.dohna && root.primary && root.enabled && !root.navigation
+            anchors.right: parent.right
+            anchors.top: parent.top
+            width: 14
+            height: 11
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: "transparent"
+                fillColor: root.theme.accent
+                startX: 5
+                startY: 0
+                PathLine { x: 14; y: 0 }
+                PathLine { x: 14; y: 11 }
+                PathLine { x: 0; y: 11 }
+                PathLine { x: 5; y: 0 }
+            }
         }
 
         Shape {

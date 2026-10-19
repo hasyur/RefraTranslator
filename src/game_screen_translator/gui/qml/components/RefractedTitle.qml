@@ -10,10 +10,6 @@ Item {
     property int transitionSequence: 0
     property bool motionEnabled: false
     readonly property real heavyTitleSize: titleSize * 0.94
-    readonly property real facetWidthRatio: 0.075
-    readonly property real facetAngle: 6
-    readonly property real cyanFacetOpacity: theme.dohna ? 0 : (theme.dark ? 0.43 : 0.31)
-    readonly property real spectrumFacetOpacity: theme.dohna ? 0 : (theme.dark ? 0.27 : 0.19)
     readonly property bool refractionRunning: refractionKick.running
     property real refractionShift: 6
     property real refractionEnergy: 0
@@ -32,7 +28,7 @@ Item {
     }
 
     function playRefraction() {
-        if (!motionEnabled || theme.reducedMotion) {
+        if (!theme.dohna || !motionEnabled || theme.reducedMotion) {
             settleRefraction()
             return
         }
@@ -66,8 +62,8 @@ Item {
         color: root.theme.text
         font.family: root.theme.displayFontFor(text)
         font.pixelSize: root.titleSize
-        font.weight: root.theme.dohna ? Font.Bold : Font.Light
-        font.letterSpacing: root.theme.dohna ? 0 : -root.titleSize * 0.035
+        font.weight: Font.Bold
+        font.letterSpacing: 0
         renderType: Text.CurveRendering
         renderTypeQuality: Text.VeryHighRenderTypeQuality
         transform: Translate {
@@ -90,125 +86,6 @@ Item {
         font.letterSpacing: -root.titleSize * 0.035
         renderType: Text.CurveRendering
         renderTypeQuality: Text.VeryHighRenderTypeQuality
-    }
-
-    Item {
-        id: heavyEffects
-        objectName: "pageTitleHeavyEffects"
-        x: displayTitleHeavy.x
-        y: 0
-        width: displayTitleHeavy.width
-        height: root.height
-        clip: true
-        z: 2
-        visible: !root.theme.dohna
-
-        Item {
-            id: cyanFacet
-            objectName: "pageTitleCyanSlice"
-            readonly property real chromaticOffset: 1.5
-            x: heavyEffects.width * 0.445
-            y: -heavyEffects.height * 0.08
-            width: Math.max(8, heavyEffects.width * root.facetWidthRatio)
-            height: heavyEffects.height * 1.16
-            rotation: root.facetAngle
-            transformOrigin: Item.Center
-            clip: true
-            layer.enabled: true
-            layer.smooth: true
-            layer.samples: 4
-
-            Item {
-                x: -cyanFacet.x
-                y: -cyanFacet.y
-                width: heavyEffects.width
-                height: heavyEffects.height
-                transform: Rotation {
-                    objectName: "pageTitleCyanCounterRotation"
-                    origin.x: cyanFacet.x + cyanFacet.width / 2
-                    origin.y: cyanFacet.y + cyanFacet.height / 2
-                    angle: -cyanFacet.rotation
-                }
-
-                Text {
-                    x: root.refractionShift + cyanFacet.chromaticOffset
-                    y: displayTitleHeavy.y
-                    text: displayTitleHeavy.text
-                    color: root.theme.accent
-                    opacity: root.cyanFacetOpacity
-                    font: displayTitleHeavy.font
-                    renderType: Text.CurveRendering
-                    renderTypeQuality: Text.VeryHighRenderTypeQuality
-                }
-            }
-        }
-
-        Item {
-            id: spectrumFacet
-            objectName: "pageTitleSpectrumSlice"
-            readonly property real chromaticOffset: 3.5
-            x: cyanFacet.x
-            y: cyanFacet.y
-            width: cyanFacet.width
-            height: cyanFacet.height
-            rotation: cyanFacet.rotation
-            transformOrigin: Item.Center
-            clip: true
-            layer.enabled: true
-            layer.smooth: true
-            layer.samples: 4
-
-            Item {
-                x: -spectrumFacet.x
-                y: -spectrumFacet.y
-                width: heavyEffects.width
-                height: heavyEffects.height
-                transform: Rotation {
-                    objectName: "pageTitleSpectrumCounterRotation"
-                    origin.x: spectrumFacet.x + spectrumFacet.width / 2
-                    origin.y: spectrumFacet.y + spectrumFacet.height / 2
-                    angle: -spectrumFacet.rotation
-                }
-
-                Text {
-                    x: root.refractionShift + spectrumFacet.chromaticOffset
-                    y: displayTitleHeavy.y
-                    text: displayTitleHeavy.text
-                    color: root.theme.spectrum
-                    opacity: root.spectrumFacetOpacity
-                    font: displayTitleHeavy.font
-                    renderType: Text.CurveRendering
-                    renderTypeQuality: Text.VeryHighRenderTypeQuality
-                }
-            }
-        }
-
-        Rectangle {
-            id: cyanEdge
-            objectName: "pageTitleCyanEdge"
-            x: heavyEffects.width * 0.49
-            y: -heavyEffects.height * 0.08
-            width: 1.5
-            height: heavyEffects.height * 1.16
-            color: root.theme.accent
-            opacity: 0.72 + root.refractionEnergy * 0.18
-            rotation: root.facetAngle
-            transformOrigin: Item.Center
-            antialiasing: true
-        }
-
-        Rectangle {
-            objectName: "pageTitleSpectrumEdge"
-            x: cyanEdge.x + 4
-            y: cyanEdge.y
-            width: 1.5
-            height: cyanEdge.height
-            color: root.theme.spectrum
-            opacity: 0.58 + root.refractionEnergy * 0.2
-            rotation: root.facetAngle
-            transformOrigin: Item.Center
-            antialiasing: true
-        }
     }
 
     SequentialAnimation {

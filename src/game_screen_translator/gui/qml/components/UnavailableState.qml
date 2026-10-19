@@ -35,6 +35,8 @@ Rectangle {
             font.family: root.theme.monoFontFor(text)
             font.pixelSize: 13
             font.letterSpacing: 1.2
+            Layout.fillWidth: !root.theme.dohna
+            wrapMode: root.theme.dohna ? Text.NoWrap : Text.WordWrap
         }
         Text {
             objectName: "unavailableStateTitle"

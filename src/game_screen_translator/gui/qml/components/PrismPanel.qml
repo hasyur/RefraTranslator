@@ -107,13 +107,23 @@ Item {
         objectName: "prismPanelSurface"
         anchors.fill: parent
         clip: !root.theme.dohna
-        color: root.theme.dohna ? "transparent" : (root.raised ? root.theme.glassRaised : root.theme.glass)
+        color: "transparent"
         border.color: root.theme.lineStrong
-        border.width: root.theme.dohna ? 0 : 1
+        border.width: 0
+
+        Rectangle {
+            objectName: "prismPanelGridRule"
+            visible: !root.theme.dohna && root.raised
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 1
+            color: root.theme.line
+        }
 
         Rectangle {
             objectName: "panelAccentEdge"
-            visible: !root.theme.dohna
+            visible: false
             width: 2
             height: Math.min(parent.height * 0.28, 82)
             anchors.top: parent.top
@@ -124,7 +134,7 @@ Item {
 
         Rectangle {
             objectName: "panelSpectrumEdge"
-            visible: !root.theme.dohna
+            visible: false
             width: Math.min(parent.width * 0.34, 160)
             height: 2
             anchors.left: parent.left
@@ -136,7 +146,7 @@ Item {
 
         Rectangle {
             objectName: "prismPanelTopLight"
-            visible: !root.theme.dohna
+            visible: false
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
@@ -147,7 +157,7 @@ Item {
 
         Shape {
             objectName: "prismPanelCutFacet"
-            visible: !root.theme.dohna
+            visible: false
             anchors.fill: parent
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
@@ -166,7 +176,7 @@ Item {
 
         Rectangle {
             objectName: "prismPanelInsetRule"
-            visible: !root.theme.dohna
+            visible: false
             x: 14
             y: 16
             width: Math.min(parent.width * 0.22, 96)

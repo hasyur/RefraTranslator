@@ -3127,11 +3127,12 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     skin_selector = window.findChild(QObject, "homeSkinSelector")
     theme_selector = window.findChild(QObject, "homeThemeSelector")
     theme = window.findChild(QObject, "prismTheme")
-    stage = window.findChild(QObject, "opticalStage")
+    motion_feedback = window.findChild(QObject, "prismMotionFeedback")
     backdrop = window.findChild(QObject, "dohnaBackdrop")
     assert skin_selector is not None
     assert theme is not None
-    assert stage is not None
+    assert motion_feedback is not None
+    assert window.findChild(QObject, "opticalStage") is None
     assert backdrop is not None
     assert skin_selector.property("currentIndex") == 0
     assert skin_selector.property("currentText") == "Prism"
@@ -3139,7 +3140,7 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     assert theme_selector.property("currentText") == "深色"
     assert theme_selector.property("enabled") is True
     assert theme.property("dohna") is False
-    assert stage.property("visible") is True
+    assert motion_feedback.property("visible") is False
 
     for index in range(7):
         navigation_button = _find_quick_item(window, f"navigationButton{index}")
@@ -3170,7 +3171,7 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     assert theme_selector.property("enabled") is False
     assert theme_selector.property("currentIndex") == 2
     assert theme_selector.property("currentText") == "浅色"
-    assert stage.property("visible") is False
+    assert motion_feedback.property("visible") is False
     assert backdrop.property("visible") is True
     assert window.findChild(QObject, "homeDohnaThemeHint").property("visible") is True
     assert window.findChild(QObject, "pageDisplayTitleLight").property("text") == "翻译控制台"
@@ -3234,7 +3235,8 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     assert theme_selector.property("enabled") is True
     assert theme.property("dohna") is False
     assert theme.property("dark") is True
-    assert stage.property("visible") is True
+    assert motion_feedback.property("visible") is False
+    assert motion_feedback.property("motionEnabled") is False
     for saved_theme, label in (("system", "跟随系统"), ("light", "浅色")):
         controller.setTheme(saved_theme)
         controller.setSkin(SKIN_DOHNA)
@@ -3405,9 +3407,8 @@ def test_real_dohna_uses_local_control_feedback_and_settles_on_switch_or_hide(
     window = host.window
     assert window is not None
     theme = window.findChild(QObject, "prismTheme")
-    stage = window.findChild(QObject, "opticalStage")
+    motion_feedback = window.findChild(QObject, "prismMotionFeedback")
     feedback = window.findChild(QObject, "dohnaFeedbackLayer")
-    sweep = window.findChild(QObject, "pageTransitionSweep")
     page_content = window.findChild(QObject, "pageContentMotion")
     content_translate = window.findChild(QObject, "pageContentTranslate")
     page_header = window.findChild(QObject, "pageHeaderSlice")
@@ -3418,9 +3419,8 @@ def test_real_dohna_uses_local_control_feedback_and_settles_on_switch_or_hide(
     nav_button = _find_quick_item(window, "navigationButton1")
     required_items = {
         "theme": theme,
-        "stage": stage,
+        "motion_feedback": motion_feedback,
         "feedback": feedback,
-        "sweep": sweep,
         "page_content": page_content,
         "content_translate": content_translate,
         "page_header": page_header,
@@ -3450,8 +3450,8 @@ def test_real_dohna_uses_local_control_feedback_and_settles_on_switch_or_hide(
     backdrop = window.findChild(QObject, "dohnaBackdrop")
     assert backdrop is not None
     assert backdrop.findChild(QObject, "dohnaPrintFacet").property("visible") is True
-    assert stage.property("motionEnabled") is False
-    assert sweep.property("visible") is False
+    assert motion_feedback.property("motionEnabled") is False
+    assert window.findChild(QObject, "pageTransitionSweep") is None
     assert panel_body.property("visible") is True
     assert panel_body.property("width") > 0
     assert panel_body.property("height") > 0
@@ -3685,8 +3685,8 @@ def test_real_dohna_uses_local_control_feedback_and_settles_on_switch_or_hide(
     assert float(page_header.property("opacity")) == 1
     controller.setSkin(SKIN_PRISM)
     app.processEvents()
-    assert stage.property("motionEnabled") is True
-    assert sweep.property("visible") is True
+    assert motion_feedback.property("motionEnabled") is True
+    assert window.findChild(QObject, "pageTransitionSweep") is None
     assert feedback.property("visible") is False
     assert window.property("pageTransitioning") is False
     assert window.property("pageContentReady") is True
@@ -4130,7 +4130,7 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
         assert rail.property("clip") is False
         assert all(_find_quick_item(window, f"navigationButton{i}").property("rotation") == 0
                    for i in range(len(pages)))
-        assert all(_find_quick_item(window, f"navigationButton{i}").height() == 42
+        assert all(_find_quick_item(window, f"navigationButton{i}").height() == 52
                    for i in range(len(pages)))
     finally:
         host.shutdown()
@@ -4348,15 +4348,14 @@ def test_capture_fields_use_two_rows_and_keep_geometry_clear(
         surface = _find_quick_item(window, "captureGeometrySurface")
         outline = _find_quick_item(window, "captureDisplayOutline")
         preview = _find_quick_item(window, "captureRegionPreview")
-        stage = _find_quick_item(window, "opticalStage")
-        assert all(item is not None for item in (theme, surface, outline, preview, stage))
+        assert all(item is not None for item in (theme, surface, outline, preview))
         assert surface.property("color") == theme.property("panel")
         assert surface.property("color").alphaF() == 1
         assert QQmlProperty(outline, "border.color").read() == theme.property("line")
         assert QQmlProperty(preview, "border.color").read() == theme.property("accent")
         assert QQmlProperty(preview, "border.width").read() == 2
         assert preview.property("visible") is True
-        assert 0 < float(stage.property("opacity")) < 0.2
+        assert window.findChild(QObject, "opticalStage") is None
 
         controller.useFullScreen()
         app.processEvents()
@@ -4364,7 +4363,7 @@ def test_capture_fields_use_two_rows_and_keep_geometry_clear(
         assert all(stepper.property("enabled") is False for stepper in steppers.values())
         controller.setPage("HOME")
         app.processEvents()
-        assert stage.property("opacity") == theme.property("opticalStageOpacity")
+        assert window.findChild(QObject, "opticalStage") is None
     finally:
         host.shutdown()
 
@@ -4470,6 +4469,8 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
 
     window = host.window
     assert window is not None
+    theme = window.findChild(QObject, "prismTheme")
+    assert theme is not None
     window.update()
     QTest.qWait(20)
     app.processEvents()
@@ -4488,14 +4489,13 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
     assert float(preview_entry.property("maskOpacity")) == configured
     assert controller.settingsDirty is False
 
-    stage = window.findChild(QObject, "opticalStage")
-    overlay_motif = window.findChild(QObject, "overlayStageMotif")
-    overlay_near_plane = window.findChild(QObject, "overlayStageNearPlane")
-    assert stage is not None
-    assert overlay_motif is not None
-    assert overlay_near_plane is not None
-    resting_plane_x = float(overlay_near_plane.property("x"))
-    action_sequence = int(stage.property("actionSequence"))
+    motion_feedback = window.findChild(QObject, "prismMotionFeedback")
+    feedback_layer = window.findChild(QObject, "prismFeedbackLayer")
+    action_rule = window.findChild(QObject, "prismActionFeedbackRule")
+    assert motion_feedback is not None
+    assert feedback_layer is not None
+    assert action_rule is not None
+    action_sequence = int(motion_feedback.property("actionSequence"))
     start_ratio = float(slider.property("visualPosition"))
     start = _slider_scene_point(slider, start_ratio)
     end_ratio = 0.73
@@ -4506,7 +4506,7 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
         Qt.KeyboardModifier.NoModifier,
         start,
     )
-    assert int(stage.property("actionSequence")) == action_sequence
+    assert int(motion_feedback.property("actionSequence")) == action_sequence
 
     draft_samples = []
     for progress in (0.25, 0.5, 0.75, 1.0):
@@ -4518,7 +4518,7 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
         app.processEvents()
         draft_samples.append(controller.overlayOpacity)
         assert float(preview_entry.property("maskOpacity")) == controller.overlayOpacity
-        assert int(stage.property("actionSequence")) == action_sequence
+        assert int(motion_feedback.property("actionSequence")) == action_sequence
 
     assert draft_samples == sorted(draft_samples)
     assert len(set(draft_samples)) == len(draft_samples)
@@ -4529,11 +4529,14 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
         end,
     )
     app.processEvents()
-    assert int(stage.property("actionSequence")) == action_sequence + 1
+    assert int(motion_feedback.property("actionSequence")) == action_sequence + 1
+    assert motion_feedback.property("actionKind") == "projection"
+    assert motion_feedback.property("actionPulseRunning") is True
+    assert feedback_layer.property("visible") is True
     QTest.qWait(160)
     app.processEvents()
-    assert overlay_motif.property("actionLinked") is True
-    assert float(overlay_near_plane.property("x")) > resting_plane_x + 1
+    assert action_rule.property("visible") is True
+    assert float(action_rule.property("width")) > 0
 
     draft = controller.overlayOpacity
     assert draft > configured
@@ -4542,7 +4545,7 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
     assert percentage.property("text") == f"{round(draft * 100)}%"
     assert controller.settingsDirty is True
     assert load_config(config_path).preview.overlay_opacity == configured
-    assert stage.property("actionKind") == "projection"
+    assert motion_feedback.property("actionKind") == "projection"
 
     controller.setOverlayOpacity(0.23)
     app.processEvents()
@@ -4551,7 +4554,7 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
     assert float(slider.property("value")) == 0.23
     assert percentage.property("text") == "23%"
     assert float(preview_entry.property("maskOpacity")) == 0.23
-    assert int(stage.property("actionSequence")) == action_sequence + 1
+    assert int(motion_feedback.property("actionSequence")) == action_sequence + 1
 
     _click_quick_item(window, "saveAllButton")
     assert controller.settingsDirty is False
@@ -4562,14 +4565,11 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
         machine,
         saved_profile,
     ).preview.overlay_opacity == draft
-    QTest.qWait(600)
+    QTest.qWait(int(theme.property("actionMotion")) + 40)
     app.processEvents()
-    assert overlay_motif.property("actionLinked") is False
-    assert math.isclose(
-        float(overlay_near_plane.property("x")),
-        resting_plane_x,
-        abs_tol=0.01,
-    )
+    assert motion_feedback.property("actionPulseRunning") is False
+    assert action_rule.property("visible") is False
+    assert feedback_layer.property("visible") is False
     host.shutdown()
 
 
@@ -5058,7 +5058,7 @@ def test_page_subtitle_stays_clear_of_dividers_across_pages_themes_and_sizes(
     host.shutdown()
 
 
-def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
+def test_real_workbench_uses_responsive_titles_and_settling_page_motion(
     tmp_path: Path,
 ) -> None:
     app = _application()
@@ -5071,6 +5071,7 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setReducedMotion(False)
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
     app.processEvents()
@@ -5080,289 +5081,125 @@ def test_real_workbench_uses_responsive_title_stack_and_layered_page_motion(
     title = window.findChild(QObject, "pageDisplayTitle")
     title_light = window.findChild(QObject, "pageDisplayTitleLight")
     title_heavy = window.findChild(QObject, "pageDisplayTitleHeavy")
-    cyan_slice = window.findChild(QObject, "pageTitleCyanSlice")
-    spectrum_slice = window.findChild(QObject, "pageTitleSpectrumSlice")
-    cyan_edge = window.findChild(QObject, "pageTitleCyanEdge")
-    spectrum_edge = window.findChild(QObject, "pageTitleSpectrumEdge")
-    header_underline = window.findChild(QObject, "pageHeaderUnderline")
+    header_rule = window.findChild(QObject, "prismPageHeaderRule")
+    fold_facet = window.findChild(QObject, "prismFoldRuleFacet")
     page_subtitle = window.findChild(QObject, "pageSubtitle")
-    cyan_counter_rotation = window.findChild(
-        QObject,
-        "pageTitleCyanCounterRotation",
-    )
-    spectrum_counter_rotation = window.findChild(
-        QObject,
-        "pageTitleSpectrumCounterRotation",
-    )
     header_bar = window.findChild(QObject, "pageHeaderBar")
     save_button = window.findChild(QObject, "saveAllButton")
     theme = window.findChild(QObject, "prismTheme")
-    stage = window.findChild(QObject, "opticalStage")
-    assert title is not None
-    assert title_light is not None
-    assert title_heavy is not None
-    assert cyan_slice is not None
-    assert spectrum_slice is not None
-    assert cyan_edge is not None
-    assert spectrum_edge is not None
-    assert header_underline is not None
-    assert page_subtitle is not None
-    assert cyan_counter_rotation is not None
-    assert spectrum_counter_rotation is not None
-    assert header_bar is not None
-    assert save_button is not None
-    assert theme is not None
-    assert stage is not None
+    assert all(
+        item is not None
+        for item in (
+            title, title_light, title_heavy, header_rule, fold_facet,
+            page_subtitle, header_bar, save_button, theme,
+        )
+    )
 
     display_fonts = theme.property("displayFonts")
     if hasattr(display_fonts, "toVariant"):
         display_fonts = display_fonts.toVariant()
     assert list(display_fonts)[:2] == ["Bahnschrift", "Microsoft YaHei UI"]
     assert title_light.property("font").family() == "Microsoft YaHei UI"
-    assert title_light.property("font").pixelSize() == 80
-    assert title_light.property("font").weight() == 300
-    assert title_heavy.property("font").pixelSize() == 75
-    assert title_heavy.property("font").weight() == 700
-    assert title_light.property("font").letterSpacing() < 0
-    assert 0.07 <= float(title.property("facetWidthRatio")) <= 0.08
-    assert 5 <= float(title.property("facetAngle")) <= 7
-    assert cyan_slice.property("clip") is True
-    assert spectrum_slice.property("clip") is True
-    assert spectrum_slice.property("chromaticOffset") > cyan_slice.property(
-        "chromaticOffset"
-    ) > 0
-    assert cyan_slice.property("rotation") == title.property("facetAngle")
-    assert spectrum_slice.property("rotation") == title.property("facetAngle")
-    facet_ratio = cyan_slice.property("width") / title_heavy.property("width")
-    assert 0.07 <= facet_ratio <= 0.08
-    assert cyan_slice.property("height") > title_heavy.property("height")
-    assert spectrum_slice.property("height") == cyan_slice.property("height")
-    assert cyan_edge.property("rotation") == title.property("facetAngle")
-    assert spectrum_edge.property("rotation") == title.property("facetAngle")
-    assert cyan_edge.property("width") >= 1.5
-    assert spectrum_edge.property("width") >= 1.5
-    assert cyan_edge.property("antialiasing") is True
-    assert spectrum_edge.property("antialiasing") is True
-    assert header_underline.property("antialiasing") is True
-    assert cyan_counter_rotation.property("angle") == -title.property("facetAngle")
-    assert spectrum_counter_rotation.property("angle") == -title.property(
-        "facetAngle"
-    )
-    cyan_origin = cyan_counter_rotation.property("origin")
-    spectrum_origin = spectrum_counter_rotation.property("origin")
-    assert abs(
-        cyan_origin.x()
-        - (cyan_slice.property("x") + cyan_slice.property("width") / 2)
-    ) < 1e-6
-    assert abs(
-        cyan_origin.y()
-        - (cyan_slice.property("y") + cyan_slice.property("height") / 2)
-    ) < 1e-6
-    assert abs(
-        spectrum_origin.x()
-        - (spectrum_slice.property("x") + spectrum_slice.property("width") / 2)
-    ) < 1e-6
-    assert abs(
-        spectrum_origin.y()
-        - (spectrum_slice.property("y") + spectrum_slice.property("height") / 2)
-    ) < 1e-6
+    assert title_light.property("font").weight() == 700
+    assert title_light.property("font").letterSpacing() == 0
+    assert title_heavy.property("text") == ""
+    assert window.findChild(QObject, "pageTitleCyanSlice") is None
+    assert window.findChild(QObject, "pageTitleSpectrumSlice") is None
+    assert window.findChild(QObject, "opticalStage") is None
+    assert window.findChild(QObject, "pageTransitionSweep") is None
+    assert header_rule.property("visible") is True
+    assert 35 <= float(fold_facet.property("width")) <= 44
+    assert fold_facet.property("visible") is True
+    assert 40 <= title_light.property("font").pixelSize() <= 54
 
-    title_parts = (
-        ("HOME", "折射", "控制台"),
-        ("CAPTURE", "捕获", "光圈"),
-        ("OCR", "识别", "矩阵"),
-        ("TRANSLATION", "译文", "分光器"),
-        ("OVERLAY", "覆盖层", "投影"),
-        ("CACHE", "缓存", "阵列"),
-        ("SETTINGS", "高级", "设置"),
-    )
-    for page, light_text, heavy_text in title_parts:
+    page_titles = {
+        "HOME": "总览",
+        "CAPTURE": "捕获",
+        "OCR": "文字识别",
+        "TRANSLATION": "翻译",
+        "OVERLAY": "覆盖层",
+        "CACHE": "缓存",
+        "SETTINGS": "设置",
+    }
+    for page, expected_title in page_titles.items():
         controller.setPage(page)
         app.processEvents()
-        assert title_light.property("text") == light_text
-        assert title_heavy.property("text") == heavy_text
+        assert title_light.property("text") == expected_title
+        assert title_heavy.property("text") == ""
+        assert header_rule.property("visible") is True
 
     def assert_subtitle_clearance() -> None:
         subtitle_top = page_subtitle.mapToItem(header_bar, QPointF(0, 0)).y()
         subtitle_bottom = subtitle_top + float(page_subtitle.property("height"))
-        header_height = float(header_bar.property("height"))
-        assert subtitle_bottom <= header_height - 4
-        underline_points = (
-            QPointF(0, 0),
-            QPointF(float(header_underline.property("width")), 0),
-            QPointF(0, float(header_underline.property("height"))),
-            QPointF(
-                float(header_underline.property("width")),
-                float(header_underline.property("height")),
-            ),
-        )
-        underline_bottom = max(
-            header_underline.mapToItem(header_bar, point).y()
-            for point in underline_points
-        )
-        assert subtitle_top >= underline_bottom + 3
-
-    def assert_title_inside_container() -> None:
-        for segment in (title_light, title_heavy):
-            assert segment.property("y") >= 0
-            assert (
-                segment.property("y") + segment.property("height")
-                <= title.property("height")
-            )
-            segment_in_header = segment.mapToItem(header_bar, QPointF(0, 0))
-            assert segment_in_header.y() >= 0
-            assert segment_in_header.y() + segment.property("height") <= header_bar.property(
-                "height"
-            )
-        assert title_heavy.property("x") + title_heavy.property("width") <= title.property(
-            "width"
-        )
-        heavy_right = title_heavy.mapToItem(
+        rule_bottom = header_rule.mapToItem(
             header_bar,
-            QPointF(title_heavy.property("width"), 0),
+            QPointF(0, float(header_rule.property("height"))),
+        ).y()
+        assert subtitle_top >= rule_bottom + 3
+        assert subtitle_bottom <= float(header_bar.property("height")) - 4
+
+    def assert_title_fits() -> None:
+        title_right = title_light.mapToItem(
+            header_bar,
+            QPointF(float(title_light.property("width")), 0),
         ).x()
         save_left = save_button.mapToItem(header_bar, QPointF(0, 0)).x()
-        assert heavy_right + 8 <= save_left
+        assert title_light.property("y") >= 0
+        assert title_light.property("y") + title_light.property("height") <= title.property("height")
+        assert title_right + 8 <= save_left
 
-    assert_title_inside_container()
     window.resize(980, 700)
     controller.setTheme("dark")
     controller.setPage("OVERLAY")
     app.processEvents()
     compact_title_size = title_light.property("font").pixelSize()
-    assert 60 <= compact_title_size < 80
-    assert_title_inside_container()
+    assert 40 <= compact_title_size <= 44
+    assert_title_fits()
     assert_subtitle_clearance()
 
     window.resize(1280, 820)
     controller.setPage("HOME")
     app.processEvents()
-    assert title_light.property("font").pixelSize() == 80
-    assert_title_inside_container()
+    assert 52 <= title_light.property("font").pixelSize() <= 54
+    assert_title_fits()
     assert_subtitle_clearance()
 
-    QTest.qWait(820)
-    refraction_states: list[bool] = []
-    title.refractionRunningChanged.connect(
-        lambda *_args: refraction_states.append(
-            bool(title.property("refractionRunning"))
-        )
-    )
+    QTest.qWait(int(theme.property("pageMotion")) + 30)
     controller.setPage("CAPTURE")
     app.processEvents()
     QTest.qWait(1)
-    app.processEvents()
     content_translate = window.findChild(QObject, "pageContentTranslate")
     page_content = window.findChild(QObject, "pageContentMotion")
     header_translate = window.findChild(QObject, "pageHeaderTranslate")
     page_header = window.findChild(QObject, "pageHeaderSlice")
-    transition_sweep = window.findChild(QObject, "pageTransitionSweep")
     primary_panel = window.findChild(QObject, "capturePrimaryPanel")
     secondary_panel = window.findChild(QObject, "captureSecondaryPanel")
-    tertiary_rail = window.findChild(QObject, "pageTertiaryRail")
     assert content_translate is not None
     assert page_content is not None
     assert header_translate is not None
     assert page_header is not None
-    assert transition_sweep is not None
     assert primary_panel is not None
     assert secondary_panel is not None
-    assert tertiary_rail is not None
     assert window.property("pageTransitioning") is True
-    assert stage.property("pageTransitionRunning") is True
-    assert window.property("pageTransitionSequence") >= 2
-    assert window.property("pageContentReady") is False
-    assert title.property("refractionRunning") is False
-    assert float(title.property("refractionShift")) == 3
+    assert window.property("pageContentReady") is True
     assert abs(float(content_translate.property("x"))) > 0.5
     assert abs(float(header_translate.property("x"))) > 0.5
-    assert primary_panel.property("entryRunning") is False
-    assert secondary_panel.property("entryRunning") is False
-    assert float(primary_panel.property("opacity")) == 1
-    assert stage.property("deviceVisualOpacity") < 1
-
-    QTest.qWait(70)
-    app.processEvents()
-    assert window.property("pageContentReady") is False
-    assert float(page_content.property("opacity")) == 0
-    assert primary_panel.property("entryRunning") is False
-    assert 0 < float(stage.property("deviceVisualOffsetX")) < 18
-    assert float(stage.property("deviceVisualOpacity")) > 0.04
-    assert float(transition_sweep.property("x")) > -float(
-        transition_sweep.property("width")
-    )
-
-    QTest.qWait(int(theme.property("backgroundMotion")) - 70 + 90)
-    app.processEvents()
-    assert window.property("pageContentReady") is True
     assert float(page_content.property("opacity")) == 1
     assert primary_panel.property("entryRunning") is True
     assert secondary_panel.property("entryRunning") is True
-    assert True in refraction_states
-    QTest.qWait(90)
-    app.processEvents()
-    primary_offset = float(primary_panel.property("visualOffsetX"))
-    secondary_offset = float(secondary_panel.property("visualOffsetX"))
-    assert 0 <= primary_offset < secondary_offset <= 18
-    assert 0 < float(primary_panel.property("opacity")) < 1
-    assert 0 < float(window.findChild(QObject, "pageHeaderSlice").property("opacity")) < 1
-    refraction_deadline = time.monotonic() + 0.25
-    while bool(title.property("refractionRunning")) and time.monotonic() < refraction_deadline:
-        QTest.qWait(5)
-        app.processEvents()
-    assert title.property("refractionRunning") is False
-    assert False in refraction_states
-    assert float(title.property("refractionShift")) == 3
-    assert float(title.property("refractionEnergy")) == 0
-    assert 0 < float(tertiary_rail.property("opacity")) < theme.property(
-        "tertiaryRailOpacity"
-    )
-    assert stage.property("deviceVisualOffsetX") == 0
 
-    first_sequence = int(window.property("pageTransitionSequence"))
-    controller.setPage("OCR")
-    app.processEvents()
-    QTest.qWait(1)
-    app.processEvents()
-    ocr_primary = window.findChild(QObject, "ocrPrimaryPanel")
-    ocr_secondary = window.findChild(QObject, "ocrSecondaryPanel")
-    assert ocr_primary is not None
-    assert ocr_secondary is not None
-    assert int(window.property("pageTransitionSequence")) == first_sequence + 1
-    assert window.property("pageTransitioning") is True
-    assert window.property("pageContentReady") is False
-    assert float(page_content.property("opacity")) == 0
-    assert title.property("refractionRunning") is False
-    assert abs(float(content_translate.property("x"))) > 0.5
-    assert ocr_primary.property("entryRunning") is False
-    assert ocr_secondary.property("entryRunning") is False
-    assert float(stage.property("deviceVisualOffsetX")) > 0
-
-    QTest.qWait(int(theme.property("backgroundMotion")) + 100)
-    app.processEvents()
-    assert window.property("pageTransitioning") is True
-    assert window.property("pageContentReady") is True
-    assert ocr_primary.property("entryRunning") is True
-    assert ocr_secondary.property("entryRunning") is True
-    assert 0 < float(ocr_primary.property("opacity")) < 1
-    assert 0 < float(window.findChild(QObject, "pageHeaderSlice").property("opacity")) < 1
-    assert 0 < tertiary_rail.property("opacity") < theme.property(
-        "tertiaryRailOpacity"
-    )
-    QTest.qWait(int(theme.property("pageMotion")) + 50)
+    QTest.qWait(int(theme.property("pageMotion")) + 40)
     app.processEvents()
     assert window.property("pageTransitioning") is False
-    assert stage.property("pageTransitionRunning") is False
-    assert stage.property("pageTransitionSequence") >= 1
+    assert window.property("pageContentReady") is True
     assert content_translate.property("x") == 0
     assert header_translate.property("x") == 0
-    assert ocr_primary.property("visualOffsetX") == 0
-    assert ocr_secondary.property("visualOffsetX") == 0
-    assert stage.property("deviceVisualOffsetX") == 0
-    assert title.property("refractionRunning") is False
-    assert abs(float(title.property("refractionShift")) - 3) < 0.01
+    assert primary_panel.property("entryRunning") is False
+    assert secondary_panel.property("entryRunning") is False
+    assert float(primary_panel.property("opacity")) == 1
+    assert float(secondary_panel.property("opacity")) == 1
+    assert_subtitle_clearance()
     host.shutdown()
-
 
 @pytest.mark.parametrize(
     ("skin", "theme_name"),
@@ -5455,6 +5292,20 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                     checked += 1
                 assert checked > 10, page
 
+                if skin == SKIN_PRISM and page == "TRANSLATION" and width == 980:
+                    unavailable = _find_quick_item(
+                        window,
+                        "translationLastRunUnavailable",
+                    )
+                    assert unavailable is not None
+                    eyebrow = unavailable.findChild(
+                        QQuickItem,
+                        "unavailableStateEyebrow",
+                    )
+                    assert eyebrow is not None
+                    assert eyebrow.property("lineCount") >= 2
+                    assert eyebrow.width() <= unavailable.width() - 40 + 0.5
+
             for name in (
                 *(f"navigationButton{index}" for index in range(7)),
                 "saveAllButton", "startLiveButton",
@@ -5476,9 +5327,7 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
         host.shutdown()
 
 
-def test_real_workbench_pages_and_themes_are_usable(
-    tmp_path: Path,
-) -> None:
+def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
     app = _application()
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
@@ -5498,55 +5347,111 @@ def test_real_workbench_pages_and_themes_are_usable(
     window = host.window
     assert window is not None
     theme = window.findChild(QObject, "prismTheme")
-    title = window.findChild(QObject, "pageDisplayTitle")
+    title = window.findChild(QObject, "pageDisplayTitleLight")
     save_button = window.findChild(QObject, "saveAllButton")
     start_button = window.findChild(QObject, "startLiveButton")
-    stage = window.findChild(QObject, "opticalStage")
-    assert theme is not None
-    assert title is not None
-    assert save_button is not None
-    assert start_button is not None
-    assert stage is not None
+    motion_feedback = window.findChild(QObject, "prismMotionFeedback")
+    feedback_layer = window.findChild(QObject, "prismFeedbackLayer")
+    fold_facet = window.findChild(QObject, "prismFoldRuleFacet")
+    skin_selector = window.findChild(QObject, "homeSkinSelector")
+    assert all(
+        item is not None
+        for item in (
+            theme, title, save_button, start_button, motion_feedback,
+            feedback_layer, fold_facet, skin_selector,
+        )
+    )
+    assert window.findChild(QObject, "opticalStage") is None
+    assert window.findChild(QObject, "pageTransitionSweep") is None
 
-    page_motifs = {
-        "HOME": "homeStageMotif",
-        "CAPTURE": "captureStageMotif",
-        "OCR": "ocrStageMotif",
-        "TRANSLATION": "translationStageMotif",
-        "OVERLAY": "overlayStageMotif",
-        "CACHE": "cacheStageMotif",
-        "SETTINGS": "settingsStageMotif",
-    }
-    motifs = {
-        page: _find_quick_item(window, object_name)
-        for page, object_name in page_motifs.items()
-    }
-    assert all(motif is not None for motif in motifs.values())
-    assert theme.property("dark") is True
-    assert stage.property("visible") is True
-    assert title.property("visible") is True
+    pages = (
+        ("HOME", "总览", "OVERVIEW", "总览", "homeSecondaryPanel"),
+        ("CAPTURE", "捕获", "CAPTURE", "捕获", "captureSecondaryPanel"),
+        ("OCR", "文字识别", "OCR", "文字识别", "ocrSecondaryPanel"),
+        ("TRANSLATION", "翻译", "TRANSLATION", "翻译", "translationSecondaryPanel"),
+        ("OVERLAY", "覆盖层", "OVERLAY", "覆盖层", "overlaySecondaryPanel"),
+        ("CACHE", "缓存", "CACHE", "缓存", "cacheSecondaryPanel"),
+        ("SETTINGS", "设置", "SETTINGS", "设置", "settingsSecondaryPanel"),
+    )
+    nav_buttons = [
+        _find_quick_item(window, f"navigationButton{index}")
+        for index in range(7)
+    ]
+    assert all(button is not None for button in nav_buttons)
     assert save_button.property("visible") is True
     assert start_button.property("visible") is True
+    assert feedback_layer.property("visible") is False
 
-    for page, active_motif in motifs.items():
-        controller.setPage(page)
+    def contrast_ratio(foreground: QColor, background: QColor) -> float:
+        def luminance(color: QColor) -> float:
+            channels = [color.redF(), color.greenF(), color.blueF()]
+            linear = [
+                channel / 12.92 if channel <= 0.04045
+                else ((channel + 0.055) / 1.055) ** 2.4
+                for channel in channels
+            ]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        first = luminance(foreground)
+        second = luminance(background)
+        return (max(first, second) + 0.05) / (min(first, second) + 0.05)
+
+    for theme_name, expected_paper, expected_panel in (
+        ("dark", "#14191d", "#1c2429"),
+        ("light", "#f2f3ed", "#e5e9e4"),
+    ):
+        controller.setTheme(theme_name)
+        controller.setPage("HOME")
         app.processEvents()
-        assert active_motif is not None
-        assert active_motif.isVisible()
-        assert sum(motif.isVisible() for motif in motifs.values() if motif) == 1
-        assert window.property("pageContentReady") is True
-        assert window.property("pageTransitioning") is False
-        assert title.property("visible") is True
+        assert theme.property("dark") is (theme_name == "dark")
+        paper = QColor(theme.property("paper"))
+        panel = QColor(theme.property("panel"))
+        text = QColor(theme.property("text"))
+        text_soft = QColor(theme.property("textSoft"))
+        assert paper.name() == expected_paper
+        assert panel.name() == expected_panel
+        assert paper.alpha() == panel.alpha() == 255
+        assert contrast_ratio(text, paper) >= 7
+        assert contrast_ratio(text_soft, paper) >= 4.5
+        assert QColor(theme.property("inputSurface")).alpha() == 255
+        combo_surface = skin_selector.findChild(QObject, "prismComboBoxBackground")
+        chevron = skin_selector.findChild(QObject, "prismComboBoxChevron")
+        assert combo_surface is not None
+        assert chevron is not None
+        assert QColor(combo_surface.property("color")).alpha() == 255
+        assert chevron.property("visible") is True
 
-    controller.setTheme("light")
-    app.processEvents()
-    assert theme.property("dark") is False
-    assert stage.property("visible") is True
-    assert title.property("visible") is True
-    controller.setTheme("dark")
-    app.processEvents()
-    assert theme.property("dark") is True
-    assert stage.property("visible") is True
+        for index, (page, page_title, code, nav_title, panel_name) in enumerate(pages):
+            controller.setPage(page)
+            app.processEvents()
+            assert window.property("pageContentReady") is True
+            assert window.property("pageTransitioning") is False
+            assert title.property("text") == page_title
+            assert title.property("visible") is True
+            assert window.findChild(QObject, "pageDisplayTitleHeavy").property("text") == ""
+            assert fold_facet.property("visible") is True
+            assert nav_buttons[index] is not None
+            assert nav_buttons[index].property("visible") is True
+            nav_title_label = nav_buttons[index].findChild(QObject, "navigationTitleLabel")
+            nav_code_label = nav_buttons[index].findChild(QObject, "navigationCodeLabel")
+            assert nav_title_label is not None
+            assert nav_code_label is not None
+            assert nav_title_label.property("text") == nav_title
+            assert nav_code_label.property("text") == code
+            assert nav_code_label.property("font").pixelSize() >= 12
+
+            primary_panel = _find_quick_item(window, panel_name)
+            assert primary_panel is not None
+            panel_surface = primary_panel.findChild(QObject, "prismPanelSurface")
+            grid_rule = primary_panel.findChild(QObject, "prismPanelGridRule")
+            assert panel_surface is not None
+            assert grid_rule is not None
+            assert panel_surface.property("color").alpha() == 0
+            assert QQmlProperty(panel_surface, "border.width").read() == 0
+            assert grid_rule.property("visible") is True
+
+    assert motion_feedback.property("visible") is False
+    assert feedback_layer.property("visible") is False
     host.shutdown()
 
 
@@ -5655,7 +5560,7 @@ def test_real_prism_button_feedback_tracks_pointer_and_reduced_motion(
     host.shutdown()
 
 
-def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) -> None:
+def test_real_page_operations_show_local_feedback_and_settle(tmp_path: Path) -> None:
     class ActionController(WorkbenchController):
         def __init__(self, config_path: Path) -> None:
             super().__init__(config_path, probe_ocr_devices=False)
@@ -5694,69 +5599,28 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
     app.processEvents()
     window = host.window
     assert window is not None
-    stage = window.findChild(QObject, "opticalStage")
-    feedback_layer = window.findChild(QObject, "transientFeedbackLayer")
-    capture_motif = window.findChild(QObject, "captureStageMotif")
-    capture_scan_line = window.findChild(QObject, "captureStageScanLine")
-    title = window.findChild(QObject, "pageDisplayTitle")
+    motion_feedback = window.findChild(QObject, "prismMotionFeedback")
+    feedback_layer = window.findChild(QObject, "prismFeedbackLayer")
+    action_rule = window.findChild(QObject, "prismActionFeedbackRule")
+    warning_rule = window.findChild(QObject, "prismWarningFeedbackRule")
     theme = window.findChild(QObject, "prismTheme")
-    assert stage is not None
+    assert motion_feedback is not None
     assert feedback_layer is not None
-    assert capture_motif is not None
-    assert capture_scan_line is not None
-    assert title is not None
+    assert action_rule is not None
+    assert warning_rule is not None
     assert theme is not None
-    assert window.findChild(QObject, "pageActionFeedback") is None
-    assert feedback_layer.parent() == stage.parent()
+    assert window.findChild(QObject, "opticalStage") is None
+    assert window.findChild(QObject, "transientFeedbackLayer") is None
     assert feedback_layer.property("enabled") is False
-    assert feedback_layer.property("opacity") == 1
-    assert feedback_layer.property("z") > stage.property("z")
+    assert feedback_layer.parent() == motion_feedback.parent()
+    assert feedback_layer.property("z") > motion_feedback.property("z")
 
-    operations = (
-        (
-            "OCR",
-            "ocrProbeAction",
-            "focus",
-            "ocrStageMotif",
-            "ocrStageFocusBox0",
-            "scale",
-            lambda current, resting: current < resting - 0.005,
-        ),
-        (
-            "TRANSLATION",
-            "translationTraceAction",
-            "trace",
-            "translationStageMotif",
-            "translationStageTracePrimary",
-            "width",
-            lambda current, resting: current < resting - 20,
-        ),
-        (
-            "CACHE",
-            "cacheRippleAction",
-            "ripple",
-            "cacheStageMotif",
-            "cacheStageRail0",
-            "height",
-            lambda current, resting: current > resting + 0.1,
-        ),
-        (
-            "SETTINGS",
-            "saveAllButton",
-            "calibrate",
-            "settingsStageMotif",
-            "settingsStageCalibrationTarget",
-            "rotation",
-            lambda current, resting: current > resting + 1,
-        ),
-    )
-    previous_sequence = int(stage.property("actionSequence"))
-
+    previous_sequence = int(motion_feedback.property("actionSequence"))
     controller.setPage("CAPTURE")
     app.processEvents()
     custom_action = _click_quick_item(window, "captureCustomAction")
-    assert int(stage.property("actionSequence")) == previous_sequence
-    assert stage.property("actionPulseRunning") is False
+    assert int(motion_feedback.property("actionSequence")) == previous_sequence
+    assert motion_feedback.property("actionPulseRunning") is False
     assert selectors[-1].opened is True
     assert window.isVisible() is False
     selectors[-1].selected_region = (10, 20, 640, 180)
@@ -5769,16 +5633,17 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
     assert controller.captureTop == 20
     assert controller.captureWidth == 640
     assert controller.captureHeight == 180
-    assert stage.property("actionKind") == "scan"
-    assert int(stage.property("actionSequence")) == previous_sequence + 1
-    assert stage.property("actionPulseRunning") is True
-    assert capture_motif.property("actionLinked") is True
-    assert feedback_layer.property("visible") is False
-    resting_scan_y = 294.0
-    QTest.qWait(180)
-    app.processEvents()
-    assert abs(float(capture_scan_line.property("y")) - resting_scan_y) > 10
+    assert motion_feedback.property("actionKind") == "scan"
+    assert int(motion_feedback.property("actionSequence")) == previous_sequence + 1
+    assert motion_feedback.property("actionPulseRunning") is True
+    assert feedback_layer.property("visible") is True
+    assert action_rule.property("visible") is True
+    assert float(action_rule.property("width")) > 0
     previous_sequence += 1
+    QTest.qWait(int(theme.property("actionMotion")) + 20)
+    app.processEvents()
+    assert motion_feedback.property("actionPulseRunning") is False
+    assert action_rule.property("visible") is False
 
     _click_quick_item(window, "captureCustomAction")
     assert window.isVisible() is False
@@ -5787,10 +5652,8 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
     QTest.qWait(1)
     app.processEvents()
     assert window.isVisible() is True
-    assert int(stage.property("actionSequence")) == previous_sequence
-    assert stage.property("actionPulseRunning") is False
-    assert capture_motif.property("actionLinked") is False
-    assert feedback_layer.property("visible") is False
+    assert int(motion_feedback.property("actionSequence")) == previous_sequence
+    assert motion_feedback.property("actionPulseRunning") is False
 
     selector_failure.append(RuntimeError("selector unavailable"))
     _click_quick_item(window, "captureCustomAction")
@@ -5798,10 +5661,15 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
     QTest.qWait(1)
     app.processEvents()
     assert window.isVisible() is True
-    assert int(stage.property("actionSequence")) == previous_sequence
-    assert stage.property("actionPulseRunning") is False
-    assert capture_motif.property("actionLinked") is False
-    assert feedback_layer.property("visible") is False
+    assert int(motion_feedback.property("actionSequence")) == previous_sequence
+    assert motion_feedback.property("actionPulseRunning") is False
+    error_dialog = window.findChild(QObject, "errorDialog")
+    assert error_dialog is not None
+    assert error_dialog.property("visible") is True
+    _click_quick_item(window, "errorDialogAcceptButton")
+    QTest.qWait(int(theme.property("warningMotion")) + 20)
+    app.processEvents()
+    assert warning_rule.property("visible") is False
 
     assert custom_action.property("text") == "自定义区域"
     assert window.findChild(QObject, "captureRegionSelectAction") is None
@@ -5810,76 +5678,49 @@ def test_real_page_operations_animate_their_background_motifs(tmp_path: Path) ->
         for item in window.findChildren(QObject)
     )
 
-    motif_names = ["captureStageMotif"]
-    visual_states = [(capture_scan_line, "y", resting_scan_y)]
-    for (
-        page,
-        button_name,
-        feedback,
-        motif_name,
-        visual_name,
-        visual_property,
-        changed,
-    ) in operations:
+    operations = (
+        ("OCR", "ocrProbeAction", "focus"),
+        ("TRANSLATION", "translationTraceAction", "trace"),
+        ("CACHE", "cacheRippleAction", "ripple"),
+        ("SETTINGS", "saveAllButton", "calibrate"),
+    )
+    for page, button_name, action_kind in operations:
         controller.setPage(page)
         app.processEvents()
-        motif = window.findChild(QObject, motif_name)
-        visual = _find_quick_item(window, visual_name)
-        assert motif is not None
-        assert visual is not None, visual_name
-        resting_value = float(visual.property(visual_property))
         _click_quick_item(window, button_name)
-        assert stage.property("actionKind") == feedback
-        assert int(stage.property("actionSequence")) == previous_sequence + 1
-        assert stage.property("actionPulseRunning") is True
-        assert motif.property("actionLinked") is True
-        assert feedback_layer.property("visible") is False
-        QTest.qWait(180)
-        app.processEvents()
-        assert changed(float(visual.property(visual_property)), resting_value)
-        motif_names.append(motif_name)
-        visual_states.append((visual, visual_property, resting_value))
+        assert motion_feedback.property("actionKind") == action_kind
+        assert int(motion_feedback.property("actionSequence")) == previous_sequence + 1
+        assert motion_feedback.property("actionPulseRunning") is True
+        assert feedback_layer.property("visible") is True
+        assert action_rule.property("visible") is True
+        assert float(action_rule.property("width")) > 0
         previous_sequence += 1
     assert controller.probe_calls == 1
 
     QTest.qWait(int(theme.property("actionMotion")) + 30)
     app.processEvents()
-    assert stage.property("actionPulseRunning") is False
+    assert motion_feedback.property("actionPulseRunning") is False
     assert feedback_layer.property("visible") is False
-    for motif_name in motif_names:
-        motif = window.findChild(QObject, motif_name)
-        assert motif is not None
-        assert motif.property("actionLinked") is False
-    for visual, visual_property, resting_value in visual_states:
-        assert math.isclose(
-            float(visual.property(visual_property)),
-            resting_value,
-            abs_tol=0.01,
-        )
+    assert action_rule.property("visible") is False
+    assert motion_feedback.property("actionProgress") == 1
 
     controller.setReducedMotion(True)
     controller.setPage("OCR")
     app.processEvents()
     assert controller.reducedMotion is True
     assert window.property("reduceMotion") is True
-    assert stage.property("reducedMotion") is True
-    assert feedback_layer.property("visible") is False
+    assert motion_feedback.property("reducedMotion") is True
     QTest.qWait(16)
     app.processEvents()
-    assert stage.property("actionPulseRunning") is False
+    assert motion_feedback.property("actionPulseRunning") is False
     _click_quick_item(window, "ocrProbeAction")
-    assert stage.property("actionKind") == "focus"
-    assert int(stage.property("actionSequence")) == previous_sequence + 1
-    assert stage.property("actionPulseRunning") is False
-    ocr_motif = window.findChild(QObject, "ocrStageMotif")
-    assert ocr_motif is not None
-    assert ocr_motif.property("actionLinked") is False
-    assert stage.property("pageTransitionRunning") is False
-    assert stage.property("startPreludeRunning") is False
-    assert stage.property("actionProgress") == 1
+    assert motion_feedback.property("actionKind") == "focus"
+    assert int(motion_feedback.property("actionSequence")) == previous_sequence + 1
+    assert motion_feedback.property("actionPulseRunning") is False
+    assert motion_feedback.property("actionProgress") == 1
+    assert feedback_layer.property("visible") is False
+    assert action_rule.property("visible") is False
     assert window.property("pageTransitioning") is False
-    assert title.property("refractionRunning") is False
-    assert float(title.property("refractionShift")) == 3
     host.shutdown()
 
 
@@ -6025,11 +5866,13 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     window = host.window
     assert window is not None
     theme = window.findChild(QObject, "prismTheme")
-    stage = window.findChild(QObject, "opticalStage")
-    start_feedback = window.findChild(QObject, "startPreludeFeedback")
+    motion_feedback = window.findChild(QObject, "prismMotionFeedback")
+    start_feedback = window.findChild(QObject, "prismStartProgressRule")
+    feedback_layer = window.findChild(QObject, "prismFeedbackLayer")
     dohna_feedback = window.findChild(QObject, "dohnaFeedbackLayer")
-    assert stage is not None
+    assert motion_feedback is not None
     assert start_feedback is not None
+    assert feedback_layer is not None
     assert dohna_feedback is not None
     assert theme is not None
 
@@ -6037,12 +5880,14 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     assert window.property("startPreludePending") is True
     assert controller.toggle_calls == 0
     if skin == SKIN_DOHNA:
-        assert stage.property("startPreludeRunning") is False
+        assert motion_feedback.property("startPreludeRunning") is False
+        assert start_feedback.property("visible") is False
         assert not window.findChildren(QObject, "dohnaStartImpact")
         assert not window.findChildren(QObject, "dohnaStartImpactTag")
     else:
-        assert stage.property("startPreludeRunning") is True
-    assert stage.property("startPreludeSequence") == 1
+        assert motion_feedback.property("startPreludeRunning") is True
+        assert start_feedback.property("visible") is True
+    assert motion_feedback.property("startPreludeSequence") == 1
     QTest.qWait(280)
     assert controller.toggle_calls == 0
     QTest.qWait(100)
@@ -6060,11 +5905,12 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     assert controller.toggle_calls == 2
     assert window.property("startPreludePending") is False
     assert start_feedback.property("visible") is False
+    assert feedback_layer.property("visible") is False
     assert not window.findChildren(QObject, "dohnaStartImpact")
     assert not window.findChildren(QObject, "dohnaStartImpactTag")
     QTest.qWait(16)
     app.processEvents()
-    assert stage.property("startPreludeRunning") is False
+    assert motion_feedback.property("startPreludeRunning") is False
 
     _click_quick_item(window, "startLiveButton")
     assert controller.toggle_calls == 3
@@ -6367,12 +6213,15 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
     title_source = (qml_root / "components" / "RefractedTitle.qml").read_text(
         encoding="utf-8"
     )
-    stage_source = (qml_root / "components" / "OpticalStage.qml").read_text(
+    feedback_source = (qml_root / "components" / "PrismFeedbackLayer.qml").read_text(
         encoding="utf-8"
     )
-    feedback_source = (
-        qml_root / "components" / "TransientFeedbackLayer.qml"
-    ).read_text(encoding="utf-8")
+    motion_source = (qml_root / "components" / "PrismMotionFeedback.qml").read_text(
+        encoding="utf-8"
+    )
+    fold_source = (qml_root / "components" / "PrismFoldRule.qml").read_text(
+        encoding="utf-8"
+    )
     assert 'objectName: "captureCustomAction"' in capture_source
     assert "selectRegion()" in capture_source
     assert 'text: "框选区域"' not in capture_source
@@ -6394,27 +6243,26 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
     assert settings_source.count('root.visualAction("calibrate")') >= 8
     assert 'objectName: "saveAllButton"' in main_source
     assert 'root.pulseVisualAction("calibrate")' in main_source
-    assert "TransientFeedbackLayer" in main_source
-    assert "pageActionFeedback" not in feedback_source
-    assert "startPreludeFeedback" in feedback_source
-    for motif_name in (
-        "captureStageMotif",
-        "ocrStageMotif",
-        "translationStageMotif",
-        "overlayStageMotif",
-        "cacheStageMotif",
-        "settingsStageMotif",
-    ):
-        assert motif_name in stage_source
-    assert stage_source.count("preferredRendererType: Shape.CurveRenderer") >= 5
+    assert "PrismMotionFeedback" in main_source
+    assert "PrismFeedbackLayer" in main_source
+    assert "OpticalStage {" not in main_source
+    assert "TransientFeedbackLayer {" not in main_source
+    assert "pageTransitionSweep" not in main_source
+    assert 'objectName: "prismActionFeedbackRule"' in feedback_source
+    assert 'objectName: "prismStartProgressRule"' in feedback_source
+    assert 'property real actionProgress: 1' in motion_source
+    assert 'function settleMotion()' in motion_source
+    assert "refractionSpectrum" in fold_source
+    assert 'objectName: "prismFoldRuleFacet"' in fold_source
+    assert "pageTitleCyanSlice" not in title_source
+    assert "pageTitleSpectrumSlice" not in title_source
     assert "style: Text.Raised" not in title_source
-    assert "facetWidthRatio: 0.075" in title_source
-    assert title_source.count("renderType: Text.CurveRendering") == 4
+    assert "font.weight: Font.Bold" in title_source
+    assert title_source.count("renderType: Text.CurveRendering") == 2
     assert title_source.count(
         "renderTypeQuality: Text.VeryHighRenderTypeQuality"
-    ) == 4
-    assert title_source.count("layer.enabled: true") == 2
-    assert title_source.count("layer.samples: 4") == 2
+    ) == 2
+    assert "layer.enabled: true" not in title_source
     assert 'objectName: "pageHeaderUnderline"' in main_source
 
 

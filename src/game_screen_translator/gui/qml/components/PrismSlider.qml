@@ -43,7 +43,7 @@ Slider {
         y: root.topPadding + root.availableHeight / 2 - height / 2
         implicitWidth: 20
         implicitHeight: 20
-        radius: root.theme.dohna ? 2 : width / 2
+        radius: 2
         rotation: root.theme.dohna ? (root.pressed ? -12 : -7) : 0
         color: root.pressed && root.theme.dohna
                ? root.theme.violet

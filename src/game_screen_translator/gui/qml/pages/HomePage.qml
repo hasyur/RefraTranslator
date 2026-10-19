@@ -188,8 +188,8 @@ Item {
 
                 SectionHeader {
                     theme: root.theme
-                    title: "光学信号场"
-                    meta: "LIVE CONTROL"
+                    title: root.theme.dohna ? "光学信号场" : "系统状态"
+                    meta: root.theme.dohna ? "LIVE CONTROL" : "SYSTEM STATUS"
                     Layout.fillWidth: true
                 }
 

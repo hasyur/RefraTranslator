@@ -66,30 +66,32 @@ ApplicationWindow {
             return titles[page] || page
         }
         const titles = {
-            "HOME": "折射",
+            "HOME": "总览",
             "CAPTURE": "捕获",
-            "OCR": "识别",
-            "TRANSLATION": "译文",
+            "OCR": "文字识别",
+            "TRANSLATION": "翻译",
             "OVERLAY": "覆盖层",
             "CACHE": "缓存",
-            "SETTINGS": "高级"
+            "SETTINGS": "设置"
         }
         return titles[page] || page
     }
 
     function pageTitleHeavy(page) {
-        if (root.boundWorkbench.skinPreference === "dohna")
-            return ""
-        const titles = {
-            "HOME": "控制台",
-            "CAPTURE": "光圈",
-            "OCR": "矩阵",
-            "TRANSLATION": "分光器",
-            "OVERLAY": "投影",
-            "CACHE": "阵列",
-            "SETTINGS": "设置"
+        return ""
+    }
+
+    function pageCode(page) {
+        const codes = {
+            "HOME": "OVERVIEW",
+            "CAPTURE": "CAPTURE",
+            "OCR": "OCR",
+            "TRANSLATION": "TRANSLATION",
+            "OVERLAY": "OVERLAY",
+            "CACHE": "CACHE",
+            "SETTINGS": "SETTINGS"
         }
-        return titles[page] || ""
+        return codes[page] || String(page)
     }
 
     function navigationLabel(page) {
@@ -105,7 +107,16 @@ ApplicationWindow {
             }
             return labels[page] || page
         }
-        return page
+        const labels = {
+            "HOME": "总览",
+            "CAPTURE": "捕获",
+            "OCR": "文字识别",
+            "TRANSLATION": "翻译",
+            "OVERLAY": "覆盖层",
+            "CACHE": "缓存",
+            "SETTINGS": "设置"
+        }
+        return labels[page] || page
     }
 
     function pageSubtitle(page) {
@@ -127,8 +138,6 @@ ApplicationWindow {
         pageContentMotion.opacity = 1
         pageHeaderTranslate.x = 0
         pageHeaderSlice.opacity = 1
-        transitionSweep.opacity = 0
-        transitionSweep.x = root.width
         tertiaryRail.opacity = prism.tertiaryRailOpacity
     }
 
@@ -265,7 +274,7 @@ ApplicationWindow {
     background: Rectangle {
         gradient: Gradient {
             GradientStop { position: 0; color: prism.backgroundTop }
-            GradientStop { position: 0.62; color: prism.inkRaised }
+            GradientStop { position: 0.62; color: prism.dohna ? prism.inkRaised : prism.paper }
             GradientStop { position: 1; color: prism.backgroundBottom }
         }
     }
@@ -313,7 +322,7 @@ ApplicationWindow {
         Rectangle {
             id: navigationRail
             implicitWidth: prism.dohna ? Math.ceil(dohnaNavigationText.width + 40)
-                                      : root.width < 1100 ? 202 : 222
+            : root.width < 1100 ? 176 : 184
             Layout.preferredWidth: implicitWidth
             Layout.fillHeight: true
             color: prism.navigationSurface
@@ -332,7 +341,9 @@ ApplicationWindow {
             ColumnLayout {
                 id: navigationLayout
                 anchors.fill: parent
-                anchors.margins: root.width < 1100 ? 14 : 20
+                anchors.margins: prism.dohna
+                                ? (root.width < 1100 ? 14 : 20)
+                                : (root.width < 1100 ? 12 : 16)
                 spacing: 10
 
                 ColumnLayout {
@@ -376,7 +387,9 @@ ApplicationWindow {
                         navigation: true
                         text: prism.dohna
                               ? String(modelData) + "  " + root.navigationLabel(String(modelData))
-                              : String(index + 1).padStart(2, "0") + "   " + root.navigationLabel(String(modelData))
+                              : root.navigationLabel(String(modelData))
+                        navigationNumber: String(index + 1).padStart(2, "0")
+                        navigationCode: root.pageCode(String(modelData))
                         primary: root.boundWorkbench.currentPage === modelData
                         quiet: root.boundWorkbench.currentPage !== modelData
                         implicitWidth: 150
@@ -428,7 +441,7 @@ ApplicationWindow {
                 }
 
                 Text {
-                    text: "NATIVE QML · 7 SURFACES"
+                    text: "PRISM  /  SWISS GRID"
                     visible: !prism.dohna
                     color: prism.navigationTextDim
                     font.family: prism.monoFontFor(text)
@@ -456,19 +469,13 @@ ApplicationWindow {
                 visible: prism.dohna
             }
 
-            OpticalStage {
+            PrismMotionFeedback {
                 id: stage
-                objectName: "opticalStage"
-                anchors.fill: parent
-                anchors.margins: 12
+                objectName: "prismMotionFeedback"
                 theme: prism
-                page: root.boundWorkbench.currentPage
                 pageTransitionSequence: root.pageTransitionSequence
                 reducedMotion: root.boundWorkbench.reducedMotion
                 motionEnabled: root.animationsRunning && !prism.dohna
-                visible: !prism.dohna
-                opacity: prism.opticalStageOpacity
-                         * (page === "CAPTURE" ? 0.25 : 1)
             }
 
             ColumnLayout {
@@ -480,7 +487,9 @@ ApplicationWindow {
                     clip: prism.dohna
                     Layout.fillWidth: true
                     Layout.preferredHeight: Math.max(
-                        root.height <= 820 ? 116 : 142,
+                        prism.dohna
+                            ? (root.height <= 820 ? 116 : 142)
+                            : (root.height <= 820 ? 104 : 116),
                         pageHeaderTextColumn.implicitHeight + 16
                     )
                     color: prism.headerSurface
@@ -498,7 +507,9 @@ ApplicationWindow {
                             spacing: 0
                             Text {
                                 text: String(root.pageIndex(root.boundWorkbench.currentPage) + 1).padStart(2, "0")
-                                      + " / " + root.boundWorkbench.currentPage
+                                      + " / " + (prism.dohna
+                                                  ? root.boundWorkbench.currentPage
+                                                  : root.pageCode(root.boundWorkbench.currentPage))
                                 color: prism.accentText
                                 font.family: prism.monoFontFor(text)
                                 font.pixelSize: 12
@@ -528,8 +539,17 @@ ApplicationWindow {
                                     transitionSequence: root.pageTransitionSequence
                                     motionEnabled: root.pageMotionEnabled
                                 }
+                                PrismFoldRule {
+                                    objectName: "prismPageHeaderRule"
+                                    visible: !prism.dohna
+                                    theme: prism
+                                    width: Math.min(parent.width * 0.72, 420)
+                                    anchors.left: parent.left
+                                    anchors.bottom: parent.bottom
+                                }
                                 Rectangle {
                                     objectName: "pageHeaderUnderline"
+                                    visible: prism.dohna
                                     width: Math.min(parent.width * 0.72, 420)
                                     height: prism.dohna ? 5 : 1
                                     anchors.left: parent.left
@@ -546,7 +566,7 @@ ApplicationWindow {
                                 color: prism.textSoft
                                 font.family: prism.uiFontFor(text)
                                 font.pixelSize: 13
-                                Layout.topMargin: 10
+                                Layout.topMargin: prism.dohna ? 10 : 8
                             }
                         }
 
@@ -572,7 +592,9 @@ ApplicationWindow {
                             objectName: "startLiveButton"
                             theme: prism
                             primary: true
-                            text: root.startPreludePending ? "正在点亮光路…" : root.boundWorkbench.startButtonText
+                            text: root.startPreludePending
+                                  ? (prism.dohna ? "正在点亮光路…" : "正在启动…")
+                                  : root.boundWorkbench.startButtonText
                             enabled: root.boundWorkbench.runPhase !== "stopping"
                                      && !root.startPreludePending
                                      && (root.boundWorkbench.canStart || root.boundWorkbench.running)
@@ -664,38 +686,9 @@ ApplicationWindow {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
-                        height: 3
-                        color: prism.spectrum
+                        height: prism.dohna ? 3 : 1
+                        color: prism.dohna ? prism.spectrum : prism.line
                         opacity: prism.tertiaryRailOpacity
-                    }
-
-                    Rectangle {
-                        id: transitionSweep
-                        objectName: "pageTransitionSweep"
-                        visible: !prism.dohna
-                        readonly property real accentAlpha: prism.sweepAccentAlpha
-                        readonly property real spectrumAlpha: prism.sweepSpectrumAlpha
-                        width: Math.max(190, parent.width * 0.28)
-                        height: parent.height * 1.3
-                        y: -parent.height * 0.15
-                        rotation: -12
-                        antialiasing: true
-                        opacity: 0
-                        gradient: Gradient {
-                            orientation: Gradient.Horizontal
-                            GradientStop { position: 0; color: "transparent" }
-                            GradientStop { position: 0.42; color: Qt.rgba(prism.accent.r, prism.accent.g, prism.accent.b, transitionSweep.accentAlpha) }
-                            GradientStop { position: 0.62; color: Qt.rgba(prism.spectrum.r, prism.spectrum.g, prism.spectrum.b, transitionSweep.spectrumAlpha) }
-                            GradientStop { position: 1; color: "transparent" }
-                        }
-                        Rectangle {
-                            objectName: "pageTransitionSweepCore"
-                            anchors.centerIn: parent
-                            width: 2
-                            height: parent.height
-                            color: prism.text
-                            opacity: 0.62
-                        }
                     }
                 }
 
@@ -738,12 +731,17 @@ ApplicationWindow {
                 }
             }
 
-            TransientFeedbackLayer {
-                objectName: "transientFeedbackLayer"
+            PrismFeedbackLayer {
+                objectName: "prismFeedbackLayer"
                 anchors.fill: parent
                 theme: prism
                 startProgress: stage.startProgress
                 startRunning: stage.startPreludeRunning
+                actionProgress: stage.actionProgress
+                actionRunning: stage.actionPulseRunning
+                actionKind: stage.actionKind
+                warningProgress: stage.warningProgress
+                warningRunning: stage.warningPulseRunning
                 reducedMotion: root.reduceMotion
             }
 
@@ -784,18 +782,6 @@ ApplicationWindow {
 
     SequentialAnimation {
         id: pageTransitionAnimation
-        SequentialAnimation {
-            PropertyAction { target: transitionSweep; property: "x"; value: -transitionSweep.width }
-            PropertyAction { target: transitionSweep; property: "opacity"; value: 0 }
-            ParallelAnimation {
-                NumberAnimation { target: transitionSweep; property: "x"; to: root.width + transitionSweep.width; duration: prism.backgroundMotion; easing.type: Easing.InOutCubic }
-                SequentialAnimation {
-                    NumberAnimation { target: transitionSweep; property: "opacity"; to: 0.62; duration: prism.fast }
-                    PauseAnimation { duration: prism.backgroundMotion - prism.fast * 2 }
-                    NumberAnimation { target: transitionSweep; property: "opacity"; to: 0; duration: prism.fast }
-                }
-            }
-        }
         ScriptAction {
             script: {
                 root.pageContentReady = true
