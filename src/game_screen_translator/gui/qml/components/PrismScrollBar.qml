@@ -11,16 +11,21 @@ ScrollBar {
     readonly property real contentInset: implicitWidth + 8
     implicitWidth: 12
     padding: 0
+    topPadding: 2
+    bottomPadding: 2
     policy: ScrollBar.AsNeeded
+    visible: policy === ScrollBar.AlwaysOn || (policy === ScrollBar.AsNeeded && size < 1)
     hoverEnabled: true
     minimumSize: Math.min(1, 28 / Math.max(1, height))
 
     background: Item {
         Rectangle {
+            objectName: "prismScrollTrack"
             anchors.horizontalCenter: parent.horizontalCenter
-            height: parent.height
-            width: 1
-            color: control.theme.line
+            y: control.topPadding
+            height: control.availableHeight
+            width: 6
+            color: control.theme.inputTrack
         }
     }
 

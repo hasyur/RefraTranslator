@@ -179,12 +179,14 @@ Item {
             motionRole: "secondary"
             transitionSerial: root.transitionSerial
             motionEnabled: root.pageMotionEnabled && root.visible
-            Layout.preferredWidth: 344
-            Layout.minimumWidth: 344
+            // Two 144px steppers, 12px column gap, 20px scroll lane and padding.
+            Layout.preferredWidth: 364
+            Layout.minimumWidth: 364
             Layout.fillHeight: true
 
             Flickable {
                 id: captureFormScroll
+                objectName: "captureSettingsScroll"
                 anchors.fill: parent
                 contentWidth: width
                 contentHeight: form.implicitHeight

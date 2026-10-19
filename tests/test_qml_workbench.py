@@ -269,6 +269,18 @@ def _find_quick_items(
     return matches
 
 
+def _assert_scroll_thumb_inside_track(bar: QQuickItem) -> None:
+    track = _find_quick_item(bar, "prismScrollTrack")
+    thumb = _find_quick_item(bar, "prismScrollThumb")
+    assert track is not None and thumb is not None
+    origin = thumb.mapToItem(track, QPointF(0, 0))
+    assert origin.x() >= -0.5
+    assert origin.y() >= -0.5
+    assert origin.x() + thumb.width() <= track.width() + 0.5
+    assert origin.y() + thumb.height() <= track.height() + 0.5
+    assert math.isclose(origin.x() + thumb.width() / 2, track.width() / 2, abs_tol=0.1)
+
+
 def _wait_for_page_layout(
     window: QQuickWindow,
     item: QQuickItem,
@@ -4302,12 +4314,25 @@ def test_capture_fields_use_two_rows_and_keep_geometry_clear(
         assert left.y() + steppers["capture-left"].height() < width.y()
 
         panel_origin = panel.mapToScene(QPointF(0, 0))
+        scroll = _find_quick_item(panel, "captureSettingsScroll")
+        assert scroll is not None
+        bar = _find_quick_item(scroll, "prismScrollBar")
+        assert bar is not None
+        assert bar.isVisible() == (float(scroll.property("contentHeight")) > scroll.height())
+        lane_left = bar.mapToScene(QPointF(0, 0)).x()
+        content = scroll.property("contentItem")
+        form = next(child for child in content.childItems() if child.width() > 30)
+        for child in form.childItems():
+            if child.isVisible():
+                origin = child.mapToScene(QPointF(0, 0))
+                assert origin.x() + child.width() <= lane_left - 7.5
         for key, stepper in steppers.items():
             origin = origins[key]
             assert stepper.width() == 144
             assert origin.x() >= panel_origin.x()
             assert origin.y() >= panel_origin.y()
             assert origin.x() + stepper.width() <= panel_origin.x() + panel.width()
+            assert origin.x() + stepper.width() <= lane_left - 7.5
             assert origin.y() + stepper.height() <= panel_origin.y() + panel.height()
             editor = stepper.findChild(QQuickItem, "numberStepperEditor")
             suffix = stepper.findChild(QQuickItem, "numberStepperSuffix")
@@ -4929,18 +4954,21 @@ def test_ocr_scrollbar_has_clear_lane_and_drags_content(
         thumb = _find_quick_item(bar, "prismScrollThumb")
         assert thumb is not None
         assert thumb.property("radius") == 0
+        _assert_scroll_thumb_inside_track(bar)
         start = thumb.mapToScene(QPointF(thumb.width() / 2, thumb.height() / 2)).toPoint()
         QTest.mouseMove(window, start)
         QTest.qWait(30)
         assert bar.property("hovered")
         theme = bar.property("theme")
         assert thumb.property("color") == theme.property("accent")
+        _assert_scroll_thumb_inside_track(bar)
         QTest.mousePress(window, Qt.MouseButton.LeftButton, pos=start)
         QTest.mouseMove(window, start + QPoint(0, 45), delay=30)
         QTest.mouseRelease(window, Qt.MouseButton.LeftButton, pos=start + QPoint(0, 45))
         app.processEvents()
         assert scroll.property("contentY") > 0
         assert bar.property("position") > 0
+        _assert_scroll_thumb_inside_track(bar)
     finally:
         host.shutdown()
 
@@ -5322,7 +5350,8 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                 primary, secondary = page_panels
                 secondary_origin = secondary.mapToItem(page_item, QPointF(0, 0))
                 primary_right = primary.mapToItem(page_item, QPointF(primary.width(), 0))
-                assert secondary_origin.x() - primary_right.x() >= 16 - 0.5, page
+                panel_gap = 8 if page == "SETTINGS" and skin == SKIN_PRISM else 16
+                assert secondary_origin.x() - primary_right.x() >= panel_gap - 0.5, page
 
                 pending = [window.contentItem()]
                 checked = 0
@@ -6108,12 +6137,24 @@ def test_settings_keeps_output_controls_left_and_diagnostics_scrollable(
         assert_contained(profile_scroll, secondary)
         assert_contained(log_scroll, secondary)
         assert_contained(refresh, secondary)
+        form_bar = _find_quick_item(form, "prismScrollBar")
+        assert form_bar is not None
+        if skin == SKIN_PRISM:
+            bar_right = form_bar.mapToScene(QPointF(form_bar.width(), 0)).x()
+            divider_left = secondary.mapToScene(QPointF(0, 0)).x()
+            assert 8 <= divider_left - bar_right <= 16.5
         for viewport, texts in (
             (profile_scroll, (diagnostic,)),
             (log_scroll, (ocr, translation, summary)),
         ):
             bar = _find_quick_item(viewport, "prismScrollBar")
             assert bar is not None
+            _assert_scroll_thumb_inside_track(bar)
+            track = _find_quick_item(bar, "prismScrollTrack")
+            origin = track.mapToItem(viewport, QPointF(0, 0))
+            assert origin.y() >= 1
+            assert origin.y() + track.height() <= viewport.height() - 1
+            assert origin.x() + track.width() <= viewport.width() - 1
             lane_left = bar.mapToItem(viewport, QPointF(0, 0)).x()
             for text in texts:
                 origin = text.mapToItem(viewport, QPointF(0, 0))

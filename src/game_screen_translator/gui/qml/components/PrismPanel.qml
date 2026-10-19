@@ -6,6 +6,7 @@ Item {
 
     required property var theme
     property int padding: 22
+    property int rightPadding: padding
     property bool raised: false
     property string motionRole: "primary"
     property int transitionSerial: 0
@@ -212,6 +213,7 @@ Item {
         id: contentItem
         anchors.fill: parent
         anchors.margins: root.padding
+        anchors.rightMargin: root.rightPadding
     }
 
     Rectangle {

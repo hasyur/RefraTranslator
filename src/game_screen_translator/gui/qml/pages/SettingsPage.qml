@@ -15,11 +15,12 @@ Item {
 
     RowLayout {
         anchors.fill: parent
-        spacing: 16
+        spacing: root.theme.dohna ? 16 : 8
 
         PrismPanel {
             objectName: "settingsPrimaryPanel"
             theme: root.theme
+            rightPadding: root.theme.dohna ? padding : 8
             motionRole: "primary"
             transitionSerial: root.transitionSerial
             motionEnabled: root.pageMotionEnabled && root.visible
