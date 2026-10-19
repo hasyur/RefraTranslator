@@ -5082,7 +5082,7 @@ def test_real_workbench_uses_responsive_titles_and_settling_page_motion(
     title_light = window.findChild(QObject, "pageDisplayTitleLight")
     title_heavy = window.findChild(QObject, "pageDisplayTitleHeavy")
     header_rule = window.findChild(QObject, "prismPageHeaderRule")
-    fold_facet = window.findChild(QObject, "prismFoldRuleFacet")
+    divider_line = header_rule.findChild(QObject, "prismDividerLine")
     page_subtitle = window.findChild(QObject, "pageSubtitle")
     header_bar = window.findChild(QObject, "pageHeaderBar")
     save_button = window.findChild(QObject, "saveAllButton")
@@ -5090,7 +5090,7 @@ def test_real_workbench_uses_responsive_titles_and_settling_page_motion(
     assert all(
         item is not None
         for item in (
-            title, title_light, title_heavy, header_rule, fold_facet,
+            title, title_light, title_heavy, header_rule, divider_line,
             page_subtitle, header_bar, save_button, theme,
         )
     )
@@ -5108,8 +5108,11 @@ def test_real_workbench_uses_responsive_titles_and_settling_page_motion(
     assert window.findChild(QObject, "opticalStage") is None
     assert window.findChild(QObject, "pageTransitionSweep") is None
     assert header_rule.property("visible") is True
-    assert 35 <= float(fold_facet.property("width")) <= 44
-    assert fold_facet.property("visible") is True
+    assert window.findChild(QObject, "prismFoldRuleFacet") is None
+    assert divider_line.property("height") == 1
+    assert divider_line.property("width") == header_rule.property("width")
+    assert divider_line.property("color") == theme.property("line")
+    assert divider_line.property("visible") is True
     assert 40 <= title_light.property("font").pixelSize() <= 54
 
     page_titles = {
@@ -5352,13 +5355,13 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
     start_button = window.findChild(QObject, "startLiveButton")
     motion_feedback = window.findChild(QObject, "prismMotionFeedback")
     feedback_layer = window.findChild(QObject, "prismFeedbackLayer")
-    fold_facet = window.findChild(QObject, "prismFoldRuleFacet")
+    divider_line = window.findChild(QObject, "prismDividerLine")
     skin_selector = window.findChild(QObject, "homeSkinSelector")
     assert all(
         item is not None
         for item in (
             theme, title, save_button, start_button, motion_feedback,
-            feedback_layer, fold_facet, skin_selector,
+            feedback_layer, divider_line, skin_selector,
         )
     )
     assert window.findChild(QObject, "opticalStage") is None
@@ -5429,7 +5432,18 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
             assert title.property("text") == page_title
             assert title.property("visible") is True
             assert window.findChild(QObject, "pageDisplayTitleHeavy").property("text") == ""
-            assert fold_facet.property("visible") is True
+            assert not window.findChildren(QObject, "prismFoldRuleFacet")
+            visible_dividers = [
+                line for line in window.findChildren(QObject, "prismDividerLine")
+                if line.property("visible")
+            ]
+            # The page heading and each section retain full-width neutral rules.
+            assert len(visible_dividers) >= 3
+            for line in visible_dividers:
+                assert line.property("height") == 1
+                assert line.property("width") == line.parentItem().width()
+                assert line.property("color") == theme.property("line")
+                assert len(line.parentItem().childItems()) == 1
             assert nav_buttons[index] is not None
             assert nav_buttons[index].property("visible") is True
             nav_title_label = nav_buttons[index].findChild(QObject, "navigationTitleLabel")
@@ -6252,8 +6266,8 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
     assert 'objectName: "prismStartProgressRule"' in feedback_source
     assert 'property real actionProgress: 1' in motion_source
     assert 'function settleMotion()' in motion_source
-    assert "refractionSpectrum" in fold_source
-    assert 'objectName: "prismFoldRuleFacet"' in fold_source
+    assert "ShapePath" not in fold_source
+    assert 'objectName: "prismDividerLine"' in fold_source
     assert "pageTitleCyanSlice" not in title_source
     assert "pageTitleSpectrumSlice" not in title_source
     assert "style: Text.Raised" not in title_source

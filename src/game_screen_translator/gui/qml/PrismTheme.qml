@@ -21,7 +21,6 @@ QtObject {
     readonly property color textDim: dohna ? "#766D77" : (dark ? "#87938f" : "#65716c")
     readonly property color accent: dohna ? "#FF4384" : (dark ? "#62cbd0" : "#177780")
     readonly property color spectrum: dohna ? "#00DAD5" : (dark ? "#62cbd0" : "#177780")
-    readonly property color refractionSpectrum: dohna ? "#00DAD5" : (dark ? "#8ca9a6" : "#718783")
     readonly property color accentText: dohna ? "#B51F59" : accent
     readonly property color spectrumText: dohna ? "#007A78" : spectrum
     readonly property color violet: dohna ? "#F5F044" : (dark ? "#92a9a7" : "#526b69")
