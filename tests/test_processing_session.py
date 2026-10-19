@@ -170,6 +170,50 @@ def test_live_and_frozen_frame_share_units_batches_prompts_retries_and_mapping(m
     assert results[0] == results[1]
 
 
+def test_frozen_session_routes_native_overlay_updates_without_owning_it(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    install_transport(monkeypatch)
+    capture, ocr = Capture(), SceneOcr()
+
+    class CallerOwnedOverlay(Ports):
+        def __init__(self):
+            self.scenes = []
+            self.close_calls = 0
+
+        def set_scene(self, frame, tracks):
+            snapshot = tuple(tracks)
+            self.scenes.append((frame, snapshot))
+            super().set_scene(frame, snapshot)
+
+        def close(self):
+            self.close_calls += 1
+
+    overlay = CallerOwnedOverlay()
+    session = create_processing_session(
+        configuration(),
+        app=app,
+        ocr=ocr,
+        profile=None,
+        capture_output_size=capture.output_size,
+        capture_region=capture.region,
+        capture_backend=capture.active_backend,
+        overlay=overlay,
+    )
+    try:
+        session.submit_frame(capture.frame, 1)
+        snapshot = wait_for(
+            app,
+            lambda: (current if (current := session.snapshot()).terminal else None),
+        )
+        assert overlay.scenes
+        assert overlay.scenes[-1][0] is capture.frame
+        assert any(track.display_translation for track in overlay.scenes[-1][1])
+        assert any(item.translated_text for item in snapshot.items)
+    finally:
+        session.close()
+    assert overlay.close_calls == 0
+
+
 def test_frozen_transaction_stops_ocr_when_done_and_reuses_same_text(monkeypatch):
     app = QApplication.instance() or QApplication([])
     prompts, _ = install_transport(monkeypatch)

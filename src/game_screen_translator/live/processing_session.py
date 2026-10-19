@@ -18,6 +18,7 @@ from game_screen_translator.live.tracker import Bounds
 
 if TYPE_CHECKING:
     from game_screen_translator.config import AppConfig
+    from game_screen_translator.overlay.window import TranslationOverlay
     from game_screen_translator.ocr.paddle import PaddleOcrEngine
     from game_screen_translator.profiles import GameProfile
 
@@ -128,11 +129,13 @@ def create_processing_session(
     capture_output_size: tuple[int, int],
     capture_region: tuple[int, int, int, int],
     capture_backend: str,
+    overlay: TranslationOverlay | None = None,
 ) -> LiveProcessingSession:
     """Create the public transaction around a controller on the GUI thread.
 
     The supplied geometry is passive. The session never reads or closes the
-    adapter's one-shot capture object; the caller remains its lifecycle owner.
+    adapter's one-shot capture object. A supplied overlay receives the same
+    ``set_scene`` updates as live mode, but remains owned and closed by caller.
     """
     from game_screen_translator.live.runtime import LiveController
 
@@ -144,7 +147,7 @@ def create_processing_session(
             capture_backend,
         ),
         ocr=ocr,
-        overlay=_NullOverlay(),
+        overlay=overlay if overlay is not None else _NullOverlay(),
         control=_NullControl(),
         app=app,
         profile=profile,
