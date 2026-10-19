@@ -190,13 +190,13 @@ Item {
                 contentHeight: form.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                ScrollBar.vertical: PrismScrollBar { id: captureBar; theme: root.theme }
 
                 FocusScrollGuard { flickable: captureFormScroll }
 
                 ColumnLayout {
                     id: form
-                    width: parent.width
+                    width: parent.width - captureBar.contentInset
                     spacing: 12
 
                     SectionHeader {

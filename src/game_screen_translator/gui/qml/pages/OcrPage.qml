@@ -132,13 +132,13 @@ Item {
                 contentHeight: form.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                ScrollBar.vertical: PrismScrollBar { id: ocrBar; theme: root.theme }
 
                 FocusScrollGuard { flickable: ocrFormScroll }
 
                 ColumnLayout {
                     id: form
-                    width: parent.width
+                    width: parent.width - ocrBar.contentInset
                     spacing: 7
 
                     SectionHeader {

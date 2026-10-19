@@ -35,13 +35,13 @@ Item {
                 contentHeight: scheduleForm.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                ScrollBar.vertical: PrismScrollBar { id: scheduleBar; theme: root.theme }
 
                 FocusScrollGuard { flickable: scheduleFormScroll }
 
                 ColumnLayout {
                     id: scheduleForm
-                    width: parent.width
+                    width: parent.width - scheduleBar.contentInset
                     spacing: 12
 
                     SectionHeader {
@@ -335,7 +335,14 @@ Item {
                     Layout.preferredHeight: 158
                     Layout.maximumHeight: 158
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    ScrollBar.vertical: PrismScrollBar {
+                        id: profileBar
+                        theme: root.theme
+                        parent: profileScroll
+                        x: parent.width - width
+                        height: parent.height
+                    }
+                    rightPadding: profileBar.contentInset
                     background: Rectangle {
                         color: "transparent"
                         border.color: root.theme.line
@@ -373,7 +380,14 @@ Item {
                     Layout.minimumHeight: 100
                     Layout.preferredHeight: 260
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    ScrollBar.vertical: PrismScrollBar {
+                        id: logBar
+                        theme: root.theme
+                        parent: logScroll
+                        x: parent.width - width
+                        height: parent.height
+                    }
+                    rightPadding: logBar.contentInset
                     background: Rectangle {
                         color: "transparent"
                         border.color: root.theme.line

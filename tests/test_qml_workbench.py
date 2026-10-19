@@ -4890,6 +4890,61 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     host.shutdown()
 
 
+@pytest.mark.parametrize("skin,theme_name", [
+    (SKIN_PRISM, "dark"), (SKIN_PRISM, "light"), (SKIN_DOHNA, "light"),
+])
+def test_ocr_scrollbar_has_clear_lane_and_drags_content(
+    tmp_path: Path, skin: str, theme_name: str,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(config_path, load_config(config_path), "scroll-test")
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(skin)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(True)
+    controller.setPage("OCR")
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        window = host.window
+        assert window is not None
+        window.resize(max(980, window.minimumWidth()), 700)
+        host.show()
+        panel = _find_quick_item(window, "ocrSecondaryPanel")
+        scroll = _find_quick_item(window, "ocrSettingsScroll")
+        assert panel is not None and scroll is not None
+        _wait_for_page_layout(window, panel, app)
+        bar = _find_quick_item(scroll, "prismScrollBar")
+        assert bar is not None and bar.isVisible()
+        assert scroll.property("contentHeight") > scroll.height()
+        content = scroll.property("contentItem")
+        form = next(child for child in content.childItems() if child.width() > 30)
+        lane_left = bar.mapToItem(scroll, QPointF(0, 0)).x()
+        assert form.width() <= lane_left - 8 + 0.5
+        for child in form.childItems():
+            if child.isVisible():
+                origin = child.mapToItem(scroll, QPointF(0, 0))
+                assert origin.x() + child.width() <= lane_left - 7.5
+        thumb = _find_quick_item(bar, "prismScrollThumb")
+        assert thumb is not None
+        assert thumb.property("radius") == 0
+        start = thumb.mapToScene(QPointF(thumb.width() / 2, thumb.height() / 2)).toPoint()
+        QTest.mouseMove(window, start)
+        QTest.qWait(30)
+        assert bar.property("hovered")
+        theme = bar.property("theme")
+        assert thumb.property("color") == theme.property("accent")
+        QTest.mousePress(window, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(window, start + QPoint(0, 45), delay=30)
+        QTest.mouseRelease(window, Qt.MouseButton.LeftButton, pos=start + QPoint(0, 45))
+        app.processEvents()
+        assert scroll.property("contentY") > 0
+        assert bar.property("position") > 0
+    finally:
+        host.shutdown()
+
+
 @pytest.mark.parametrize("theme_name", ("dark", "light"))
 def test_nearly_fitting_pages_compact_spacing_before_requiring_scroll(
     tmp_path: Path,
@@ -6053,6 +6108,16 @@ def test_settings_keeps_output_controls_left_and_diagnostics_scrollable(
         assert_contained(profile_scroll, secondary)
         assert_contained(log_scroll, secondary)
         assert_contained(refresh, secondary)
+        for viewport, texts in (
+            (profile_scroll, (diagnostic,)),
+            (log_scroll, (ocr, translation, summary)),
+        ):
+            bar = _find_quick_item(viewport, "prismScrollBar")
+            assert bar is not None
+            lane_left = bar.mapToItem(viewport, QPointF(0, 0)).x()
+            for text in texts:
+                origin = text.mapToItem(viewport, QPointF(0, 0))
+                assert origin.x() + text.width() <= lane_left - 7.5
         if window_size == (1280, 820):
             assert log_scroll.height() > 142  # The former log viewport height.
         else:

@@ -206,13 +206,13 @@ Item {
                         contentHeight: settingsForm.implicitHeight
                         clip: true
                         boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                        ScrollBar.vertical: PrismScrollBar { id: translationBar; theme: root.theme }
 
                         FocusScrollGuard { flickable: translationFormScroll }
 
                         ColumnLayout {
                             id: settingsForm
-                            width: parent.width
+                            width: parent.width - translationBar.contentInset
                             spacing: 12
 
                             SectionHeader {

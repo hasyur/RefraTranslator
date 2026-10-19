@@ -99,10 +99,10 @@ Item {
                     contentHeight: cacheLastRunHitsColumn.implicitHeight
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                    ScrollBar.vertical: PrismScrollBar { id: cacheBar; theme: root.theme }
                     ColumnLayout {
                         id: cacheLastRunHitsColumn
-                        width: parent.width
+                        width: parent.width - cacheBar.contentInset
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                     spacing: 8

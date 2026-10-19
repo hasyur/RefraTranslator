@@ -177,12 +177,12 @@ Item {
                 contentHeight: homePrimaryContent.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                ScrollBar.vertical: PrismScrollBar { id: homePrimaryBar; theme: root.theme }
 
                 ColumnLayout {
                     id: homePrimaryContent
                     objectName: "homePrimaryContent"
-                    width: parent.width
+                    width: parent.width - homePrimaryBar.contentInset
                     height: implicitHeight
                     spacing: root.compactOverview ? 4 : 14
 
@@ -466,11 +466,11 @@ Item {
                 contentHeight: homeSecondaryContent.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                ScrollBar.vertical: PrismScrollBar { id: homeSecondaryBar; theme: root.theme }
 
                 ColumnLayout {
                     id: homeSecondaryContent
-                    width: homeSecondaryScroll.width
+                    width: homeSecondaryScroll.width - homeSecondaryBar.contentInset
                     height: implicitHeight
                 spacing: 14
 
