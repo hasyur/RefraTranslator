@@ -50,6 +50,7 @@ from game_screen_translator.gui.theme import (
 from game_screen_translator.gui.workbench_controller import WorkbenchController
 from game_screen_translator.live.latency import LiveLatencyStats
 from game_screen_translator.live.snapshot import CacheHit, SnapshotEntry, new_snapshot, save_snapshot
+from game_screen_translator.translation.cache import CacheStats
 from game_screen_translator.profiles import (
     ProfileCaptureSettings,
     apply_profile_runtime_settings,
@@ -6384,6 +6385,94 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
     ) == 2
     assert "layer.enabled: true" not in title_source
     assert 'objectName: "pageHeaderUnderline"' in main_source
+
+
+@pytest.mark.parametrize("skin,theme_name", [
+    (SKIN_PRISM, "dark"), (SKIN_PRISM, "light"), (SKIN_DOHNA, "light"),
+])
+def test_cache_large_metrics_and_multiline_hits_stay_clear_of_scrollbar(
+    tmp_path: Path, skin: str, theme_name: str,
+) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    profile = create_game_profile(
+        config_path, load_config(config_path), "cache-layout", display_name="缓存布局测试夹具",
+    )
+    save_snapshot(profile.directory, new_snapshot(
+        (SnapshotEntry("track", 0, "布局测试原文", "布局测试译文", 0.9, (20, 40, 420, 75)),),
+        tuple(CacheHit(f"CONTROLS - BASIC MOVEMENT {i}\n" + "长缓存原文 " * 12, 10882 - i)
+                  for i in range(5)), ocr_peak_seconds=None, llm_peak_seconds=None,
+    ))
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(skin)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(True)
+    controller.setPage("CACHE")
+    controller._set_cache_stats(CacheStats(
+        automatic_entries=4649, automatic_hits=10882, manual_corrections=12345678, manual_hits=0,
+    ))
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        window = host.window
+        assert window is not None
+        host.show()
+        panel = _find_quick_item(window, "cachePrimaryPanel")
+        assert panel is not None
+        for width, height in ((980, 700), (1280, 820), (1600, 900)):
+            window.resize(max(width, window.minimumWidth()), height)
+            _wait_for_page_layout(window, panel, app)
+            grid = _find_quick_item(panel, "cacheSummaryMetrics")
+            assert grid is not None
+            assert grid.property("columns") == (4 if grid.width() >= 510 else 2)
+            values = _find_quick_items(panel, "cacheMetricValue")
+            assert {value.property("text") for value in values} == {"4649", "10882", "12345678", "0"}
+            for value in values:
+                card = value.parentItem().parentItem()
+                origin = value.mapToItem(card, QPointF(0, 0))
+                assert origin.x() >= 11.5
+                assert origin.x() + value.width() <= card.width() - 11.5
+                assert value.property("contentWidth") <= value.width() + 0.5
+                assert value.property("contentHeight") <= value.height() + 0.5
+                assert not value.property("truncated")
+            scroll = _find_quick_item(panel, "cacheLastRunHits")
+            assert scroll is not None
+            bar = _find_quick_item(scroll, "prismScrollBar")
+            assert bar is not None
+            lane_left = bar.mapToItem(scroll, QPointF(0, 0)).x()
+            content = scroll.property("contentItem")
+            form = next(child for child in content.childItems() if child.width() > 30)
+            for child in form.childItems():
+                if child.isVisible():
+                    origin = child.mapToItem(scroll, QPointF(0, 0))
+                    assert origin.x() + child.width() <= lane_left - 7.5
+            for name in ("cacheHitSource", "cacheHitCount"):
+                texts = _find_quick_items(scroll, name)
+                assert len(texts) == 5
+                for text in texts:
+                    origin = text.mapToItem(scroll, QPointF(0, 0))
+                    assert origin.x() + text.width() <= lane_left - 7.5
+                    assert text.property("lineCount") == 1
+                    assert text.property("contentHeight") <= text.parentItem().height() + 0.5
+                    if name == "cacheHitCount":
+                        assert not text.property("truncated")
+            screenshot_dir = os.environ.get("REFRA_CACHE_SCREENSHOT_DIR")
+            if screenshot_dir:
+                destination = Path(screenshot_dir)
+                destination.mkdir(parents=True, exist_ok=True)
+                QTest.qWait(80)
+                assert window.grabWindow().save(str(destination / f"cache-fixture-{skin}-{theme_name}-{width}.png"))
+            maximum = max(0, scroll.property("contentHeight") - scroll.height())
+            scroll.setProperty("contentY", maximum)
+            app.processEvents()
+            hint = _find_quick_item(scroll, "cacheSummarySourceHint")
+            assert hint is not None
+            hint_origin = hint.mapToItem(scroll, QPointF(0, 0))
+            assert hint_origin.y() >= -0.5
+            assert hint_origin.y() + hint.height() <= scroll.height() + 0.5
+            scroll.setProperty("contentY", 0)
+    finally:
+        host.shutdown()
 
 
 def test_cache_page_hides_numeric_metrics_without_a_profile(tmp_path: Path) -> None:
