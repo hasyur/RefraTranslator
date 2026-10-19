@@ -1081,8 +1081,9 @@ class LiveController:
         self._translation_executor.shutdown(wait=True, cancel_futures=True)
         # Executors have now finished all work that can still publish. Drain
         # those completed futures once before taking the bounded snapshot.
-        self._collect_completed_work()
+        self._collect_completed_work(advance_processing=False)
         self._shutting_down = True
+        self._snapshot_running = False
         if not self._fatal_error:
             self._save_last_run_snapshot()
         print(
@@ -1157,10 +1158,6 @@ class LiveController:
     def _tick(self) -> None:
         if self._shutting_down:
             return
-        # Opportunistic fallback for tests and delayed Qt timer delivery.  In
-        # normal operation the independent completion timer gets here first.
-        self._collect_completed_work()
-
         now = time.monotonic()
         try:
             frame = self._capture.latest_frame()
@@ -1171,15 +1168,20 @@ class LiveController:
         self._sync_overlay_geometry()
         self._expire_missing_tracks(now)
         if frame is None:
+            self._advance_processing_transaction()
+            now = time.monotonic()
             self._mark_capture_waiting(now)
             self._publish_scene(self._latest_frame, self._tracker.visible_tracks)
             self._tick_dynamic_roi_without_frame(now)
             return
 
         self._mark_capture_resumed(now)
-        self._queue_untranslated_visible_sources()
-        self._dispatch_translation_work()
         self._latest_frame = frame
+        self._advance_processing_transaction()
+        # Collecting completed OCR can update the ROI scheduler with a later
+        # monotonic timestamp, so schedule the next capture scan using a fresh
+        # clock reading from after that collection.
+        now = time.monotonic()
         if self._force_full_scan:
             if self._ocr_future is None:
                 self._force_full_scan = False
@@ -1331,21 +1333,16 @@ class LiveController:
         )
         _live_message(detail)
 
-    def _collect_completed_work(self) -> None:
+    def _collect_completed_work(self, *, advance_processing: bool = True) -> None:
         if self._shutting_down:
             return
-        if self._snapshot_mode and self._snapshot_running and self._snapshot_is_current is not None:
-            try:
-                is_current = self._snapshot_is_current()
-            except Exception:
-                is_current = False
-            if not is_current:
-                self._invalidate_snapshot()
+        if advance_processing and not self._finalizing:
+            self._advance_processing_transaction()
+            return
         self._observe_capture_geometry()
-        self._collect_ocr()
-        self._collect_layout_arbitrations()
-        self._collect_translations()
-        self._advance_snapshot()
+        self._collect_ocr(advance_processing=False)
+        self._collect_layout_arbitrations(advance_processing=False)
+        self._collect_translations(advance_processing=False)
 
     def _submit_snapshot_frame(
         self,
@@ -1372,15 +1369,12 @@ class LiveController:
         self._submit_ocr(frame, triggered_at=time.monotonic(), scan_label="停留触发")
         self._completion_timer.start()
 
-    def _advance_snapshot(self) -> None:
-        if (
-            not self._snapshot_mode
-            or not self._snapshot_running
-            or self._finalizing
-            or self._shutting_down
-        ):
+    def _advance_processing_transaction(self) -> None:
+        if self._finalizing or self._shutting_down:
             return
-        if self._snapshot_is_current is not None:
+
+        snapshot_active = self._snapshot_mode and self._snapshot_running
+        if snapshot_active and self._snapshot_is_current is not None:
             try:
                 current = self._snapshot_is_current()
             except Exception:
@@ -1388,22 +1382,48 @@ class LiveController:
             if not current:
                 self._invalidate_snapshot()
 
-        if self._snapshot_stale:
+        # The live completion timer, live capture tick, and frozen-frame timer
+        # all collect work through this same transaction pass. Frame/ROI
+        # scheduling remains in _tick; transaction progress never depends on
+        # a new frame arriving.
+        self._observe_capture_geometry()
+        self._collect_ocr(advance_processing=False)
+        self._collect_layout_arbitrations(advance_processing=False)
+        self._collect_translations(advance_processing=False)
+
+        if snapshot_active and self._snapshot_stale:
             if not self._snapshot_has_pending_work():
                 self._snapshot_running = False
                 self._completion_timer.stop()
             return
 
-        if self._snapshot_error is not None:
+        if snapshot_active and self._snapshot_error is not None:
+            self._translation_exhausted_keys.update(
+                (track.track_id, track.revision)
+                for track in self._tracker.visible_tracks
+                if track.missing_since is None and track.display_translation is None
+            )
+            # Work admitted before the OCR error can still complete; keep
+            # collecting it, but do not admit new source or confirmation work.
+            self._dispatch_translation_work()
+            if not self._snapshot_has_pending_work():
+                self._snapshot_running = False
+                self._completion_timer.stop()
+            return
+
+        # Both live and frozen-frame processing pass through this admission
+        # and dispatch path. Capacity-limited batches are refilled whenever
+        # completed work is collected, even if no new capture frame arrives.
+        self._dispatch_translation_work()
+        self._queue_untranslated_visible_sources(dispatch=False)
+        self._dispatch_translation_work()
+
+        if not snapshot_active:
+            return
+        if not self._processing_has_pending_work():
             self._snapshot_running = False
             self._completion_timer.stop()
             return
-
-        # Live `_tick` retries this admission step on every poll. Translation
-        # admission can be bounded by max_concurrency/max_batch_size, so a
-        # frozen-frame session must drain that same queue before it can finish.
-        self._queue_untranslated_visible_sources()
-        self._dispatch_translation_work()
         if self._snapshot_has_pending_work():
             return
 
@@ -1434,8 +1454,33 @@ class LiveController:
                 return
             return
 
-        self._snapshot_running = False
-        self._completion_timer.stop()
+        # A frozen input can provide the same frame for its necessary layout
+        # and revision confirmation. Live mode leaves that choice to its
+        # existing capture/ROI schedulers.
+        # Any pending item not represented by asynchronous work or a required
+        # confirmation remains pending. Do not turn it into a false terminal.
+
+    def _processing_has_pending_work(self) -> bool:
+        if (
+            self._snapshot_has_pending_work()
+            or self._tracker.has_pending_revisions
+            or self._layout_stabilizer.has_pending
+            or self._layout_arbitration_blocked_member_ids
+        ):
+            return True
+        for track in self._tracker.visible_tracks:
+            if track.missing_since is not None:
+                continue
+            key = (track.track_id, track.revision)
+            if not track.stable_emitted or track.translation_suppressed:
+                return True
+            if (
+                track.display_translation is None
+                and key not in self._translation_exhausted_keys
+                and not self._track_waits_for_layout_arbitration(track)
+            ):
+                return True
+        return False
 
     def _invalidate_snapshot(self) -> None:
         if self._snapshot_stale:
@@ -1499,10 +1544,10 @@ class LiveController:
                 )
             )
         items.sort(key=lambda item: (item.bounds[1], item.bounds[0]))
-        pending = self._snapshot_has_pending_work() or any(
-            item.state == "pending" for item in items
-        ) or self._tracker.has_pending_revisions or self._layout_stabilizer.has_pending
-        terminal = not pending and not self._snapshot_running
+        pending = self._processing_has_pending_work() or self._snapshot_running
+        if self._shutting_down:
+            pending = False
+        terminal = not pending
         return ProcessingSnapshot(
             request_id=self._snapshot_request_id,
             items=tuple(items),
@@ -2056,7 +2101,7 @@ class LiveController:
             len(unresolved_requests),
         )
 
-    def _collect_ocr(self) -> None:
+    def _collect_ocr(self, *, advance_processing: bool = True) -> None:
         future = self._ocr_future
         if future is None or not future.done():
             return
@@ -2132,8 +2177,6 @@ class LiveController:
             print(f"OCR 错误：{exc}", file=sys.stderr)
             if self._snapshot_mode:
                 self._snapshot_error = f"OCR 失败：{exc}"
-                self._snapshot_running = False
-                self._completion_timer.stop()
             if follow_up is not None and not self._finalizing:
                 self._submit_roi_ocr(follow_up)
             elif (
@@ -2260,6 +2303,7 @@ class LiveController:
                 ),
                 first_recognized_at=task_result.completed_at,
             ),
+            advance_processing=advance_processing,
         )
 
         scheduler = None if self._snapshot_mode else self._roi_scheduler
@@ -2365,6 +2409,7 @@ class LiveController:
         now: float,
         *,
         default_origin: _SourceLatencyOrigin,
+        advance_processing: bool = True,
     ) -> None:
         previous_keys = {
             (track.track_id, track.revision) for track in self._tracker.visible_tracks
@@ -2390,9 +2435,9 @@ class LiveController:
                 visible_by_key[(source.track_id, source.revision)]
             )
         )
-        if translatable_sources and not self._finalizing:
+        if translatable_sources and not self._finalizing and advance_processing:
             self._submit_translations(translatable_sources)
-        if not self._finalizing:
+        if not self._finalizing and advance_processing:
             self._dispatch_translation_work()
 
     def _queue_layout_arbitration(self, request: LayoutArbitrationRequest) -> None:
@@ -2443,7 +2488,7 @@ class LiveController:
             oldest_key = next(iter(self._layout_arbitration_cache))
             self._layout_arbitration_cache.pop(oldest_key)
 
-    def _collect_layout_arbitrations(self) -> None:
+    def _collect_layout_arbitrations(self, *, advance_processing: bool = True) -> None:
         completed_current: list[_LayoutArbitrationSubmission] = []
         active_lines = self._active_ocr_lines()
         for future in tuple(self._layout_arbitration_futures):
@@ -2478,7 +2523,7 @@ class LiveController:
             completed_current.append(submission)
 
         if not completed_current:
-            if not self._finalizing:
+            if not self._finalizing and advance_processing:
                 self._dispatch_translation_work()
             return
         # The revision and active-key checks above ensure this rebuild cannot
@@ -2495,13 +2540,15 @@ class LiveController:
                 min(item.pipeline_started_at for item in completed_current),
                 min(item.first_recognized_at for item in completed_current),
             ),
+            advance_processing=advance_processing,
         )
         # If the arbiter kept (or fell back to) the rule topology, those tracks
         # were already stable before the request and will not emit stable_sources
         # a second time.  Queue them explicitly now that the block is unblocked.
-        self._queue_untranslated_visible_sources()
-        if not self._finalizing:
-            self._dispatch_translation_work()
+        if advance_processing:
+            self._queue_untranslated_visible_sources()
+            if not self._finalizing:
+                self._dispatch_translation_work()
         if self._latest_frame is not None:
             self._publish_scene(self._latest_frame, self._tracker.visible_tracks)
 
@@ -2524,7 +2571,12 @@ class LiveController:
 
         return asyncio.run(arbitrate())
 
-    def _submit_translations(self, sources: Sequence[SourceText]) -> None:
+    def _submit_translations(
+        self,
+        sources: Sequence[SourceText],
+        *,
+        dispatch: bool = True,
+    ) -> None:
         if not sources:
             return
         batch_size = self._config.live.max_batch_size
@@ -2550,7 +2602,8 @@ class LiveController:
             visible_by_key,
         )
         self._prune_obsolete_pending_translations()
-        self._dispatch_translation_work()
+        if dispatch:
+            self._dispatch_translation_work()
         scheduled_keys = self._scheduled_translation_keys()
         queued_sources = tuple(
             source
@@ -2560,7 +2613,8 @@ class LiveController:
             not in self._translation_exhausted_keys
         )
         if not queued_sources:
-            self._dispatch_translation_work()
+            if dispatch:
+                self._dispatch_translation_work()
             return
 
         context = self._context_snapshot()
@@ -2616,7 +2670,8 @@ class LiveController:
                     1,
                 )
             )
-        self._dispatch_translation_work()
+        if dispatch:
+            self._dispatch_translation_work()
         self._translation_queue_peak = max(
             self._translation_queue_peak,
             len(self._pending_translations),
@@ -2708,7 +2763,7 @@ class LiveController:
             )
         return scheduled
 
-    def _queue_untranslated_visible_sources(self) -> None:
+    def _queue_untranslated_visible_sources(self, *, dispatch: bool = True) -> None:
         if self._finalizing:
             return
         visible = self._tracker.visible_tracks
@@ -2730,7 +2785,7 @@ class LiveController:
             not in self._translation_exhausted_keys
         )
         if deferred:
-            self._submit_translations(deferred)
+            self._submit_translations(deferred, dispatch=dispatch)
 
     def _dispatch_translation_work(self) -> None:
         self._dispatch_pending_layout_arbitrations()
@@ -2862,7 +2917,7 @@ class LiveController:
             llm_seconds,
         )
 
-    def _collect_translations(self) -> None:
+    def _collect_translations(self, *, advance_processing: bool = True) -> None:
         self._cancel_obsolete_translation_futures()
         for future in tuple(self._translation_futures):
             if not future.done():
@@ -2946,7 +3001,7 @@ class LiveController:
             )
 
         self._publish_ready_translations()
-        if not self._finalizing:
+        if not self._finalizing and advance_processing:
             self._dispatch_translation_work()
 
     def _schedule_quality_correction(

@@ -620,11 +620,20 @@ def test_live_controller_collects_completed_work_on_independent_timer(
         app=app,
     )
     collected: list[str] = []
-    monkeypatch.setattr(controller, "_collect_ocr", lambda: collected.append("ocr"))
+    monkeypatch.setattr(
+        controller,
+        "_collect_ocr",
+        lambda **_kwargs: collected.append("ocr"),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_collect_layout_arbitrations",
+        lambda **_kwargs: None,
+    )
     monkeypatch.setattr(
         controller,
         "_collect_translations",
-        lambda: collected.append("translation"),
+        lambda **_kwargs: collected.append("translation"),
     )
 
     assert controller._timer.interval() == 200
@@ -1523,7 +1532,7 @@ def test_dynamic_roi_empty_result_retries_once_with_a_wider_fresh_crop(
         app=app,
         debug=True,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [10.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -1649,7 +1658,7 @@ def test_dynamic_roi_baseline_reversion_keeps_one_retry_confirmation(
         app=app,
         browser_overlay=browser_overlay,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [10.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -1772,7 +1781,7 @@ def test_dynamic_roi_baseline_returns_before_empty_roi_completes(
         app=app,
         browser_overlay=browser_overlay,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [10.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -1918,7 +1927,7 @@ def test_dynamic_roi_expiry_runs_without_frame_while_retry_ocr_is_running(
         app=app,
         browser_overlay=browser_overlay,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [10.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -2032,7 +2041,7 @@ def test_dynamic_roi_empty_retry_stops_after_one_failed_retry(monkeypatch) -> No
         control=FakeControl(),
         app=app,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [20.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -2176,7 +2185,7 @@ def test_dynamic_roi_full_frame_confirmation_reconciles_latest_saved_frame(
         control=FakeControl(),
         app=app,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [10.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -2302,7 +2311,7 @@ def test_dynamic_roi_completion_does_not_dispatch_while_finalizing(monkeypatch) 
         control=FakeControl(),
         app=app,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [20.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -2356,7 +2365,7 @@ def test_dynamic_roi_full_frame_confirmation_does_not_replay_static_scene(
         control=FakeControl(),
         app=app,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [20.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -2444,7 +2453,7 @@ def test_dynamic_roi_new_frame_during_confirmation_gets_own_confirmation(
         control=FakeControl(),
         app=app,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [30.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -2613,7 +2622,7 @@ def test_legacy_runtime_confirms_changed_visible_text_without_idle_timers(
         control=FakeControl(),
         app=app,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [10.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -2718,7 +2727,7 @@ def test_dynamic_roi_retries_until_visible_text_revision_is_confirmed(
         control=FakeControl(),
         app=app,
     )
-    monkeypatch.setattr(controller, "_submit_translations", lambda sources: None)
+    monkeypatch.setattr(controller, "_submit_translations", lambda sources, **_kwargs: None)
     clock = [10.0]
     monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
 
@@ -3477,6 +3486,73 @@ def test_deferred_visible_text_returns_when_queue_has_capacity(monkeypatch) -> N
     )
     assert controller._pending_translations == []
     controller.close()
+
+
+@pytest.mark.parametrize("snapshot_mode", [False, True])
+def test_completion_timer_refills_shared_queue_without_new_frame(
+    monkeypatch, snapshot_mode,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-1.8b",
+            max_concurrency=1,
+        ),
+        live=LiveConfig(stable_observations=1, stable_ms=0, max_batch_size=1),
+    )
+    capture = FakeCapture()
+    capture.latest_frame = lambda: pytest.fail("completion must not poll capture")
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=FakeOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    controller._snapshot_mode = snapshot_mode
+    controller._snapshot_running = snapshot_mode
+    sources = _many_visible_sources(controller, 9)
+    calls: list[str] = []
+
+    def translate(batch, context):
+        del context
+        calls.extend(source.text for source in batch.items)
+        return _successful_worker_result(batch)
+
+    monkeypatch.setattr(controller, "_translate_blocking_timed", translate)
+    try:
+        controller._submit_translations(sources)
+        assert len(controller._pending_translations) > 0
+
+        deadline = live_runtime.time.monotonic() + 3
+        while any(
+            track.translated_text is None
+            for track in controller._tracker.visible_tracks
+        ):
+            assert live_runtime.time.monotonic() < deadline
+            active = tuple(controller._translation_futures)
+            assert active, "the shared transaction should admit the next batch"
+            active[0].result(timeout=2)
+            # Even a completed future is pending until the shared advancement
+            # collects it. Reading progress cannot dispatch or publish work.
+            before = (tuple(controller._translation_futures), tuple(controller._pending_translations),
+                      tuple(track.translated_text for track in controller._tracker.visible_tracks))
+            snapshot = controller.processing_session.snapshot()
+            assert snapshot.pending and not snapshot.terminal
+            assert controller.processing_session.snapshot() == snapshot
+            assert before == (tuple(controller._translation_futures), tuple(controller._pending_translations),
+                              tuple(track.translated_text for track in controller._tracker.visible_tracks))
+            controller._completion_timer.timeout.emit()
+
+        assert calls == [source.text for source in sources]
+        assert controller._pending_translations == []
+        assert controller._translation_futures == {}
+        assert not controller.processing_session.snapshot().pending
+        assert controller.processing_session.snapshot().terminal
+    finally:
+        controller.close()
 
 
 def test_concurrent_batches_publish_in_top_to_bottom_order(monkeypatch) -> None:
