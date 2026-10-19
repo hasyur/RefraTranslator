@@ -52,7 +52,9 @@ Item {
                     }
 
                     Text {
-                        text: "动态 ROI 开关位于 OCR 页；这里仅调整与当前模式对应的调度参数。"
+                        text: root.workbench.triggerMethodIndex === 2
+                              ? "触发方式在 OCR 页选择。鼠标模式仅在触发后推进 ROI 处理，等待期间保留上次译文。"
+                              : "触发方式在 OCR 页选择；这里调整与当前方式对应的调度参数。"
                         color: root.theme.textDim
                         font.family: root.theme.uiFontFor(text)
                         font.pixelSize: 13
@@ -63,12 +65,14 @@ Item {
                     SettingLabel {
                         theme: root.theme
                         title: "画面变化轮询"
+                        visible: root.workbench.triggerMethodIndex !== 2
                         meta: "FPS"
                         description: "设置画面变化的检查频率。"
                         settingKey: "settings-poll-fps"
                     }
                     NumberStepper {
                         objectName: "settingsCalibrationStepper"
+                        visible: root.workbench.triggerMethodIndex !== 2
                         theme: root.theme
                         accessibleName: "画面变化轮询频率"
                         settingDescription: "设置画面变化的检查频率。"
@@ -87,6 +91,7 @@ Item {
                     SettingLabel {
                         theme: root.theme
                         title: "字幕消失判定"
+                        visible: root.workbench.triggerMethodIndex !== 2
                         meta: "50—1000 MS"
                         description: "设置字幕多久未更新后被判定为消失。"
                         settingKey: "settings-clear-after"
@@ -94,6 +99,7 @@ Item {
                     NumberStepper {
                         theme: root.theme
                         accessibleName: "字幕消失判定时间"
+                        visible: root.workbench.triggerMethodIndex !== 2
                         settingDescription: "设置字幕多久未更新后被判定为消失。"
                         settingKey: "settings-clear-after"
                         value: root.workbench.clearAfterMs

@@ -67,6 +67,12 @@ browser_overlay_port = 47831
 root_dir = "profiles"
 
 [live]
+# continuous 配合 dynamic_roi_enabled=false/true 对应“原生”/“动态 ROI”。
+# mouse_dwell 配合 dynamic_roi_enabled=true 为按需省资源的“鼠标触发”。
+# 处理完成后等待下次鼠标移动并停稳。
+trigger_mode = "continuous"
+# 鼠标触发模式的停稳等待时间，单位毫秒；0 表示无额外等待。
+mouse_dwell_ms = 300
 # 相对于所选显示器的左、上、宽、高比例（0 到 1）；运行时按当前分辨率换算像素。
 # [0.0, 0.0, 1.0, 1.0] 表示整个显示器；旧像素区域会重置为全屏，请重新框选保存。
 region_ratio = [0.0, 0.0, 1.0, 1.0]

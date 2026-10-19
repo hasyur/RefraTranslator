@@ -454,6 +454,8 @@ class WorkbenchController(QObject):
         self._overlay_opacity = self._config.preview.overlay_opacity
         self._browser_overlay_enabled = self._config.recording.browser_overlay_enabled
         self._dynamic_roi_enabled = self._config.live.dynamic_roi_enabled
+        self._trigger_mode = self._config.live.trigger_mode
+        self._mouse_dwell_ms = self._config.live.mouse_dwell_ms
         self._change_poll_fps = self._config.live.change_poll_fps
         self._roi_response_target_ms = self._config.live.dynamic_roi_response_target_ms
         self._clear_after_ms = self._config.live.clear_after_ms
@@ -1065,6 +1067,16 @@ class WorkbenchController(QObject):
 
     # ----- scheduling, cache and diagnostics -------------------------
 
+    @Property(int, notify=stateChanged)
+    def triggerMethodIndex(self) -> int:
+        if self._trigger_mode == "mouse_dwell":
+            return 2
+        return 1 if self._dynamic_roi_enabled else 0
+
+    @Property(int, notify=stateChanged)
+    def mouseDwellMs(self) -> int:
+        return self._mouse_dwell_ms
+
     @Property(bool, notify=stateChanged)
     def dynamicRoiEnabled(self) -> bool:
         return self._dynamic_roi_enabled
@@ -1245,6 +1257,8 @@ class WorkbenchController(QObject):
         self._overlay_opacity = self._config.preview.overlay_opacity
         self._browser_overlay_enabled = self._config.recording.browser_overlay_enabled
         self._dynamic_roi_enabled = live.dynamic_roi_enabled
+        self._trigger_mode = live.trigger_mode
+        self._mouse_dwell_ms = live.mouse_dwell_ms
         self._debug_enabled = live.debug_border
         self._change_poll_fps = live.change_poll_fps
         self._roi_response_target_ms = live.dynamic_roi_response_target_ms
@@ -1390,6 +1404,8 @@ class WorkbenchController(QObject):
         self._overlay_opacity = self._config.preview.overlay_opacity
         self._browser_overlay_enabled = self._config.recording.browser_overlay_enabled
         self._dynamic_roi_enabled = live.dynamic_roi_enabled
+        self._trigger_mode = live.trigger_mode
+        self._mouse_dwell_ms = live.mouse_dwell_ms
         self._debug_enabled = live.debug_border
         self._change_poll_fps = live.change_poll_fps
         self._roi_response_target_ms = live.dynamic_roi_response_target_ms
@@ -1998,10 +2014,26 @@ class WorkbenchController(QObject):
 
     @Slot(bool)
     def setDynamicRoiEnabled(self, value: bool) -> None:
-        value = bool(value)
-        if value == self._dynamic_roi_enabled:
+        self.setTriggerMethodIndex(1 if value else 0)
+
+    @Slot(int)
+    def setTriggerMethodIndex(self, index: int) -> None:
+        if index not in (0, 1, 2):
             return
-        self._dynamic_roi_enabled = value
+        mode = "mouse_dwell" if index == 2 else "continuous"
+        roi_enabled = index != 0
+        if mode == self._trigger_mode and roi_enabled == self._dynamic_roi_enabled:
+            return
+        self._trigger_mode = mode
+        self._dynamic_roi_enabled = roi_enabled
+        self._mark_runtime_dirty()
+
+    @Slot(int)
+    def setMouseDwellMs(self, value: int) -> None:
+        value = max(0, min(10000, int(value)))
+        if value == self._mouse_dwell_ms:
+            return
+        self._mouse_dwell_ms = value
         self._mark_runtime_dirty()
 
     @Slot(int)
@@ -2097,6 +2129,8 @@ class WorkbenchController(QObject):
             ocr_cooldown_ms=self._ocr_cooldown_ms,
             clear_after_ms=self._clear_after_ms,
             dynamic_roi_enabled=self._dynamic_roi_enabled,
+            trigger_mode=self._trigger_mode,
+            mouse_dwell_ms=self._mouse_dwell_ms,
             debug_border=self._debug_enabled,
             change_poll_fps=self._change_poll_fps,
             dynamic_roi_response_target_ms=self._roi_response_target_ms,
@@ -2163,6 +2197,8 @@ class WorkbenchController(QObject):
             self._config.recording.browser_overlay_enabled
         )
         self._dynamic_roi_enabled = live.dynamic_roi_enabled
+        self._trigger_mode = live.trigger_mode
+        self._mouse_dwell_ms = live.mouse_dwell_ms
         self._debug_enabled = live.debug_border
         self._change_poll_fps = live.change_poll_fps
         self._roi_response_target_ms = live.dynamic_roi_response_target_ms

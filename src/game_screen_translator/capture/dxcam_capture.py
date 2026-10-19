@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import time
 from threading import Event, Lock, RLock, Thread, current_thread
 from types import TracebackType
 from typing import Any
@@ -19,6 +20,10 @@ class CaptureDependencyError(RuntimeError):
     """Raised when DXcam is unavailable or cannot initialize capture."""
 
 
+_WINRT_FIRST_FRAME_WAIT_SECONDS = 0.5
+_WINRT_FRAME_POLL_SECONDS = 0.005
+
+
 @dataclass(slots=True)
 class DxcamCapture:
     monitor_index: int = 0
@@ -26,6 +31,7 @@ class DxcamCapture:
     target_fps: int = 15
     backend: str = "dxgi"
     max_buffer_len: int = 4
+    continuous: bool = True
     region: tuple[int, int, int, int] | None = field(init=False, default=None)
     output_size: tuple[int, int] | None = field(init=False, default=None)
     active_backend: str | None = field(init=False, default=None)
@@ -65,7 +71,13 @@ class DxcamCapture:
             self._start_unlocked()
 
     def _start_unlocked(self) -> None:
-        if self._started:
+        if self._camera is not None:
+            return
+        if (
+            not self.continuous
+            and self.active_backend == "winrt"
+            and self.output_size is not None
+        ):
             return
         try:
             import dxcam
@@ -87,14 +99,12 @@ class DxcamCapture:
                 self._camera = camera
                 self.output_size = (int(camera.width), int(camera.height))
                 self.region = self._resolve_region(*self.output_size)
-                camera.start(
-                    region=self.region,
-                    target_fps=self.target_fps,
-                    video_mode=True,
-                )
-                self._started = True
                 self.active_backend = backend
-                self._start_reader(camera)
+                if self.continuous:
+                    self._activate_unlocked(camera, start_reader=True)
+                elif backend == "winrt":
+                    camera.release()
+                    self._camera = None
                 return
             except Exception as exc:
                 errors.append(f"{backend}: {exc}")
@@ -104,6 +114,112 @@ class DxcamCapture:
             + "；".join(errors)
             + "。如果游戏使用独占全屏，请切换为无边框窗口。"
         )
+
+    def capture_once(self) -> np.ndarray | None:
+        """Capture one frame without maintaining a background stream.
+
+        Continuous capture keeps its established reader/latest-frame behavior.
+        In on-demand mode the DXcam object is initialized by ``start()``, but
+        ``grab`` performs the frame capture directly without starting a stream.
+        """
+        if self.continuous:
+            return self.latest_frame()
+        with self._lifecycle_lock:
+            self._start_unlocked()
+            backend = self.active_backend
+            if backend is None:
+                raise CaptureDependencyError("采集器尚未选择后端")
+            release_after_capture = backend == "winrt"
+            camera = self._camera
+            frame = None
+            capture_error: Exception | None = None
+            try:
+                if release_after_capture:
+                    if camera is not None:
+                        raise CaptureDependencyError(
+                            "待机中的 WinRT 采集会话未释放"
+                        )
+                    camera = self._create_camera(backend)
+                    self._camera = camera
+                if camera is None:
+                    raise CaptureDependencyError("采集器尚未初始化")
+                self._ensure_current_geometry(camera)
+                if release_after_capture:
+                    frame = self._grab_winrt_frame(camera, self.region)
+                else:
+                    frame = camera.grab(
+                        region=self.region,
+                        copy=True,
+                        new_frame_only=False,
+                    )
+            except Exception as exc:
+                capture_error = exc
+            finally:
+                if release_after_capture and camera is not None:
+                    try:
+                        camera.release()
+                    except Exception as exc:
+                        if capture_error is None:
+                            capture_error = exc
+                    else:
+                        if self._camera is camera:
+                            self._camera = None
+            if capture_error is not None:
+                raise CaptureDependencyError(
+                    f"单帧屏幕采集或资源释放失败：{capture_error}"
+                ) from capture_error
+            if frame is None:
+                return None
+            return np.asarray(frame)
+
+    @staticmethod
+    def _grab_winrt_frame(camera: Any, region: tuple[int, int, int, int]) -> Any:
+        """Wait briefly for a new WinRT frame before releasing its session.
+
+        DXcam's WinRT one-shot grab waits for only a few milliseconds for its
+        first frame. A fresh capture session can need longer to deliver that
+        frame, so retry until a bounded deadline rather than releasing an
+        empty session immediately.
+        """
+        deadline = time.monotonic() + _WINRT_FIRST_FRAME_WAIT_SECONDS
+        while True:
+            frame = camera.grab(
+                region=region,
+                copy=True,
+                new_frame_only=True,
+            )
+            if frame is not None:
+                return frame
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            time.sleep(min(_WINRT_FRAME_POLL_SECONDS, remaining))
+
+    def _create_camera(self, backend: str) -> Any:
+        import dxcam
+
+        return dxcam.create(
+            output_idx=self.monitor_index,
+            region=None,
+            output_color="RGB",
+            max_buffer_len=self.max_buffer_len,
+            backend=backend,
+        )
+
+    def _activate_unlocked(self, camera: Any, *, start_reader: bool) -> None:
+        if self._started:
+            return
+        try:
+            camera.start(
+                region=self.region,
+                target_fps=self.target_fps,
+                video_mode=True,
+            )
+        except Exception as exc:
+            raise CaptureDependencyError(f"无法启动 DXcam：{exc}") from exc
+        self._started = True
+        if start_reader:
+            self._start_reader(camera)
 
     def latest_frame(self) -> np.ndarray | None:
         with self._lifecycle_lock:
@@ -210,7 +326,10 @@ class DxcamCapture:
         if current_size is None:
             return
         expected_region = self._resolve_region(*current_size)
-        camera_region = self._camera_region(camera)
+        # DXcam's one-shot ``grab(region=...)`` selects pixels for that call
+        # without changing the camera object's configured region. Only the
+        # continuous stream path can use camera.region as a geometry signal.
+        camera_region = self._camera_region(camera) if self.continuous else None
         region_changed = (
             self.region != expected_region
             or (camera_region is not None and camera_region != expected_region)
@@ -248,6 +367,16 @@ class DxcamCapture:
         output_size: tuple[int, int],
     ) -> None:
         region = self._resolve_region(*output_size)
+        if not self._started:
+            self.output_size = output_size
+            self.region = region
+            self._camera = camera
+            with self._frame_lock:
+                self._latest_generation = 0
+                self._delivered_generation = 0
+                self._reader_error = None
+                self._geometry_pending = False
+            return
         reader = self._reader_thread
         self._reader_thread = None
         self._started = False
@@ -306,7 +435,8 @@ class DxcamCapture:
         self.region = region
         self._camera = camera
         self._started = True
-        self._start_reader(camera)
+        if self.continuous:
+            self._start_reader(camera)
 
     @staticmethod
     def _camera_output_size(camera: Any) -> tuple[int, int] | None:

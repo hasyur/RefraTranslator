@@ -83,6 +83,8 @@ def test_load_config_normalizes_base_url(tmp_path: Path) -> None:
     assert config.recording.browser_overlay_port == DEFAULT_BROWSER_OVERLAY_PORT
     assert config.recording.browser_overlay_url.endswith(":47831/overlay")
     assert config.live.capture_backend == "dxgi"
+    assert config.live.trigger_mode == "continuous"
+    assert config.live.mouse_dwell_ms == 300
     assert config.live.stable_observations == 1
     assert config.live.stable_ms == 0
     assert config.live.capture_fps == 12
@@ -133,6 +135,8 @@ def test_fresh_config_and_installer_template_share_runtime_defaults(tmp_path: Pa
         assert config.translation.max_concurrency == 4
         assert config.translation.builtin_parallel == 4
         assert config.live.dynamic_roi_enabled is True
+        assert config.live.trigger_mode == "continuous"
+        assert config.live.mouse_dwell_ms == 300
         assert config.live.clear_after_ms == 150
         assert config.live.dynamic_roi_response_target_ms == 350
 
@@ -160,6 +164,58 @@ dynamic_roi_response_target_ms = 500
     assert config.live.dynamic_roi_enabled is False
     assert config.live.clear_after_ms == 900
     assert config.live.dynamic_roi_response_target_ms == 500
+
+
+def test_mouse_dwell_config_is_persisted_and_requires_roi(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    _write(
+        path,
+        """
+[live]
+trigger_mode = "mouse_dwell"
+mouse_dwell_ms = 450
+dynamic_roi_enabled = true
+""",
+    )
+
+    config = load_config(path)
+
+    assert config.live.trigger_mode == "mouse_dwell"
+    assert config.live.mouse_dwell_ms == 450
+
+    _write(
+        path,
+        """
+[live]
+trigger_mode = "mouse_dwell"
+dynamic_roi_enabled = false
+""",
+    )
+    with pytest.raises(ConfigError, match="必须启用 dynamic_roi_enabled"):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("trigger_mode", '"hover"'),
+        ("trigger_mode", "true"),
+        ("mouse_dwell_ms", "-1"),
+        ("mouse_dwell_ms", "10001"),
+        ("mouse_dwell_ms", "true"),
+        ("mouse_dwell_ms", "300.5"),
+    ],
+)
+def test_load_config_rejects_invalid_mouse_trigger_settings(
+    tmp_path: Path,
+    key: str,
+    value: str,
+) -> None:
+    path = tmp_path / "config.toml"
+    _write(path, f"\n[live]\n{key} = {value}\n")
+
+    with pytest.raises(ConfigError, match="trigger_mode|mouse_dwell_ms"):
+        load_config(path)
 
 
 def test_default_api_key_name_falls_back_to_legacy_name(monkeypatch) -> None:

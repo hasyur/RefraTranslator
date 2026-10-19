@@ -270,21 +270,62 @@ Item {
 
                     SettingLabel {
                         theme: root.theme
-                        title: "变化检测"
-                        meta: "DYNAMIC ROI"
-                        description: "启用后只处理画面中发生变化的区域。"
-                        settingKey: "ocr-dynamic"
+                        title: "触发方式"
+                        meta: "RUN MODE"
+                        description: "原生沿用整区扫描；动态 ROI 持续按变化更新；鼠标触发按需处理以减少 GPU 运行时间。"
+                        settingKey: "ocr-trigger-method"
                     }
-                    PrismToggle {
+                    PrismComboBox {
+                        objectName: "triggerMethodSelector"
                         theme: root.theme
-                        text: "只识别发生变化的区域"
-                        settingDescription: "启用后只处理画面中发生变化的区域。"
-                        settingKey: "ocr-dynamic"
-                        checked: root.workbench.dynamicRoiEnabled
+                        accessibleName: "触发方式"
+                        settingDescription: "选择原生、动态 ROI 或鼠标触发。停止翻译后可更改。"
+                        settingKey: "ocr-trigger-method"
+                        model: ["原生", "动态 ROI", "鼠标触发"]
+                        currentIndex: root.workbench.triggerMethodIndex
+                        enabled: !root.workbench.running
                         Layout.fillWidth: true
-                        onToggled: {
-                            root.workbench.setDynamicRoiEnabled(checked)
+                        onActivated: index => {
+                            root.workbench.setTriggerMethodIndex(index)
                             root.visualAction("focus")
+                        }
+                    }
+                    Text {
+                        objectName: "triggerMethodDescription"
+                        visible: root.workbench.triggerMethodIndex === 2
+                        text: "鼠标移动后停稳时更新所选区域，完成后等待下次触发。轻微移动不重复触发，可能错过短暂字幕。"
+                        color: root.theme.textDim
+                        font.family: root.theme.uiFontFor(text)
+                        font.pixelSize: 13
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    ColumnLayout {
+                        objectName: "mouseDwellSettings"
+                        visible: root.workbench.triggerMethodIndex === 2
+                        spacing: 7
+                        Layout.fillWidth: true
+                        SettingLabel {
+                            theme: root.theme
+                            title: "鼠标停稳等待"
+                            meta: "0—10000 MS"
+                            description: "鼠标移动后保持静止多久才开始识别；0 表示不增加等待。"
+                            settingKey: "ocr-mouse-dwell"
+                        }
+                        NumberStepper {
+                            objectName: "mouseDwellMsStepper"
+                            theme: root.theme
+                            accessibleName: "鼠标停稳等待时间"
+                            settingDescription: "鼠标停稳后再等待指定毫秒数开始识别。"
+                            settingKey: "ocr-mouse-dwell"
+                            minimum: 0
+                            maximum: 10000
+                            stepSize: 50
+                            suffix: "ms"
+                            value: root.workbench.mouseDwellMs
+                            enabled: !root.workbench.running
+                            Layout.fillWidth: true
+                            onEdited: value => root.workbench.setMouseDwellMs(value)
                         }
                     }
 

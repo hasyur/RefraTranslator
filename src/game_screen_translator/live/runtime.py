@@ -33,6 +33,11 @@ from game_screen_translator.gui.theme import (
 )
 from game_screen_translator.live.change_detector import FrameChangeDetector
 from game_screen_translator.live.latency import LiveLatencyStats
+from game_screen_translator.live.mouse_dwell import (
+    MOUSE_DWELL_POLL_INTERVAL_MS,
+    MouseDwellGate,
+    MouseDwellRequest,
+)
 from game_screen_translator.live.processing_session import (
     LiveProcessingSession,
     ProcessingItemSnapshot,
@@ -109,7 +114,7 @@ from game_screen_translator.translation.transport import (
 
 try:
     from PySide6.QtCore import QTimer, Qt
-    from PySide6.QtGui import QFont, QFontMetrics
+    from PySide6.QtGui import QCursor, QFont, QFontMetrics
     from PySide6.QtWidgets import (
         QApplication,
         QFrame,
@@ -613,7 +618,7 @@ class LiveControlWindow(QWidget):
             "QLabel#hudStatus, QLabel#hudStatusIndicator, QLabel#hudProfile, "
             "QLabel#hudCoverage, QLabel#hudLatencyGroup, QLabel#hudLatencyTitle, "
             "QLabel#hudLatencyValue, QLabel#hudStatusDetail {"
-            f"font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
+            "font-family: 'Segoe UI Variable', 'Microsoft YaHei UI'; "
             "font-weight: 500; }"
             "QLabel#hudStatus, QLabel#hudStatusIndicator { color: #22d3ee; }"
             "QLabel#hudStatusDetail { color: #f472b6; background-color: #000000; }"
@@ -990,8 +995,22 @@ class LiveController:
         self._snapshot_error: str | None = None
         self._snapshot_stale = False
         self._snapshot_confirmation_count = 0
+        self._mouse_dwell_gate = (
+            MouseDwellGate(config.live.mouse_dwell_ms)
+            if config.live.trigger_mode == "mouse_dwell"
+            else None
+        )
+        self._dwell_request: MouseDwellRequest | None = None
+        self._dwell_invalidated = False
+        self._dwell_frame: np.ndarray | None = None
+        self._dwell_published_items_key: tuple[object, ...] | None = None
         self._timer = QTimer()
-        self._timer.setInterval(max(10, round(1000 / config.live.change_poll_fps)))
+        timer_interval = (
+            MOUSE_DWELL_POLL_INTERVAL_MS
+            if self._mouse_dwell_gate is not None
+            else max(10, round(1000 / config.live.change_poll_fps))
+        )
+        self._timer.setInterval(timer_interval)
         self._timer.timeout.connect(self._tick)
         # OCR and translation completion used to be observed only by the
         # change-detection timer.  At 6 Hz that added about half a tick of
@@ -1026,17 +1045,22 @@ class LiveController:
         else:
             region_hint = ""
         ocr_runtime = self._config.ocr.device
-        scheduling = (
-            "实验性动态 ROI：热图 "
-            f"{self._config.live.change_poll_fps} Hz / 画面响应目标 "
-            f"{self._config.live.dynamic_roi_response_target_ms} ms / "
-            "按局部与整帧实测成本分配等待 / "
-            f"连续空目标最高退避至 "
-            f"{round(self._roi_scheduler.max_adaptive_ocr_interval_s * 1000)} ms"
-            if self._roi_scheduler is not None
-            else f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
-            f"静态复查 {self._config.live.idle_rescan_ms / 1000:g} 秒"
-        )
+        if self._mouse_dwell_gate is not None:
+            scheduling = (
+                f"鼠标停稳 {self._config.live.mouse_dwell_ms} ms 后按动态 ROI 处理"
+            )
+        else:
+            scheduling = (
+                "实验性动态 ROI：热图 "
+                f"{self._config.live.change_poll_fps} Hz / 画面响应目标 "
+                f"{self._config.live.dynamic_roi_response_target_ms} ms / "
+                "按局部与整帧实测成本分配等待 / "
+                f"连续空目标最高退避至 "
+                f"{round(self._roi_scheduler.max_adaptive_ocr_interval_s * 1000)} ms"
+                if self._roi_scheduler is not None
+                else f"{self._config.live.change_poll_fps} 次/秒检测变化 · "
+                f"静态复查 {self._config.live.idle_rescan_ms / 1000:g} 秒"
+            )
         arbitration_enabled = (
             self._config.ocr.text_merge_enabled
             and self._config.ocr.text_merge_llm_arbitration_enabled
@@ -1046,9 +1070,13 @@ class LiveController:
             if self._browser_overlay is not None
             else ""
         )
+        capture_detail = (
+            "触发时单帧采集 · "
+            if self._mouse_dwell_gate is not None
+            else f"{self._config.live.capture_fps} FPS · "
+        )
         self._running_detail = (
-            f"捕获：{self._capture.active_backend} {region} @ "
-            f"{self._config.live.capture_fps} FPS · "
+            f"捕获：{self._capture.active_backend} {region} · {capture_detail}"
             f"{scheduling} · "
             f"LLM 并发 {self._config.translation.max_concurrency} · "
             f"OCR {ocr_runtime} / 过滤"
@@ -1059,8 +1087,14 @@ class LiveController:
             f"{'开' if arbitration_enabled else '关'} · "
             f"{profile_label}{region_hint}{browser_overlay_hint}"
         )
-        self._control.set_status("实时翻译运行中", self._running_detail)
-        self._completion_timer.start()
+        status = (
+            "鼠标触发待机"
+            if self._mouse_dwell_gate is not None
+            else "实时翻译运行中"
+        )
+        self._control.set_status(status, self._running_detail)
+        if self._mouse_dwell_gate is None:
+            self._completion_timer.start()
         self._timer.start()
 
     def close(self) -> None:
@@ -1158,6 +1192,9 @@ class LiveController:
     def _tick(self) -> None:
         if self._shutting_down:
             return
+        if self._mouse_dwell_gate is not None:
+            self._tick_mouse_dwell()
+            return
         now = time.monotonic()
         try:
             frame = self._capture.latest_frame()
@@ -1194,6 +1231,45 @@ class LiveController:
             self._tick_legacy_ocr(frame, now)
 
         self._publish_scene(frame, self._tracker.visible_tracks)
+
+    def _tick_mouse_dwell(
+        self,
+        position: tuple[float, float] | None = None,
+    ) -> None:
+        gate = self._mouse_dwell_gate
+        if gate is None or self._shutting_down:
+            return
+        if position is None:
+            cursor = QCursor.pos()
+            position = (float(cursor.x()), float(cursor.y()))
+        request = gate.poll(
+            position,
+            time.monotonic(),
+            ready=self._dwell_request is None,
+        )
+        if request is None:
+            return
+        try:
+            frame = self._capture.capture_once()
+        except Exception as exc:
+            gate.complete(request, successful=False)
+            self._fatal(f"停稳触发的屏幕采集失败：{exc}")
+            return
+        if frame is None:
+            gate.complete(request, successful=False)
+            self._control.set_status("等待屏幕帧", self._running_detail)
+            return
+
+        self._observe_capture_geometry(frame)
+        self._sync_overlay_geometry()
+        self._latest_frame = frame
+        self._dwell_request = request
+        self._dwell_invalidated = False
+        self._dwell_frame = frame
+        self._control.set_status("鼠标触发处理中", self._running_detail)
+        self._publish_dwell_scene_if_current()
+        self._completion_timer.start()
+        self._advance_processing_transaction()
 
     def _observe_capture_geometry(self, frame: np.ndarray | None = None) -> bool:
         token = _capture_geometry_token(self._capture)
@@ -1374,6 +1450,9 @@ class LiveController:
             return
 
         snapshot_active = self._snapshot_mode and self._snapshot_running
+        dwell_active = self._dwell_request is not None
+        if dwell_active and not self._dwell_request_is_current():
+            self._invalidate_mouse_dwell_request()
         if snapshot_active and self._snapshot_is_current is not None:
             try:
                 current = self._snapshot_is_current()
@@ -1411,6 +1490,14 @@ class LiveController:
                 self._completion_timer.stop()
             return
 
+        # A moved mouse invalidates the frozen input. Drain already-started
+        # work by epoch, but do not admit more OCR, ROI confirmation, or retry
+        # work from that obsolete frame.
+        if dwell_active and self._dwell_invalidated:
+            if not self._snapshot_has_pending_work():
+                self._finish_mouse_dwell()
+            return
+
         # Both live and frozen-frame processing pass through this admission
         # and dispatch path. Capacity-limited batches are refilled whenever
         # completed work is collected, even if no new capture frame arrives.
@@ -1418,13 +1505,28 @@ class LiveController:
         self._queue_untranslated_visible_sources(dispatch=False)
         self._dispatch_translation_work()
 
-        if not snapshot_active:
+        if dwell_active:
+            frame = self._dwell_frame
+            scheduler = self._roi_scheduler
+            if frame is not None and scheduler is not None:
+                self._force_full_scan = False
+                self._tick_dynamic_roi(frame, time.monotonic())
+            self._publish_dwell_scene_if_current()
+
+        if not snapshot_active and not dwell_active:
             return
-        if not self._processing_has_pending_work():
-            self._snapshot_running = False
-            self._completion_timer.stop()
+        scheduler_pending = dwell_active and self._dwell_scheduler_has_pending_work()
+        if not self._processing_has_pending_work() and not scheduler_pending:
+            if snapshot_active:
+                self._snapshot_running = False
+            if dwell_active:
+                self._finish_mouse_dwell()
+            else:
+                self._completion_timer.stop()
             return
         if self._snapshot_has_pending_work():
+            return
+        if scheduler_pending:
             return
 
         tracks = self._tracker.visible_tracks
@@ -1442,14 +1544,17 @@ class LiveController:
             or self._layout_arbitration_blocked_member_ids
         )
         if needs_confirmation and not arbitration_in_flight:
-            frame = self._snapshot_frame
+            frame = self._snapshot_frame if snapshot_active else self._dwell_frame
             if frame is not None and time.monotonic() >= self._next_ocr_allowed:
-                self._snapshot_confirmation_count += 1
+                if snapshot_active:
+                    self._snapshot_confirmation_count += 1
                 self._submit_ocr(
                     frame,
                     triggered_at=time.monotonic(),
                     change_started_at=time.monotonic(),
-                    scan_label="冻结帧确认",
+                    scan_label=(
+                        "冻结帧确认" if snapshot_active else "停稳帧确认"
+                    ),
                 )
                 return
             return
@@ -1459,6 +1564,56 @@ class LiveController:
         # existing capture/ROI schedulers.
         # Any pending item not represented by asynchronous work or a required
         # confirmation remains pending. Do not turn it into a false terminal.
+
+    def _dwell_scheduler_has_pending_work(self) -> bool:
+        if self._pending_roi_empty_retry:
+            return True
+        scheduler = self._roi_scheduler
+        return bool(
+            scheduler is not None
+            and (not scheduler.primed or scheduler.busy or scheduler.has_pending)
+        )
+
+    def _finish_mouse_dwell(self) -> None:
+        request = self._dwell_request
+        gate = self._mouse_dwell_gate
+        if request is None or gate is None:
+            return
+        self._expire_missing_tracks(time.monotonic())
+        self._publish_dwell_scene_if_current()
+        self._dwell_request = None
+        self._dwell_invalidated = False
+        self._dwell_frame = None
+        self._dwell_published_items_key = None
+        self._completion_timer.stop()
+        gate.complete(request, successful=True)
+        self._control.set_status("鼠标触发待机", self._running_detail)
+
+    def _publish_dwell_scene_if_current(self) -> None:
+        request = self._dwell_request
+        gate = self._mouse_dwell_gate
+        frame = self._dwell_frame
+        if (
+            request is None
+            or gate is None
+            or frame is None
+            or not gate.request_is_current(request)
+        ):
+            return
+        items_key = tuple(
+            (
+                item.source.track_id,
+                item.source.revision,
+                item.translated_text,
+                item.state,
+                item.bounds,
+            )
+            for item in self._processing_snapshot().items
+        )
+        if items_key == self._dwell_published_items_key:
+            return
+        self._publish_scene(frame, self._tracker.visible_tracks)
+        self._dwell_published_items_key = items_key
 
     def _processing_has_pending_work(self) -> bool:
         if (
@@ -1505,6 +1660,47 @@ class LiveController:
         self._pending_ocr_triggered_at = None
         self._pending_ocr_change_started_at = None
 
+    def _dwell_request_is_current(self) -> bool:
+        request = self._dwell_request
+        gate = self._mouse_dwell_gate
+        return bool(
+            request is not None
+            and gate is not None
+            and gate.request_is_current(request)
+        )
+
+    def _invalidate_mouse_dwell_request(self) -> None:
+        if self._dwell_invalidated:
+            return
+        self._dwell_invalidated = True
+        self._stale_result_count += 1
+        self._session_epoch += 1
+        self._tracker.clear()
+        self._ocr_line_tracker.clear()
+        self._layout_stabilizer.reset()
+        self._revisions = RevisionRegistry()
+        self._context.clear()
+        self._source_latency_origins.clear()
+        self._pending_translations.clear()
+        self._translation_retries.clear()
+        self._completed_translations.clear()
+        self._early_context.clear()
+        self._pending_layout_arbitrations.clear()
+        self._active_layout_arbitration_keys.clear()
+        self._layout_arbitration_blocked_member_ids.clear()
+        self._translation_exhausted_keys.clear()
+        self._pending_ocr_frame = None
+        self._pending_ocr_triggered_at = None
+        self._pending_ocr_change_started_at = None
+        self._pending_roi_empty_retry = False
+        self._last_effective_entries = ()
+        self._last_effective_canvas_size = None
+        self._roi_scheduler = _create_roi_scheduler(self._config)
+        self._roi_planner = (
+            ContextualRoiPlanner() if self._roi_scheduler is not None else None
+        )
+        self._dwell_published_items_key = None
+
     def _snapshot_has_pending_work(self) -> bool:
         return bool(
             self._ocr_future is not None
@@ -1545,6 +1741,13 @@ class LiveController:
             )
         items.sort(key=lambda item: (item.bounds[1], item.bounds[0]))
         pending = self._processing_has_pending_work() or self._snapshot_running
+        dwell_stale = False
+        if self._dwell_request is not None and self._mouse_dwell_gate is not None:
+            pending = pending or self._dwell_request is not None
+            pending = pending or self._dwell_scheduler_has_pending_work()
+            dwell_stale = not self._mouse_dwell_gate.request_is_current(
+                self._dwell_request
+            )
         if self._shutting_down:
             pending = False
         terminal = not pending
@@ -1554,7 +1757,7 @@ class LiveController:
             pending=pending,
             terminal=terminal,
             error=self._snapshot_error,
-            stale=self._snapshot_stale,
+            stale=self._snapshot_stale or dwell_stale,
             statistics=ProcessingStatistics(
                 ocr_scans=self._ocr_scan_count,
                 model_results=self._model_result_count,
@@ -3708,13 +3911,15 @@ def _run_live_ready(
     _live_message(
         f"starting capture: monitor={config.live.monitor_index} "
         f"fps={config.live.capture_fps} "
-        f"region_ratio={config.live.region_ratio}"
+        f"region_ratio={config.live.region_ratio} "
+        f"mode={config.live.trigger_mode}"
     )
     capture = DxcamCapture(
         monitor_index=config.live.monitor_index,
         region_ratio=config.live.region_ratio,
         target_fps=config.live.capture_fps,
         backend=config.live.capture_backend,
+        continuous=config.live.trigger_mode != "mouse_dwell",
     )
     capture.start()
     _live_message(f"capture ready: backend={capture.active_backend}")

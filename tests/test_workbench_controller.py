@@ -1080,6 +1080,62 @@ def test_controller_round_trips_complete_runtime_settings_and_preserves_external
     restored.shutdown()
 
 
+@pytest.mark.parametrize("roi_enabled, expected_index", [(False, 0), (True, 1)])
+def test_old_roi_setting_maps_to_native_or_dynamic_trigger(
+    tmp_path: Path, roi_enabled: bool, expected_index: int,
+) -> None:
+    QApplication.instance() or QApplication([])
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    with config_path.open("a", encoding="utf-8") as stream:
+        stream.write(f"\ndynamic_roi_enabled = {str(roi_enabled).lower()}\n")
+    create_game_profile(config_path, load_config(config_path), "game")
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    try:
+        assert controller.triggerMethodIndex == expected_index
+        assert controller.mouseDwellMs == 300
+    finally:
+        controller.shutdown()
+
+
+def test_trigger_modes_and_mouse_wait_are_saved_per_profile(tmp_path: Path) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    machine_bytes = config_path.read_bytes()
+    assert controller.triggerMethodIndex == 1
+    controller.setTriggerMethodIndex(2)
+    controller.setMouseDwellMs(750)
+    assert controller.dynamicRoiEnabled is True
+    assert controller.saveRuntimeSettings() is True
+    controller.shutdown()
+    machine = load_config(config_path)
+    create_game_profile(config_path, machine, "other", display_name="另一游戏")
+    restored = WorkbenchController(config_path, probe_ocr_devices=False)
+    try:
+        restored.selectProfile(restored.profileIds.index("other"))
+        assert restored.triggerMethodIndex == 1
+        assert restored.mouseDwellMs == 300
+        restored.setTriggerMethodIndex(0)
+        restored.setMouseDwellMs(1250)
+        assert restored.saveRuntimeSettings() is True
+        restored.selectProfile(restored.profileIds.index("game"))
+        assert restored.triggerMethodIndex == 2
+        assert restored.mouseDwellMs == 750
+        saved = apply_profile_runtime_settings(machine, load_game_profile(config_path, machine, "game"))
+        assert saved.live.trigger_mode == "mouse_dwell"
+        assert saved.live.dynamic_roi_enabled is True
+        assert saved.live.mouse_dwell_ms == 750
+        restored.setTriggerMethodIndex(1)
+        assert restored._live_candidate().trigger_mode == "continuous"
+        assert restored._live_candidate().dynamic_roi_enabled is True
+        restored.selectProfile(restored.profileIds.index("other"))
+        assert restored.triggerMethodIndex == 0
+        assert restored.mouseDwellMs == 1250
+        assert restored._live_candidate().dynamic_roi_enabled is False
+        assert config_path.read_bytes() == machine_bytes
+    finally:
+        restored.shutdown()
+
+
 def test_detection_quality_scaling_alignment_and_merge_guard(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

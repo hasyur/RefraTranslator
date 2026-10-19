@@ -37,12 +37,20 @@ from game_screen_translator.translation.transport import TranslationTransportErr
 
 class FakeCapture:
     region = (0, 0, 320, 120)
+    output_size = (320, 120)
     active_backend = "fake"
 
     def __init__(self) -> None:
         self.closed = False
+        self.latest_frame_calls = 0
+        self.capture_once_calls = 0
 
     def latest_frame(self):
+        self.latest_frame_calls += 1
+        return np.zeros((120, 320, 3), dtype=np.uint8)
+
+    def capture_once(self):
+        self.capture_once_calls += 1
         return np.zeros((120, 320, 3), dtype=np.uint8)
 
     def close(self) -> None:
@@ -57,8 +65,15 @@ class MutableCapture:
     def __init__(self, frame: np.ndarray) -> None:
         self.frame = frame
         self.closed = False
+        self.latest_frame_calls = 0
+        self.capture_once_calls = 0
 
     def latest_frame(self):
+        self.latest_frame_calls += 1
+        return self.frame.copy()
+
+    def capture_once(self):
+        self.capture_once_calls += 1
         return self.frame.copy()
 
     def close(self) -> None:
@@ -1377,6 +1392,188 @@ def _dynamic_roi_frame_with_background_change() -> np.ndarray:
     frame[180:280, 180:620] = 50
     frame[200:260, 200:600] = 100
     return frame
+
+
+def test_mouse_dwell_mode_has_no_idle_capture_and_static_frame_uses_cache(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            trigger_mode="mouse_dwell",
+            mouse_dwell_ms=0,
+            dynamic_roi_enabled=True,
+            settle_rescan_ms=0,
+            idle_rescan_ms=0,
+        ),
+    )
+    capture = MutableCapture(np.zeros((900, 1600, 3), dtype=np.uint8))
+    ocr = FakeEmptyOcr()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ocr,
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [30.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller.start()
+    try:
+        assert controller._timer.interval() == 20
+        assert not controller._completion_timer.isActive()
+        controller._tick_mouse_dwell((100, 100))
+        clock[0] = 30.02
+        controller._tick_mouse_dwell((100, 100))
+        assert capture.capture_once_calls == 1
+        assert capture.latest_frame_calls == 0
+        assert controller._ocr_future is not None
+
+        controller._ocr_future.result(timeout=2)
+        clock[0] = 30.04
+        controller._advance_processing_transaction()
+        assert controller._dwell_request is None
+        assert not controller._completion_timer.isActive()
+        assert controller._ocr_scan_count == 1
+
+        # A 30px move to the same frozen pixels reuses the accepted ROI baseline.
+        clock[0] = 30.06
+        controller._tick_mouse_dwell((130, 100))
+        assert capture.capture_once_calls == 2
+        assert controller._dwell_request is None
+        assert controller._ocr_scan_count == 1
+
+        clock[0] = 40.0
+        controller._tick_mouse_dwell((130, 100))
+        assert capture.capture_once_calls == 2
+        assert capture.latest_frame_calls == 0
+        assert controller._ocr_scan_count == 1
+    finally:
+        controller.close()
+
+
+def test_mouse_dwell_changed_frame_dispatches_existing_local_roi_job(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            trigger_mode="mouse_dwell",
+            mouse_dwell_ms=0,
+            dynamic_roi_enabled=True,
+            stable_observations=1,
+            dynamic_roi_response_target_ms=500,
+        ),
+    )
+    baseline = _dynamic_roi_frame()
+    capture = MutableCapture(_dynamic_roi_frame(changed=True))
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=ColorBlockOcr(),
+        overlay=FakeOverlay(),
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [10.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+    assert controller._roi_scheduler is not None
+    controller._ocr_line_tracker.observe(
+        ColorBlockOcr().recognize_frame(baseline),
+        clock[0],
+    )
+    controller._roi_scheduler.prime(baseline, clock[0])
+
+    controller._tick_mouse_dwell((100, 100))
+    clock[0] = 10.2
+    controller._tick_mouse_dwell((100, 100))
+
+    assert capture.capture_once_calls == 1
+    assert capture.latest_frame_calls == 0
+    assert controller._ocr_future is None
+    clock[0] = 10.4
+    controller._advance_processing_transaction()
+    assert controller._ocr_future is not None
+    assert controller._active_roi_plan is not None
+    assert not controller._active_roi_plan.fallback_full_frame
+    assert controller._active_roi_plan.candidate_region_count == 1
+    assert controller._active_roi_plan.regions
+    controller.close()
+
+
+def test_stale_mouse_dwell_result_drains_without_publishing_then_accepts_next_input(
+    monkeypatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(
+        translation=TranslationConfig(
+            base_url="http://server.test/v1",
+            model="hy-mt1.5-7b",
+        ),
+        live=LiveConfig(
+            trigger_mode="mouse_dwell",
+            mouse_dwell_ms=0,
+            dynamic_roi_enabled=True,
+        ),
+    )
+    capture = FakeCapture()
+    overlay = FakeOverlay()
+    controller = LiveController(
+        config,
+        capture=capture,
+        ocr=FakeOcr(),
+        overlay=overlay,
+        control=FakeControl(),
+        app=app,
+    )
+    clock = [50.0]
+    monkeypatch.setattr(live_runtime.time, "monotonic", lambda: clock[0])
+
+    controller.start()
+    try:
+        controller._tick_mouse_dwell((100, 100))
+        controller._tick_mouse_dwell((100, 100))
+        assert capture.capture_once_calls == 1
+        assert overlay.scenes == 1
+        assert not controller.processing_session.snapshot().terminal
+        first_future = controller._ocr_future
+        assert first_future is not None
+
+        clock[0] = 50.01
+        controller._tick_mouse_dwell((200, 100))
+        stale_snapshot = controller.processing_session.snapshot()
+        assert stale_snapshot.pending
+        assert stale_snapshot.stale
+        assert not stale_snapshot.terminal
+
+        first_future.result(timeout=2)
+        clock[0] = 50.02
+        controller._advance_processing_transaction()
+        assert controller._dwell_request is None
+        assert overlay.scenes == 1
+        assert not controller._tracker.visible_tracks
+        assert controller._roi_scheduler is not None
+        assert not controller._roi_scheduler.primed
+
+        # A fresh trigger starts from a clean frame/OCR baseline; the old
+        # source cannot briefly appear as if it belonged to the new input.
+        clock[0] = 50.03
+        controller._tick_mouse_dwell((200, 100))
+        assert capture.capture_once_calls == 2
+        assert controller._dwell_request is not None
+        assert controller._ocr_future is not None
+        assert overlay.scenes == 2
+    finally:
+        controller.close()
+
 
 def test_dynamic_roi_runtime_uses_local_ocr_and_preserves_outside_tracks(
     monkeypatch,

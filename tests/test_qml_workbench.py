@@ -16,6 +16,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import (
+    Q_ARG,
     QCoreApplication,
     QEvent,
     QMetaObject,
@@ -33,7 +34,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
 
 from game_screen_translator.branding import PRODUCT_NAME
-from game_screen_translator.capture_region import FULL_SCREEN_REGION, pixels_to_region_ratio
+from game_screen_translator.capture_region import pixels_to_region_ratio
 from game_screen_translator.config import load_config
 from game_screen_translator.gui import qml_workbench as host_module
 from game_screen_translator.gui import runtime as runtime_module
@@ -656,6 +657,61 @@ def _real_home_hotkey_host(
     window = host.window
     assert window is not None
     return app, controller, host, window
+
+
+def test_trigger_selector_has_three_modes_and_only_mouse_shows_wait_control(tmp_path: Path) -> None:
+    app, controller, host, window = _real_home_hotkey_host(tmp_path)
+    try:
+        controller.setPage("OCR")
+        app.processEvents()
+        selector = window.findChild(QObject, "triggerMethodSelector")
+        description = window.findChild(QObject, "triggerMethodDescription")
+        mouse_settings = window.findChild(QObject, "mouseDwellSettings")
+        stepper = window.findChild(QObject, "mouseDwellMsStepper")
+        assert selector is not None and mouse_settings is not None and stepper is not None
+        assert selector.property("count") == 3
+        assert selector.property("currentIndex") == 1
+        assert description is not None and description.property("visible") is False
+        assert mouse_settings.property("visible") is False
+        assert QMetaObject.invokeMethod(selector, "activated", Q_ARG(int, 2))
+        app.processEvents()
+        assert controller.triggerMethodIndex == 2
+        assert selector.property("currentIndex") == 2
+        assert description.property("visible") is True
+        assert mouse_settings.property("visible") is True
+        assert stepper.property("value") == 300
+        window.resize(980, 700)
+        QTest.qWait(20)
+        scroll = window.findChild(QObject, "ocrSettingsScroll")
+        assert scroll is not None
+        scroll.setProperty("contentY", max(0, scroll.property("contentHeight") - scroll.height()))
+        app.processEvents()
+        position = stepper.mapToItem(scroll, QPointF(0, 0))
+        assert position.y() >= 0
+        assert position.y() + stepper.height() <= scroll.height() + 1
+        assert QMetaObject.invokeMethod(stepper, "edited", Q_ARG(int, 750))
+        app.processEvents()
+        assert controller.mouseDwellMs == 750
+        assert controller.saveRuntimeSettings() is True
+        machine = load_config(controller._config_path)
+        profile = load_game_profile(controller._config_path, machine, "game")
+        assert profile.runtime_settings.live.mouse_dwell_ms == 750
+        assert profile.runtime_settings.live.trigger_mode == "mouse_dwell"
+        assert QMetaObject.invokeMethod(selector, "activated", Q_ARG(int, 0))
+        app.processEvents()
+        assert controller.triggerMethodIndex == 0
+        assert controller.dynamicRoiEnabled is False
+        assert mouse_settings.property("visible") is False
+        controller._live_process = SimpleNamespace(poll=lambda: None)
+        controller._set_run_state("正在翻译", "success", True)
+        app.processEvents()
+        assert selector.property("enabled") is False
+        assert stepper.property("enabled") is False
+        controller._live_process = None
+        controller._set_run_state("已停止", "neutral", False)
+    finally:
+        controller._live_process = None
+        host.shutdown()
 
 
 def _begin_home_hotkey_recording(window: QQuickWindow) -> tuple[QObject, QObject]:
@@ -2547,7 +2603,8 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         "ocr-quality": {"label", "control"},
         "ocr-filter": {"control"},
         "ocr-merge": {"control"},
-        "ocr-dynamic": {"label", "control"},
+        "ocr-trigger-method": {"label", "control"},
+        "ocr-mouse-dwell": {"label", "control"},
         "translation-backend": {"control"},
         "translation-builtin-model": {"label", "control"},
         "translation-builtin-device": {"label", "control"},
@@ -3776,7 +3833,7 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
         for item in window.findChildren(QObject)
         if item.metaObject().indexOfProperty("compactWidth") >= 0
     ]
-    assert len(steppers) == 12
+    assert len(steppers) == 13
     assert float(settings_panel.property("width")) > 600
     assert float(settings_panel.property("width")) > 3 * max(
         float(stepper.property("compactWidth")) for stepper in steppers
@@ -6330,8 +6387,10 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
     assert 'objectName: "ocrQualitySlider"' in ocr_source
     assert "stepSize: 1" in ocr_source
     assert 'root.visualAction("focus")' in ocr_source
-    assert ocr_source.count("setDynamicRoiEnabled") == 1
-    assert "setDynamicRoiEnabled" not in settings_source
+    assert ocr_source.count("setTriggerMethodIndex") == 1
+    assert ocr_source.count("setMouseDwellMs") == 1
+    assert "setTriggerMethodIndex" not in settings_source
+    assert "setMouseDwellMs" not in settings_source
     assert settings_source.count('root.visualAction("calibrate")') >= 8
     assert 'objectName: "saveAllButton"' in main_source
     assert 'root.pulseVisualAction("calibrate")' in main_source

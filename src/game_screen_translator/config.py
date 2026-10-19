@@ -277,6 +277,8 @@ class LiveConfig:
     context_pairs: int = 8
     max_batch_size: int = 8
     capture_backend: str = "dxgi"
+    trigger_mode: str = "continuous"
+    mouse_dwell_ms: int = 300
     ocr_cooldown_ms: int = 0
     settle_rescan_ms: int = 500
     idle_rescan_ms: int = 2000
@@ -310,6 +312,16 @@ class LiveConfig:
             raise ConfigError("live.max_batch_size 必须至少为 1")
         if self.capture_backend not in {"dxgi", "winrt"}:
             raise ConfigError("live.capture_backend 必须是 dxgi 或 winrt")
+        if not isinstance(self.trigger_mode, str) or self.trigger_mode not in {
+            "continuous",
+            "mouse_dwell",
+        }:
+            raise ConfigError("live.trigger_mode 必须是 continuous 或 mouse_dwell")
+        if (
+            type(self.mouse_dwell_ms) is not int
+            or not 0 <= self.mouse_dwell_ms <= 10_000
+        ):
+            raise ConfigError("live.mouse_dwell_ms 必须是 0 到 10000 的整数")
         if not 0 <= self.ocr_cooldown_ms <= 10_000:
             raise ConfigError("live.ocr_cooldown_ms 必须在 0 到 10000 之间")
         if not 0 <= self.settle_rescan_ms <= 60_000:
@@ -318,6 +330,10 @@ class LiveConfig:
             raise ConfigError("live.idle_rescan_ms 必须在 0 到 60000 之间")
         if type(self.dynamic_roi_enabled) is not bool:
             raise ConfigError("live.dynamic_roi_enabled 必须是 true 或 false")
+        if self.trigger_mode == "mouse_dwell" and not self.dynamic_roi_enabled:
+            raise ConfigError(
+                "live.mouse_dwell 模式必须启用 dynamic_roi_enabled"
+            )
         if type(self.debug_border) is not bool:
             raise ConfigError("live.debug_border 必须是 true 或 false")
         if not 100 <= self.dynamic_roi_response_target_ms <= 5_000:
