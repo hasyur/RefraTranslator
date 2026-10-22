@@ -130,13 +130,9 @@ def test_release_metadata_bundles_the_native_qml_workbench() -> None:
         "qml/*.qml",
         "qml/components/*.qml",
         "qml/pages/*.qml",
-        "qml/styles/azure/*.qml",
-        "qml/styles/azure/components/*.qml",
-        "qml/styles/azure/pages/*.qml",
-        "qml/styles/azure/assets/*.png",
     } <= gui_data
     manifest = (PROJECT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
-    assert "recursive-include src/game_screen_translator/gui/qml *.qml *.png" in manifest
+    assert "recursive-include src/game_screen_translator/gui/qml *.qml" in manifest
 
 
 def test_built_archives_contain_the_exact_native_qml_workbench(
@@ -169,10 +165,6 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
         path.relative_to(qml_root).as_posix()
         for path in qml_root.rglob("*.qml")
     }
-    expected_assets = {
-        path.relative_to(qml_root).as_posix()
-        for path in (qml_root / "styles" / "azure" / "assets").glob("*.png")
-    }
 
     with zipfile.ZipFile(wheels[0]) as archive:
         wheel_names = set(archive.namelist())
@@ -182,12 +174,6 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
             if "game_screen_translator/gui/qml/" in name
             and name.endswith(".qml")
         }
-        wheel_assets = {
-            name.split("game_screen_translator/gui/qml/", 1)[1]
-            for name in wheel_names
-            if "game_screen_translator/gui/qml/" in name
-            and name.endswith(".png")
-        }
     with tarfile.open(source_archives[0], "r:gz") as archive:
         sdist_names = set(archive.getnames())
         sdist_qml = {
@@ -196,21 +182,9 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
             if "game_screen_translator/gui/qml/" in name
             and name.endswith(".qml")
         }
-        sdist_assets = {
-            name.split("game_screen_translator/gui/qml/", 1)[1]
-            for name in sdist_names
-            if "game_screen_translator/gui/qml/" in name
-            and name.endswith(".png")
-        }
 
     assert wheel_qml == expected
     assert sdist_qml == expected
-    assert expected_assets == {
-        "styles/azure/assets/heroine-home.png",
-        "styles/azure/assets/heroine-settings.png",
-    }
-    assert wheel_assets == expected_assets
-    assert sdist_assets == expected_assets
     sdist_files = {name.split("/", 1)[1] for name in sdist_names if "/" in name}
     assert set(SOURCE_RELEASE_FILES) <= sdist_files
     assert set(PUBLIC_TEST_FILES) <= sdist_files

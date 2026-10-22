@@ -8,13 +8,11 @@ from game_screen_translator.gui.theme import (
     HOTKEY_BEHAVIOR_START_ONLY,
     HOTKEY_BEHAVIOR_TOGGLE_SHOW,
     SKIN_DOHNA,
-    SKIN_AZURE,
     SKIN_PRISM,
     THEME_DARK,
     THEME_LIGHT,
     load_gui_preferences,
     save_gui_preferences,
-    effective_theme,
 )
 from game_screen_translator.gui.runtime import DEFAULT_HOTKEY
 
@@ -39,10 +37,6 @@ def test_old_gui_preferences_default_to_prism(tmp_path: Path) -> None:
     assert preferences.hotkey_behavior == HOTKEY_BEHAVIOR_START_ONLY
 
 
-def test_azure_skin_uses_its_fixed_light_palette_without_changing_preference() -> None:
-    assert effective_theme(THEME_DARK, None, skin=SKIN_AZURE) == THEME_LIGHT
-
-
 def test_existing_gui_behavior_preferences_default_missing_hotkey_behavior(
     tmp_path: Path,
 ) -> None:
@@ -61,12 +55,7 @@ def test_existing_gui_behavior_preferences_default_missing_hotkey_behavior(
 
 @pytest.mark.parametrize(
     ("theme", "skin"),
-    (
-        (THEME_DARK, SKIN_PRISM),
-        (THEME_LIGHT, SKIN_PRISM),
-        (THEME_DARK, SKIN_DOHNA),
-        (THEME_DARK, SKIN_AZURE),
-    ),
+    ((THEME_DARK, SKIN_PRISM), (THEME_LIGHT, SKIN_PRISM), (THEME_DARK, SKIN_DOHNA)),
 )
 def test_gui_preferences_round_trip_keeps_theme_and_skin(
     tmp_path: Path,
