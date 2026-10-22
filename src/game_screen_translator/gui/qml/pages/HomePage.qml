@@ -17,6 +17,7 @@ Item {
     readonly property var hotkeyBehaviorValues: ["start_only", "toggle", "toggle_show"]
     readonly property var hotkeyBehaviorLabels: ["仅启动", "启动 / 停止翻译", "启动 / 停止并打开 GUI"]
     readonly property var p3PageOrder: ["HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS"]
+    readonly property var p3MenuOffsetFractions: [0.022, 0.026, 0.043, 0.028, 0.049, 0.045, 0.074]
     property bool hotkeyRecording: false
     signal liveToggleRequested()
     signal saveRequested()
@@ -365,135 +366,173 @@ Item {
             Item {
                 objectName: "refraDarkHomeStage"
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                Layout.preferredHeight: root.height * 0.648
                 Layout.minimumHeight: 390
+                clip: true
 
-                RowLayout {
+                Rectangle {
+                    objectName: "refraDarkHomeBlueLight"
+                    x: root.width * 0.57
+                    y: -parent.height * 0.14
+                    width: root.width * 0.55
+                    height: parent.height * 1.28
+                    rotation: 17
+                    opacity: 0.40
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0; color: "#09275a" }
+                        GradientStop { position: 0.42; color: "#0c367e" }
+                        GradientStop { position: 1; color: "#1649b0" }
+                    }
+                }
+                Rectangle {
+                    x: root.width * 0.72
+                    y: -parent.height * 0.18
+                    width: root.width * 0.15
+                    height: parent.height * 1.34
+                    rotation: 17
+                    color: "#1767ff"
+                    opacity: 0.11
+                }
+                Rectangle {
+                    objectName: "refraDarkHeroDownRayOuter"
+                    x: root.width * 0.68
+                    y: parent.height * 0.62 - height / 2
+                    width: root.width * 0.45
+                    height: 54
+                    rotation: 17
+                    transformOrigin: Item.Left
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0; color: Qt.rgba(0, 0.76, 1, 0) }
+                        GradientStop { position: 0.045; color: Qt.rgba(0, 0.76, 1, 0.075) }
+                        GradientStop { position: 0.24; color: Qt.rgba(0.03, 0.34, 1, 0.045) }
+                        GradientStop { position: 0.68; color: Qt.rgba(0.03, 0.12, 0.42, 0) }
+                        GradientStop { position: 1; color: Qt.rgba(0.03, 0.12, 0.42, 0) }
+                    }
+                }
+                Rectangle {
+                    objectName: "refraDarkHeroDownRayMid"
+                    x: root.width * 0.68
+                    y: parent.height * 0.62 - height / 2
+                    width: root.width * 0.45
+                    height: 24
+                    rotation: 17
+                    transformOrigin: Item.Left
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0; color: Qt.rgba(0, 0.82, 1, 0) }
+                        GradientStop { position: 0.045; color: Qt.rgba(0, 0.82, 1, 0.15) }
+                        GradientStop { position: 0.24; color: Qt.rgba(0.03, 0.38, 1, 0.085) }
+                        GradientStop { position: 0.68; color: Qt.rgba(0.03, 0.14, 0.46, 0) }
+                        GradientStop { position: 1; color: Qt.rgba(0.03, 0.14, 0.46, 0) }
+                    }
+                }
+                Rectangle {
+                    objectName: "refraDarkHeroDownRayCore"
+                    x: root.width * 0.68
+                    y: parent.height * 0.62 - height / 2
+                    width: root.width * 0.45
+                    height: 5
+                    rotation: 17
+                    transformOrigin: Item.Left
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0; color: Qt.rgba(0, 0.88, 1, 0) }
+                        GradientStop { position: 0.045; color: Qt.rgba(0, 0.88, 1, 0.24) }
+                        GradientStop { position: 0.24; color: Qt.rgba(0.03, 0.42, 1, 0.13) }
+                        GradientStop { position: 0.68; color: Qt.rgba(0.03, 0.15, 0.48, 0) }
+                        GradientStop { position: 1; color: Qt.rgba(0.03, 0.15, 0.48, 0) }
+                    }
+                }
+
+                Text {
+                    objectName: "refraDarkHomeBrand"
+                    x: root.width * 0.024
+                    y: parent.height * 0.032
+                    width: root.width * 0.34
+                    height: 40
+                    text: "<font color='#00d9ff'>Refra</font>Translator"
+                    textFormat: Text.RichText
+                    color: root.theme.text
+                    font.family: "Arial Black"
+                    font.pixelSize: 26
+                    font.weight: Font.Black
+                    font.letterSpacing: -0.7
+                    fontSizeMode: Text.HorizontalFit
+                    minimumPixelSize: 24
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                Item {
+                    objectName: "refraDarkNavigationMenu"
                     anchors.fill: parent
-                    anchors.leftMargin: root.width < 1100 ? 24 : 42
-                    anchors.rightMargin: root.width < 1100 ? 18 : 34
-                    anchors.topMargin: root.height < 760 ? 16 : 24
-                    anchors.bottomMargin: 8
-                    spacing: 14
 
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.preferredWidth: parent.width * 0.55
-                        Layout.minimumWidth: 420
-                        Layout.maximumWidth: 570
-                        spacing: 0
-
-                        RowLayout {
-                            spacing: 8
-                            Text {
-                                text: "REFRA"
-                                color: root.theme.accent
-                                font.family: "Arial Narrow"
-                                font.pixelSize: 22
-                                font.weight: Font.Bold
-                                font.letterSpacing: 0.8
-                            }
-                            Text {
-                                text: "TRANSLATOR"
-                                color: root.theme.text
-                                font.family: root.theme.monoFontFor(text)
-                                font.pixelSize: 12
-                                font.letterSpacing: 1.4
-                            }
-                        }
-                        ColumnLayout {
-                            objectName: "refraDarkNavigationMenu"
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.topMargin: 7
-                            spacing: 0
-
-                            Repeater {
-                                model: root.p3PageOrder
-                                PrismButton {
-                                    objectName: "refraDarkNavigationButton" + index
-                                    required property int index
-                                    required property var modelData
-                                    theme: root.theme
-                                    navigation: true
-                                    navigationHero: true
-                                    navigationNumber: String(index + 1).padStart(2, "0")
-                                    navigationSubtitle: root.p3MenuSubtitle(String(modelData))
-                                    navigationCool: index % 2 === 1
-                                    navigationTilt: index % 2 === 0 ? -3.8 : -5.7
-                                    text: root.p3MenuTitle(String(modelData))
-                                    primary: root.workbench.currentPage === modelData
-                                    quiet: !primary
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: Math.max(44, Math.min(54, root.height * 0.066))
-                                    Layout.minimumHeight: 44
-                                    Layout.leftMargin: index % 3 === 1 ? 14 : index % 3 === 2 ? 6 : 0
-                                    Layout.rightMargin: index % 3 === 0 ? 18 : 4
-                                    onClicked: root.workbench.setPage(String(modelData))
-                                }
-                            }
+                    Repeater {
+                        model: root.p3PageOrder
+                        PrismButton {
+                            objectName: "refraDarkNavigationButton" + index
+                            required property int index
+                            required property var modelData
+                            theme: root.theme
+                            navigation: true
+                            navigationHero: true
+                            navigationSlashVisible: [0, 1, 3, 5].indexOf(index) >= 0
+                            navigationNumber: String(index + 1).padStart(2, "0")
+                            navigationSubtitle: root.p3MenuSubtitle(String(modelData))
+                            navigationCool: index % 2 === 1
+                            navigationTilt: index % 2 === 0 ? -3.8 : -5.7
+                            navigationHeroFontSize: Math.max(
+                                58,
+                                Math.min(70, (root.width * 0.55 - 122) / 8.2)
+                            )
+                            text: root.p3MenuTitle(String(modelData))
+                            primary: root.workbench.currentPage === modelData
+                            quiet: !primary
+                            x: root.width * root.p3MenuOffsetFractions[index]
+                            y: parent.height * (0.105 + index * 0.115)
+                            width: root.width * 0.51
+                            height: Math.max(70, Math.min(92, parent.height * 0.17))
+                            z: primary ? 2 : 1
+                            onClicked: root.workbench.setPage(String(modelData))
                         }
                     }
+                }
 
-                    Item {
-                        objectName: "refraDarkHeroStage"
+                Image {
+                    objectName: "refraDarkHeroImage"
+                    x: root.width * 0.52
+                    y: parent.height * 0.12
+                    width: root.width * 0.48
+                    height: root.height * 0.33
+                    source: "../assets/refra-hero-dark.png"
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                }
+                ColumnLayout {
+                    objectName: "refraDarkHeroProfileMarker"
+                    x: root.width * 0.69
+                    y: parent.height * 0.66
+                    width: root.width * 0.28
+                    spacing: 4
+                    Text {
+                        text: root.workbench.currentProfileName
+                        color: root.theme.text
+                        font.family: root.theme.uiFontFor(text)
+                        font.pixelSize: 19
+                        font.weight: Font.DemiBold
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.alignment: Qt.AlignHCenter
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.preferredWidth: parent.width * 0.45
-                        Layout.minimumWidth: 280
-
-                        Rectangle {
-                            x: parent.width * 0.08
-                            y: parent.height * 0.48
-                            width: parent.width * 0.92
-                            height: 1
-                            color: root.theme.accent
-                            opacity: 0.24
-                            rotation: -12
-                        }
-                        Rectangle {
-                            x: parent.width * 0.17
-                            y: parent.height * 0.60
-                            width: parent.width * 0.78
-                            height: 1
-                            color: root.theme.spectrum
-                            opacity: 0.22
-                            rotation: -12
-                        }
-                        Image {
-                            objectName: "refraDarkHeroImage"
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width * 0.82
-                            height: parent.height * 0.65
-                            source: "../assets/refra-hero-dark.png"
-                            fillMode: Image.PreserveAspectFit
-                            smooth: true
-                        }
-                        ColumnLayout {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 12
-                            spacing: 4
-                            Text {
-                                text: root.workbench.currentProfileName
-                                color: root.theme.text
-                                font.family: root.theme.uiFontFor(text)
-                                font.pixelSize: 18
-                                font.weight: Font.DemiBold
-                                horizontalAlignment: Text.AlignHCenter
-                                Layout.alignment: Qt.AlignHCenter
-                            }
-                            Text {
-                                text: root.workbench.running ? "● 正在翻译" : "● 未启动"
-                                color: root.workbench.running ? root.theme.accent : root.theme.textSoft
-                                font.family: root.theme.uiFontFor(text)
-                                font.pixelSize: 13
-                                horizontalAlignment: Text.AlignHCenter
-                                Layout.alignment: Qt.AlignHCenter
-                            }
-                        }
+                    }
+                    Text {
+                        text: root.workbench.running ? "● 正在翻译" : "● 未启动"
+                        color: root.workbench.running ? root.theme.accent : root.theme.textSoft
+                        font.family: root.theme.uiFontFor(text)
+                        font.pixelSize: 15
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.fillWidth: true
                     }
                 }
             }
@@ -509,97 +548,106 @@ Item {
             RowLayout {
                 objectName: "refraDarkHomeStatusBand"
                 Layout.fillWidth: true
-                Layout.preferredHeight: root.height < 760 ? 136 : 160
+                Layout.preferredHeight: root.height * 0.21
                 Layout.minimumHeight: 126
-                Layout.leftMargin: root.width < 1100 ? 22 : 42
-                Layout.rightMargin: root.width < 1100 ? 20 : 36
-                Layout.topMargin: 5
-                Layout.bottomMargin: 2
+                Layout.leftMargin: root.width < 1100 ? root.width * 0.065 : root.width * 0.175
+                Layout.rightMargin: root.width < 1100 ? root.width * 0.04 : root.width * 0.03
+                    Layout.topMargin: root.width < 1100 ? 6 : root.height * 0.018
                 spacing: 0
 
-                ColumnLayout {
+                Item {
                     objectName: "refraDarkProfileSummary"
                     Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignTop
+                    Layout.fillHeight: true
                     Layout.minimumWidth: 210
                     Layout.preferredWidth: 270
                     Layout.rightMargin: 18
-                    spacing: 4
-                    Text {
-                        text: "系统状态"
-                        color: root.theme.text
-                        font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 14
-                        font.weight: Font.Bold
-                    }
-                    RowLayout {
-                        spacing: 7
-                        Rectangle {
-                            Layout.preferredWidth: 7
-                            Layout.preferredHeight: 7
-                            radius: 4
-                            color: root.workbench.runTone === "error" ? root.theme.danger
-                                 : root.workbench.runTone === "warning" ? root.theme.amber
-                                 : root.workbench.running ? root.theme.accent : root.theme.textDim
-                        }
+                    ColumnLayout {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: root.width < 1100 ? 3 : 6
                         Text {
-                            objectName: "refraDarkRunState"
-                            text: root.workbench.runState
-                            color: root.workbench.runTone === "error" ? root.theme.danger
-                                 : root.workbench.runTone === "warning" ? root.theme.amber
-                                 : root.workbench.running ? root.theme.accent : root.theme.text
+                            objectName: "refraDarkProfileHeading"
+                            text: "系统状态"
+                            color: root.theme.text
                             font.family: root.theme.uiFontFor(text)
-                            font.pixelSize: 18
-                            font.weight: Font.DemiBold
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
+                            font.pixelSize: root.width < 1100 ? 16 : 18
+                            font.weight: Font.Bold
                         }
-                    }
-                    PrismComboBox {
-                        objectName: "refraDarkProfileSelector"
-                        theme: root.theme
-                        accessibleName: "当前配置"
-                        settingDescription: "选择当前游戏的配置。"
-                        settingKey: "home-profile"
-                        model: root.workbench.profileNames
-                        currentIndex: root.workbench.currentProfileIndex
-                        enabled: model.length > 0
-                        Layout.fillWidth: true
-                        onActivated: index => root.workbench.selectProfile(index)
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 5
-                        PrismButton {
-                            objectName: "refraDarkRefreshProfiles"
-                            theme: root.theme
-                            text: "刷新"
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 45
-                            onClicked: root.workbench.refreshProfiles()
+                        RowLayout {
+                            spacing: 7
+                            Rectangle {
+                                Layout.preferredWidth: 7
+                                Layout.preferredHeight: 7
+                                radius: 4
+                                color: root.workbench.runTone === "error" ? root.theme.danger
+                                     : root.workbench.runTone === "warning" ? root.theme.amber
+                                     : root.workbench.running ? root.theme.accent : root.theme.textDim
+                            }
+                            Text {
+                                objectName: "refraDarkRunState"
+                                text: root.workbench.runState
+                                color: root.workbench.runTone === "error" ? root.theme.danger
+                                     : root.workbench.runTone === "warning" ? root.theme.amber
+                                     : root.workbench.running ? root.theme.accent : root.theme.text
+                                font.family: root.theme.uiFontFor(text)
+                                font.pixelSize: root.width < 1100 ? 18 : 20
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
                         }
-                        PrismButton {
-                            objectName: "refraDarkCreateProfile"
+                        PrismComboBox {
+                            objectName: "refraDarkProfileSelector"
                             theme: root.theme
-                            text: "新建"
-                            primary: true
+                            accessibleName: "当前配置"
+                            settingDescription: "选择当前游戏的配置。"
+                            settingKey: "home-profile"
+                            model: root.workbench.profileNames
+                            currentIndex: root.workbench.currentProfileIndex
+                            enabled: model.length > 0
+                            implicitHeight: root.width < 1100 ? 36 : 42
                             Layout.fillWidth: true
-                            Layout.minimumWidth: 45
-                            onClicked: createProfileDialog.open()
+                            onActivated: index => root.workbench.selectProfile(index)
                         }
-                        PrismButton {
-                            objectName: "refraDarkDeleteProfile"
-                            theme: root.theme
-                            text: "删除"
-                            tone: "danger"
-                            enabled: root.workbench.hasProfile && !root.workbench.running
-                                     && root.workbench.runPhase !== "stopping"
+                        RowLayout {
                             Layout.fillWidth: true
-                            Layout.minimumWidth: 45
-                            onClicked: {
-                                deleteProfileDialog.profileId = root.workbench.profileIds[root.workbench.currentProfileIndex]
-                                deleteProfileDialog.profileName = root.workbench.currentProfileName
-                                deleteProfileDialog.open()
+                            spacing: 5
+                            PrismButton {
+                                objectName: "refraDarkRefreshProfiles"
+                                theme: root.theme
+                                text: "刷新"
+                                implicitHeight: root.width < 1100 ? 34 : 42
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 45
+                                onClicked: root.workbench.refreshProfiles()
+                            }
+                            PrismButton {
+                                objectName: "refraDarkCreateProfile"
+                                theme: root.theme
+                                text: "新建"
+                                primary: true
+                                implicitHeight: root.width < 1100 ? 34 : 42
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 45
+                                onClicked: createProfileDialog.open()
+                            }
+                            PrismButton {
+                                objectName: "refraDarkDeleteProfile"
+                                theme: root.theme
+                                text: "删除"
+                                tone: "danger"
+                                implicitHeight: root.width < 1100 ? 34 : 42
+                                enabled: root.workbench.hasProfile && !root.workbench.running
+                                         && root.workbench.runPhase !== "stopping"
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 45
+                                onClicked: {
+                                    deleteProfileDialog.profileId = root.workbench.profileIds[root.workbench.currentProfileIndex]
+                                    deleteProfileDialog.profileName = root.workbench.currentProfileName
+                                    deleteProfileDialog.open()
+                                }
                             }
                         }
                     }
@@ -607,125 +655,143 @@ Item {
 
                 Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: root.theme.lineStrong; opacity: 0.75 }
 
-                ColumnLayout {
+                Item {
                     objectName: "refraDarkOcrSummary"
                     Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignTop
-                    Layout.minimumWidth: 170
+                    Layout.fillHeight: true
+                    Layout.minimumWidth: root.width < 1100 ? 135 : 170
+                    Layout.preferredWidth: root.width < 1100 ? 150 : 220
                     Layout.leftMargin: 22
                     Layout.rightMargin: 18
-                    spacing: 5
-                    Text { text: "OCR"; color: root.theme.accent; font.family: root.theme.monoFontFor(text); font.pixelSize: 12; font.letterSpacing: 1 }
-                    Text {
-                        objectName: "refraDarkOcrStatus"
-                        text: root.workbench.ocrStatus
-                        color: root.theme.text
-                        font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 17
-                        font.weight: Font.Medium
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                    Text {
-                        text: root.workbench.detectionQualitySummary
-                        color: root.theme.textSoft
-                        font.family: root.theme.monoFontFor(text)
-                        font.pixelSize: 11
-                        wrapMode: Text.WordWrap
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                }
-
-                Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: root.theme.lineStrong; opacity: 0.75 }
-
-                ColumnLayout {
-                    objectName: "refraDarkTranslationSummary"
-                    Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignTop
-                    Layout.minimumWidth: 175
-                    Layout.leftMargin: 22
-                    Layout.rightMargin: 18
-                    spacing: 5
-                    Text { text: "TRANSLATION"; color: root.theme.textSoft; font.family: root.theme.monoFontFor(text); font.pixelSize: 12; font.letterSpacing: 0.7 }
-                    Text {
-                        text: root.workbench.backend === "builtin" ? "内置本地模型" : "外部 API"
-                        color: root.theme.text
-                        font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 17
-                        font.weight: Font.Medium
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                    Flickable {
-                        objectName: "refraDarkModelScroll"
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.minimumHeight: 20
-                        contentWidth: width
-                        contentHeight: modelName.implicitHeight
-                        clip: true
-                        boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: PrismScrollBar { theme: root.theme }
+                    ColumnLayout {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: 7
+                        Text { objectName: "refraDarkOcrHeading"; text: "OCR"; color: root.theme.accent; font.family: root.theme.uiFontFor(text); font.pixelSize: 18; font.weight: Font.Bold }
                         Text {
-                            id: modelName
-                            objectName: "refraDarkModelName"
-                            width: parent.width
-                            text: root.workbench.backend === "builtin" ? root.workbench.builtinModel : root.workbench.model
+                            objectName: "refraDarkOcrStatus"
+                            text: root.workbench.ocrStatus
+                            color: root.theme.text
+                            font.family: root.theme.uiFontFor(text)
+                            font.pixelSize: root.width < 1100 ? 18 : 20
+                            font.weight: Font.Medium
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: 2
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: root.workbench.detectionQualitySummary
                             color: root.theme.textSoft
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 11
-                            wrapMode: Text.WrapAnywhere
+                            font.pixelSize: 14
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
                         }
                     }
                 }
 
                 Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: root.theme.lineStrong; opacity: 0.75 }
 
-                ColumnLayout {
+                Item {
+                    objectName: "refraDarkTranslationSummary"
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumWidth: root.width < 1100 ? 150 : 175
+                    Layout.leftMargin: 22
+                    Layout.rightMargin: 18
+                    ColumnLayout {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: 7
+                        Text { objectName: "refraDarkTranslationHeading"; text: "翻译引擎"; color: root.theme.text; font.family: root.theme.uiFontFor(text); font.pixelSize: 18; font.weight: Font.Bold }
+                        Text {
+                            text: root.workbench.backend === "builtin" ? "内置本地模型" : "外部 API"
+                            color: root.theme.text
+                            font.family: root.theme.uiFontFor(text)
+                            font.pixelSize: 20
+                            font.weight: Font.Medium
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Flickable {
+                            objectName: "refraDarkModelScroll"
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.minimumHeight: 20
+                            contentWidth: width
+                            contentHeight: modelName.implicitHeight
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            ScrollBar.vertical: PrismScrollBar { theme: root.theme }
+                            Text {
+                                id: modelName
+                                objectName: "refraDarkModelName"
+                                width: parent.width
+                                text: root.workbench.backend === "builtin" ? root.workbench.builtinModel : root.workbench.model
+                                color: root.theme.textSoft
+                                font.family: root.theme.monoFontFor(text)
+                                font.pixelSize: 14
+                                wrapMode: Text.WrapAnywhere
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: root.theme.lineStrong; opacity: 0.75 }
+
+                Item {
                     objectName: "refraDarkLastRunSummary"
                     Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignTop
-                    Layout.minimumWidth: 190
+                    Layout.fillHeight: true
+                    Layout.minimumWidth: root.width < 1100 ? 160 : 190
                     Layout.leftMargin: 22
-                    spacing: 5
-                    Text { text: "上次运行"; color: root.theme.text; font.family: root.theme.uiFontFor(text); font.pixelSize: 14; font.weight: Font.Bold }
-                    Text {
-                        objectName: "refraDarkLastRunStatus"
-                        text: root.workbench.lastRunAvailable ? root.workbench.lastRunStatus
-                              : "尚无上次正常且有效的运行结果"
-                        color: root.workbench.lastRunAvailable ? root.theme.textSoft : root.theme.textDim
-                        font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                    Text {
-                        text: root.workbench.lastRunAvailable
-                              ? "OCR " + root.workbench.lastRunOcrPeakText + "  ·  LLM " + root.workbench.lastRunLlmPeakText
-                              : "快捷键  " + root.workbench.hotkeyPreference
-                        color: root.theme.accent
-                        font.family: root.theme.monoFontFor(text)
-                        font.pixelSize: 11
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                    Text {
-                        visible: root.workbench.lastRunAvailable
-                        text: "快捷键  " + root.workbench.hotkeyPreference
-                        color: root.theme.textDim
-                        font.family: root.theme.monoFontFor(text)
-                        font.pixelSize: 10
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
+                    ColumnLayout {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: 6
+                        Text { objectName: "refraDarkLastRunHeading"; text: "上次运行"; color: root.theme.text; font.family: root.theme.uiFontFor(text); font.pixelSize: 18; font.weight: Font.Bold }
+                        Text {
+                            objectName: "refraDarkLastRunStatus"
+                            text: root.workbench.lastRunAvailable ? root.workbench.lastRunStatus
+                                  : "尚无上次正常且有效的运行结果"
+                            color: root.workbench.lastRunAvailable ? root.theme.textSoft : root.theme.textDim
+                            font.family: root.theme.uiFontFor(text)
+                            font.pixelSize: 15
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: root.workbench.lastRunAvailable
+                                  ? "OCR " + root.workbench.lastRunOcrPeakText + "  ·  LLM " + root.workbench.lastRunLlmPeakText
+                                  : "快捷键  " + root.workbench.hotkeyPreference
+                            color: root.theme.accent
+                            font.family: root.theme.monoFontFor(text)
+                            font.pixelSize: 14
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            visible: root.workbench.lastRunAvailable
+                            text: "快捷键  " + root.workbench.hotkeyPreference
+                            color: root.theme.textDim
+                            font.family: root.theme.monoFontFor(text)
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
                     }
                 }
             }
 
             Rectangle {
+                objectName: "refraDarkHomeActionRule"
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
                 Layout.leftMargin: root.width < 1100 ? 22 : 42
@@ -736,15 +802,21 @@ Item {
             RowLayout {
                 objectName: "refraDarkHomeActions"
                 Layout.fillWidth: true
-                Layout.preferredHeight: root.height < 760 ? 56 : 64
-                Layout.leftMargin: root.width < 1100 ? 22 : 42
-                Layout.rightMargin: root.width < 1100 ? 20 : 36
-                Layout.bottomMargin: 4
-                spacing: 12
+                Layout.preferredHeight: root.height * 0.137
+                Layout.minimumHeight: 72
+                Layout.leftMargin: root.width < 1100 ? root.width * 0.065 : root.width * 0.175
+                Layout.rightMargin: root.width < 1100 ? root.width * 0.04 : root.width * 0.02
+                Layout.bottomMargin: 0
+                spacing: 8
                 PrismButton {
                     objectName: "refraDarkPreferencesButton"
                     theme: root.theme
                     text: "工作台偏好"
+                    implicitWidth: 154
+                    implicitHeight: 44
+                    Layout.preferredWidth: 154
+                    Layout.preferredHeight: 44
+                    Layout.alignment: Qt.AlignVCenter
                     onClicked: refraPreferencesDialog.open()
                 }
                 ColumnLayout {
@@ -756,7 +828,7 @@ Item {
                         text: "皮肤 · 主题 · 动效 · 自启动"
                         color: root.theme.textDim
                         font.family: root.theme.uiFontFor(text)
-                        font.pixelSize: 11
+                        font.pixelSize: 13
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
@@ -784,7 +856,7 @@ Item {
                                  : root.workbench.statusTone === "success" ? root.theme.accent
                                  : root.theme.textSoft
                             font.family: root.theme.uiFontFor(text)
-                            font.pixelSize: 11
+                            font.pixelSize: 13
                             wrapMode: Text.WordWrap
                             maximumLineCount: 2
                             elide: Text.ElideRight
@@ -796,28 +868,40 @@ Item {
                             text: "有未应用更改"
                             color: root.theme.amber
                             font.family: root.theme.uiFontFor(text)
-                            font.pixelSize: 11
+                            font.pixelSize: 13
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
                     }
                 }
                 PrismButton {
-                    objectName: "refraDarkApplyButton"
-                    theme: root.theme
-                    text: "应用更改"
-                    enabled: root.workbench.hasProfile
-                    onClicked: root.saveRequested()
-                }
-                PrismButton {
                     objectName: "refraDarkStartButton"
                     theme: root.theme
+                    p3Action: true
                     primary: true
                     text: root.startPreludePending ? "正在启动…" : root.workbench.startButtonText
+                    implicitWidth: root.width * 0.21
+                    implicitHeight: root.height * 0.073
+                    Layout.preferredWidth: root.width * 0.21
+                    Layout.preferredHeight: root.height * 0.073
+                    Layout.alignment: Qt.AlignVCenter
                     enabled: root.workbench.runPhase !== "stopping"
                              && !root.startPreludePending
                              && (root.workbench.canStart || root.workbench.running)
                     onClicked: root.liveToggleRequested()
+                }
+                PrismButton {
+                    objectName: "refraDarkApplyButton"
+                    theme: root.theme
+                    p3Action: true
+                    text: "应用更改"
+                    implicitWidth: root.width * 0.13
+                    implicitHeight: root.height * 0.073
+                    Layout.preferredWidth: root.width * 0.13
+                    Layout.preferredHeight: root.height * 0.073
+                    Layout.alignment: Qt.AlignVCenter
+                    enabled: root.workbench.hasProfile
+                    onClicked: root.saveRequested()
                 }
             }
         }

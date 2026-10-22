@@ -17,6 +17,9 @@ Button {
     property bool navigationCool: false
     property real navigationTilt: 0
     property bool navigationHero: false
+    property real navigationHeroFontSize: 0
+    property bool navigationSlashVisible: false
+    property bool p3Action: false
     property string tone: "neutral"
     property real dohnaImpact: 0
     // NumberStepper embeds its two actions in one shared Dohna surface.  The
@@ -88,6 +91,12 @@ Button {
                        : buttonLabel.implicitWidth
         implicitHeight: root.navigation && !root.theme.dohna ? (root.theme.refraDark ? (root.navigationHero ? 58 : 64) : 42) : buttonLabel.implicitHeight
 
+        TextMetrics {
+            id: navigationHeroTitleMetrics
+            font: navigationTitleLabel.font
+            text: navigationTitleLabel.text
+        }
+
         Text {
             id: buttonLabel
             objectName: "prismButtonLabel"
@@ -104,13 +113,17 @@ Button {
             font.family: root.theme.dohna
                          ? root.theme.monoFontFor(text)
                          : root.theme.uiFontFor(text)
-            font.pixelSize: root.theme.dohna && root.navigation ? 24 : 13
-            font.weight: root.theme.dohna && root.navigation ? Font.Bold : Font.DemiBold
+            font.pixelSize: root.theme.refraDark && root.p3Action
+                            ? (root.primary ? 20 : 17)
+                            : root.theme.dohna && root.navigation ? 24 : 13
+            font.weight: root.theme.refraDark && root.p3Action ? Font.Bold
+                         : root.theme.dohna && root.navigation ? Font.Bold : Font.DemiBold
             font.letterSpacing: root.theme.dohna
                                 ? (root.navigation ? 0.4 : 0.9)
                                 : 0.2
             fontSizeMode: Text.FixedSize
-            leftPadding: root.theme.dohna && root.navigation ? 10 : 0
+            leftPadding: root.theme.dohna && root.navigation ? 10
+                         : root.theme.refraDark && root.p3Action && root.primary ? 35 : 0
             rightPadding: leftPadding
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
@@ -121,15 +134,15 @@ Button {
         Text {
             objectName: "navigationNumberLabel"
             visible: root.navigation && !root.theme.dohna
-            x: 7
-            y: 8
-            width: 24
-            height: 18
+            x: root.navigationHero ? 10 : 7
+            y: root.navigationHero ? Math.max(0, (parent.height - height) / 2) : 8
+            width: root.navigationHero ? 34 : 24
+            height: root.navigationHero ? 28 : 18
             text: root.navigationNumber
             color: root.theme.refraDark && root.primary ? root.theme.ink
                   : root.primary ? root.theme.accent : root.theme.textDim
             font.family: root.theme.monoFontFor(text)
-            font.pixelSize: 12
+            font.pixelSize: root.navigationHero ? 16 : 12
             font.weight: Font.DemiBold
             verticalAlignment: Text.AlignVCenter
         }
@@ -138,12 +151,13 @@ Button {
             id: navigationTitleLabel
             objectName: "navigationTitleLabel"
             visible: root.navigation && !root.theme.dohna
-            x: 37
+            x: root.navigationHero ? 54 : 37
             y: root.theme.refraDark && !root.navigationHero ? 1 : (root.theme.refraDark ? 0 : 3)
             width: root.theme.refraDark && root.navigationHero
-                   ? Math.min(parent.width - x - 10, implicitWidth)
+                   ? Math.min(parent.width - x - 8,
+                              navigationHeroTitleMetrics.tightBoundingRect.width + 6)
                    : Math.max(0, parent.width - x - (root.theme.refraDark ? 10 : 5))
-            height: root.theme.refraDark ? (root.navigationHero ? 52 : 36) : 24
+            height: root.theme.refraDark ? (root.navigationHero ? parent.height : 36) : 24
             text: root.text
             color: root.theme.refraDark && root.primary ? root.theme.ink
                   : !root.enabled ? root.theme.textDim
@@ -153,22 +167,22 @@ Button {
                          ? "Arial Black" : root.theme.displayFontFor(text)
             font.pixelSize: root.theme.refraDark
                             ? (root.navigationHero
-                               ? Math.max(32, Math.min(48, root.width * 0.092))
-                               : Math.max(15, Math.min(24, (root.width - 56)
-                                                       / Math.max(5, String(text).length * 0.58)))
+                               ? (root.navigationHeroFontSize > 0
+                                  ? root.navigationHeroFontSize
+                                  : Math.max(64, Math.min(96, (root.width - 126) / 5.5)))
+                               : Math.max(16, Math.min(28, (root.width - 52)
+                                                       / Math.max(5, String(text).length * 0.67)))
                               )
                             : 15
             font.weight: root.theme.refraDark
                          ? Font.Black : root.primary ? Font.Bold : Font.DemiBold
             font.italic: root.theme.refraDark
-            font.letterSpacing: root.theme.refraDark ? -1.4 : 0
+            font.letterSpacing: root.theme.refraDark ? (root.navigationHero ? -2.8 : -1.4) : 0
+            fontSizeMode: root.theme.refraDark && root.navigation && !root.navigationHero
+                          ? Text.HorizontalFit : Text.FixedSize
+            minimumPixelSize: root.theme.refraDark && root.navigation && !root.navigationHero ? 16 : 1
             verticalAlignment: Text.AlignVCenter
             elide: root.theme.refraDark ? Text.ElideNone : Text.ElideRight
-            transform: Scale {
-                xScale: root.theme.refraDark ? 0.78 : 1
-                origin.x: 0
-                origin.y: navigationTitleLabel.height / 2
-            }
         }
 
         Text {
@@ -177,20 +191,46 @@ Button {
             visible: root.navigation && !root.theme.dohna && root.theme.refraDark
             x: root.navigationHero
                ? Math.min(parent.width - implicitWidth - 5,
-                          navigationTitleLabel.x + navigationTitleLabel.width + 16)
+                          navigationTitleLabel.x
+                          + navigationHeroTitleMetrics.tightBoundingRect.width + 12)
                : 37
             y: root.navigationHero ? 0 : 35
-            width: Math.max(0, Math.min(root.navigationHero ? 100 : parent.width - x - 5,
-                                        implicitWidth))
-            height: root.navigationHero ? 52 : 25
+            width: root.navigationHero
+                   ? Math.max(0, Math.min(parent.width - x - 5, implicitWidth))
+                   : Math.max(0, Math.min(parent.width - x - 5, implicitWidth))
+            height: root.navigationHero ? parent.height : 25
             text: root.navigationSubtitle
             color: root.primary ? root.theme.ink
                   : root.navigationCool ? root.theme.electric : root.theme.text
             font.family: root.theme.uiFontFor(text)
-            font.pixelSize: root.navigationHero ? 18 : 14
+            font.pixelSize: root.navigationHero ? 24 : 14
             font.weight: Font.Bold
             verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
+            elide: root.navigationHero ? Text.ElideNone : Text.ElideRight
+        }
+
+        Shape {
+            id: navigationHeroSlash
+            objectName: "navigationHeroSlash"
+            visible: root.theme.refraDark && root.navigation && root.navigationHero
+                     && root.navigationSlashVisible
+            x: navigationSubtitleLabel.x + navigationSubtitleLabel.width + 10
+            y: parent.height * 0.80
+            width: Math.max(0, parent.width - x - 5)
+            height: 6
+            opacity: root.primary ? 0.88 : 0.66
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: "transparent"
+                fillColor: root.navigationCool ? root.theme.electric : root.theme.accent
+                startX: 0
+                startY: 3
+                PathLine { x: Math.max(0, navigationHeroSlash.width - 24); y: 0 }
+                PathLine { x: navigationHeroSlash.width; y: 1.4 }
+                PathLine { x: Math.max(0, navigationHeroSlash.width - 24); y: 6 }
+                PathLine { x: 0; y: 4 }
+                PathLine { x: 0; y: 3 }
+            }
         }
 
         Text {
@@ -219,18 +259,22 @@ Button {
         color: !root.enabled ? "transparent"
               : root.navigation ? "transparent"
               : root.theme.dohna ? "transparent"
+              : root.theme.refraDark && root.p3Action ? "transparent"
               : root.primary ? root.theme.buttonPrimary
               : root.down ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.12)
               : root.hovered ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.065)
               : root.quiet ? "transparent"
               : root.theme.glassRaised
-        border.color: root.theme.dohna || root.navigation ? "transparent"
+        border.color: root.theme.dohna || root.navigation
+                      || (root.theme.refraDark && root.p3Action) ? "transparent"
                     : root.activeFocus ? root.theme.accent
                     : root.tone === "danger" ? root.theme.danger
                     : root.primary && root.theme.dohna ? root.theme.selectionEdge
                     : root.primary ? root.theme.accent
                     : root.theme.lineStrong
-        border.width: root.theme.dohna || root.navigation ? 0 : (root.activeFocus ? 2 : root.primary ? 1.5 : 1)
+        border.width: root.theme.dohna || root.navigation
+                      || (root.theme.refraDark && root.p3Action) ? 0
+                      : (root.activeFocus ? 2 : root.primary ? 1.5 : 1)
         opacity: root.dohnaGroupFrame
                  ? (root.dohnaGroupEnabled ? 1 : 0.55)
                  : root.enabled ? 1 : 0.55
@@ -251,38 +295,155 @@ Button {
             Behavior on opacity { NumberAnimation { duration: root.theme.ui } }
         }
 
-        Rectangle {
+        Shape {
+            id: prismNavigationSidebarMagenta
             objectName: "prismNavigationMagentaOffset"
             visible: root.theme.refraDark && root.navigation && root.primary && root.enabled
+                     && !root.navigationHero
             x: 10
-            y: 7
-            width: root.navigationHero
-                   ? Math.max(360, Math.min(parent.width - 26,
-                                            navigationTitleLabel.x + navigationTitleLabel.implicitWidth
-                                            + 16 + navigationSubtitleLabel.implicitWidth + 14))
-                   : Math.max(0, parent.width - 27)
-            height: parent.height - 11
-            color: root.theme.spectrum
-            rotation: -1.4
+            y: 8
+            width: Math.max(0, parent.width - 16)
+            height: Math.max(0, parent.height - 13)
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: "transparent"
+                fillColor: root.theme.spectrum
+                startX: 8
+                startY: 0
+                PathLine { x: prismNavigationSidebarMagenta.width; y: 0 }
+                PathLine { x: prismNavigationSidebarMagenta.width - 12; y: prismNavigationSidebarMagenta.height }
+                PathLine { x: 0; y: parent.height }
+                PathLine { x: 8; y: 0 }
+            }
         }
-        Rectangle {
+        Shape {
+            id: prismNavigationSidebarActive
             objectName: "prismNavigationActivePlate"
             visible: root.theme.refraDark && root.navigation && root.primary && root.enabled
-            x: 4
+                     && !root.navigationHero
+            x: 0
             y: 4
-            width: root.navigationHero
-                   ? Math.max(360, Math.min(parent.width - 26,
-                                            navigationTitleLabel.x + navigationTitleLabel.implicitWidth
-                                            + 16 + navigationSubtitleLabel.implicitWidth + 14))
-                   : Math.max(0, parent.width - 26)
-            height: parent.height - 6
-            color: root.theme.accent
-            rotation: -1.4
+            width: Math.max(0, parent.width - 18)
+            height: Math.max(0, parent.height - 10)
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: "transparent"
+                fillColor: root.theme.accent
+                startX: 8
+                startY: 0
+                PathLine { x: prismNavigationSidebarActive.width; y: 0 }
+                PathLine { x: prismNavigationSidebarActive.width - 12; y: prismNavigationSidebarActive.height }
+                PathLine { x: 0; y: parent.height }
+                PathLine { x: 8; y: 0 }
+            }
+        }
+
+        Shape {
+            id: navigationHeroMagentaShape
+            objectName: "prismNavigationHeroMagentaWedge"
+            visible: root.theme.refraDark && root.navigation && root.navigationHero
+                     && root.primary && root.enabled
+            x: 13
+            y: 10
+            width: parent.width * 0.85
+            height: parent.height - 20
+            rotation: -2.2
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: "transparent"
+                fillColor: root.theme.spectrum
+                startX: 18
+                startY: 0
+                PathLine { x: navigationHeroMagentaShape.width * 0.96; y: 0 }
+                PathLine { x: navigationHeroMagentaShape.width * 0.88; y: navigationHeroMagentaShape.height }
+                PathLine { x: 0; y: navigationHeroMagentaShape.height }
+                PathLine { x: 18; y: 0 }
+            }
+        }
+
+        Shape {
+            id: navigationHeroActiveShape
+            objectName: "prismNavigationHeroActiveWedge"
+            visible: root.theme.refraDark && root.navigation && root.navigationHero
+                     && root.primary && root.enabled
+            x: 3
+            y: 3
+            width: parent.width * 0.85
+            height: parent.height - 16
+            rotation: -2.2
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: "transparent"
+                fillColor: root.theme.accent
+                startX: 18
+                startY: 0
+                PathLine { x: navigationHeroActiveShape.width * 0.96; y: 0 }
+                PathLine { x: navigationHeroActiveShape.width * 0.88; y: navigationHeroActiveShape.height }
+                PathLine { x: 0; y: navigationHeroActiveShape.height }
+                PathLine { x: 18; y: 0 }
+            }
+        }
+
+        Shape {
+            objectName: "prismP3ActionWedge"
+            visible: root.theme.refraDark && root.p3Action && root.enabled
+            anchors.fill: parent
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.primary ? "transparent" : root.theme.electric
+                strokeWidth: root.primary ? 0 : 1.4
+                fillColor: root.primary ? root.theme.buttonPrimary
+                          : root.down ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.14)
+                          : Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.035)
+                startX: 18
+                startY: 0
+                PathLine { x: root.width; y: 0 }
+                PathLine { x: root.width - 18; y: root.height }
+                PathLine { x: 0; y: root.height }
+                PathLine { x: 18; y: 0 }
+            }
+        }
+
+        Shape {
+            id: p3ActionLeadFacet
+            objectName: "prismP3ActionLeadFacet"
+            visible: root.theme.refraDark && root.p3Action && root.primary && root.enabled
+            x: 0
+            y: 0
+            width: 32
+            height: parent.height
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: "transparent"
+                fillColor: root.theme.accent
+                startX: 21
+                startY: 0
+                PathLine { x: 32; y: 0 }
+                PathLine { x: 11; y: p3ActionLeadFacet.height }
+                PathLine { x: 0; y: p3ActionLeadFacet.height }
+                PathLine { x: 21; y: 0 }
+            }
+        }
+
+        Text {
+            objectName: "prismP3ActionPlayMark"
+            visible: root.theme.refraDark && root.p3Action && root.primary
+            x: 22
+            y: 0
+            width: 28
+            height: parent.height
+            text: "▶"
+            color: root.theme.buttonPrimaryText
+            font.family: root.theme.uiFontFor(text)
+            font.pixelSize: 22
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
         }
 
         Shape {
             objectName: "prismButtonPrimaryFacet"
             visible: !root.theme.dohna && root.primary && root.enabled && !root.navigation
+                     && !(root.theme.refraDark && root.p3Action)
             anchors.right: parent.right
             anchors.top: parent.top
             width: 14

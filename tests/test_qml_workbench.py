@@ -674,6 +674,12 @@ def _real_home_hotkey_host(
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    # These legacy Home checks exercise the original preferences tree. Keep
+    # their theme and skin explicit so an elevated Windows account's system
+    # color scheme cannot silently route them through the new dark Home. Tests
+    # for the replacement dark preferences enter dark mode explicitly below.
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
     controller.setReducedMotion(True)
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
@@ -926,6 +932,8 @@ def test_home_hotkey_default_button_restores_default_and_updates_display(
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
     controller.setHotkey("Ctrl+Shift+T")
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
@@ -2217,6 +2225,8 @@ def test_real_profile_dropdown_switches_and_restores_runtime_state(
     )
 
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
     app.processEvents()
@@ -2320,6 +2330,7 @@ def test_real_skin_dropdown_highlight_uses_skin_specific_surface(
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
     controller.setSkin(skin)
+    controller.setTheme("light")
     controller.setReducedMotion(True)
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
@@ -2461,6 +2472,7 @@ def test_profile_delete_dialog_cancel_confirm_and_empty_state(tmp_path: Path, sk
     profile = create_game_profile(config_path, load_config(config_path), "game", display_name="测试游戏")
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
     controller.setSkin(skin)
+    controller.setTheme("light")
     controller.setReducedMotion(True)
     host = QmlWorkbenchHost(controller, application=app)
     try:
@@ -3194,10 +3206,6 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     assert skin_selector.property("visible") is False
     assert dark_skin_selector is not None
     assert dark_theme_selector is not None
-    assert dark_skin_selector.property("currentIndex") == 0
-    assert dark_skin_selector.property("currentText") == "Prism"
-    assert dark_theme_selector.property("currentText") == "深色"
-    assert dark_theme_selector.property("enabled") is True
     assert theme_selector is not None
     assert theme_selector.property("enabled") is False
     assert theme.property("dohna") is False
@@ -3218,6 +3226,12 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     ).toPoint()
     QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=center)
     app.processEvents()
+    assert dark_skin_selector.property("visible") is True
+    assert dark_theme_selector.property("visible") is True
+    assert dark_skin_selector.property("currentIndex") == 0
+    assert dark_skin_selector.property("currentText") == "Prism"
+    assert dark_theme_selector.property("currentText") == "深色"
+    assert dark_theme_selector.property("enabled") is True
     center = dark_skin_selector.mapToScene(
         QPointF(dark_skin_selector.width() / 2, dark_skin_selector.height() / 2)
     ).toPoint()
@@ -3303,8 +3317,19 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     controller.setSkin(SKIN_PRISM)
     app.processEvents()
     assert controller.themePreference == "dark"
+    preferences = window.findChild(QObject, "refraDarkPreferencesButton")
+    assert preferences is not None and preferences.isVisible()
+    center = preferences.mapToScene(
+        QPointF(preferences.width() / 2, preferences.height() / 2)
+    ).toPoint()
+    QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=center)
+    app.processEvents()
+    assert dark_theme_selector.property("visible") is True
     assert dark_theme_selector.property("currentText") == "深色"
     assert dark_theme_selector.property("enabled") is True
+    preferences_accept = window.findChild(QObject, "refraPreferencesDialogAcceptButton")
+    assert preferences_accept is not None and preferences_accept.isVisible()
+    _click_quick_item(window, "refraPreferencesDialogAcceptButton")
     assert theme_selector.property("enabled") is False
     assert theme.property("dohna") is False
     assert theme.property("dark") is True
@@ -3319,8 +3344,24 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
         assert controller.themePreference == saved_theme
         controller.setSkin(SKIN_PRISM)
         app.processEvents()
-        assert theme_selector.property("currentText") == label
-        assert theme_selector.property("enabled") is True
+        if theme.property("refraDark") is True:
+            assert theme_selector.property("visible") is False
+            assert theme_selector.property("enabled") is False
+            preferences = window.findChild(QObject, "refraDarkPreferencesButton")
+            assert preferences is not None and preferences.isVisible()
+            center = preferences.mapToScene(
+                QPointF(preferences.width() / 2, preferences.height() / 2)
+            ).toPoint()
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=center)
+            app.processEvents()
+            assert dark_theme_selector.property("visible") is True
+            assert dark_theme_selector.property("currentText") == label
+            assert dark_theme_selector.property("enabled") is True
+            _click_quick_item(window, "refraPreferencesDialogAcceptButton")
+        else:
+            assert theme_selector.property("visible") is True
+            assert theme_selector.property("currentText") == label
+            assert theme_selector.property("enabled") is True
     host.shutdown()
 
 
@@ -3330,6 +3371,7 @@ def test_real_dohna_titles_enter_opposite_content_on_every_page(tmp_path: Path) 
     _write_config(config_path)
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
     controller.setSkin(SKIN_DOHNA)
+    controller.setTheme("light")
     controller.setReducedMotion(False)
     controller.setPage("SETTINGS")
     host = QmlWorkbenchHost(controller, application=app)
@@ -3886,6 +3928,8 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
     window = host.window
@@ -4084,6 +4128,7 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
     create_game_profile(config_path, load_config(config_path), "game", display_name="测试游戏")
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
     controller.setSkin(SKIN_DOHNA)
+    controller.setTheme("light")
     controller.setReducedMotion(True)
     host = QmlWorkbenchHost(controller, application=app)
     try:
@@ -4548,6 +4593,8 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
     )
     configured = load_config(config_path).preview.overlay_opacity
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
     controller.setPage("OVERLAY")
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
@@ -4811,6 +4858,8 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
         ),
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
     qml_warnings: list[str] = []
 
     def create_engine(parent: QObject) -> QQmlApplicationEngine:
@@ -5251,6 +5300,8 @@ def test_real_workbench_uses_responsive_titles_and_settling_page_motion(
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
     controller.setReducedMotion(False)
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
@@ -5463,6 +5514,48 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                         assert origin.x() + content.width() <= panel.width() + 0.5
                         assert origin.y() + content.height() <= panel.height() + 0.5
                     assert _find_quick_item(window, "refraDarkHeroImage").isVisible()
+                    status_band = _find_quick_item(window, "refraDarkHomeStatusBand")
+                    assert status_band is not None
+                    headings = [
+                        _find_quick_item(window, name)
+                        for name in (
+                            "refraDarkProfileHeading",
+                            "refraDarkOcrHeading",
+                            "refraDarkTranslationHeading",
+                            "refraDarkLastRunHeading",
+                        )
+                    ]
+                    assert all(heading is not None and heading.isVisible() for heading in headings)
+                    heading_y = [
+                        heading.mapToItem(status_band, QPointF(0, 0)).y()
+                        for heading in headings
+                    ]
+                    assert max(heading_y) - min(heading_y) <= 0.5
+
+                    ocr_status = _find_quick_item(window, "refraDarkOcrStatus")
+                    assert ocr_status is not None
+                    assert ocr_status.property("text") == controller.ocrStatus
+                    assert ocr_status.property("lineCount") <= 2
+                    status_origin = ocr_status.mapToItem(status_band, QPointF(0, 0))
+                    assert status_origin.y() + ocr_status.height() <= status_band.height() + 0.5
+
+                    footer_rule = _find_quick_item(window, "refraDarkHomeActionRule")
+                    assert footer_rule is not None
+                    footer_rule_y = footer_rule.mapToItem(panel, QPointF(0, 0)).y()
+                    for name in (
+                        "refraDarkRefreshProfiles",
+                        "refraDarkCreateProfile",
+                        "refraDarkDeleteProfile",
+                    ):
+                        profile_action = _find_quick_item(window, name)
+                        assert profile_action is not None and profile_action.isVisible()
+                        action_bottom = profile_action.mapToItem(
+                            panel,
+                            QPointF(0, profile_action.height()),
+                        ).y()
+                        assert action_bottom <= footer_rule_y + 0.5, (
+                            width, name, action_bottom, footer_rule_y,
+                        )
                     page_panels = []
                 else:
                     page_panels = [
@@ -5557,6 +5650,15 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                         name, label.property("text"), label.width(),
                         label.property("implicitWidth"),
                     )
+            if dark_prism:
+                start_button = _find_quick_item(window, "darkStartLiveButton")
+                apply_button = _find_quick_item(window, "darkSaveAllButton")
+                assert start_button is not None and apply_button is not None
+                start_x = start_button.mapToItem(window.contentItem(), QPointF(0, 0)).x()
+                apply_x = apply_button.mapToItem(window.contentItem(), QPointF(0, 0)).x()
+                assert start_x < apply_x
+                assert start_button.property("p3Action") is True
+                assert apply_button.property("p3Action") is True
     finally:
         host.shutdown()
 
@@ -5761,6 +5863,8 @@ def test_real_prism_button_feedback_tracks_pointer_and_reduced_motion(
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
     controller.setReducedMotion(False)
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
@@ -5873,6 +5977,8 @@ def test_real_page_operations_show_local_feedback_and_settle(tmp_path: Path) -> 
         display_name="测试游戏",
     )
     controller = ActionController(config_path)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
     selectors: list[_SelectorStub] = []
     selector_failure: list[Exception] = []
 
@@ -6030,6 +6136,8 @@ def test_capture_custom_action_preserves_cancel_and_applies_boundary_edits(
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
     controller.setReducedMotion(True)
     selectors: list[_SelectorStub] = []
 
@@ -6153,6 +6261,7 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     )
     controller = RecordingController(config_path)
     controller.setSkin(skin)
+    controller.setTheme("light")
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
     app.processEvents()

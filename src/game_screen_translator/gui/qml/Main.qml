@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Shapes
 import QtQuick.Window
 import "components"
 import "pages"
@@ -405,6 +406,30 @@ ApplicationWindow {
             border.color: prism.line
             clip: prism.dohna
 
+            Rectangle {
+                objectName: "refraDarkSidebarFacet"
+                visible: prism.refraDark
+                x: parent.width * 0.59
+                y: -root.height * 0.06
+                width: parent.width * 0.34
+                height: root.height * 1.12
+                rotation: 13
+                color: "#124ab1"
+                opacity: 0.18
+            }
+
+            Rectangle {
+                objectName: "refraDarkSidebarLight"
+                visible: prism.refraDark
+                x: parent.width * 0.81
+                y: -root.height * 0.08
+                width: parent.width * 0.11
+                height: root.height * 1.16
+                rotation: 13
+                color: "#1767ff"
+                opacity: 0.10
+            }
+
             TextMetrics {
                 id: dohnaNavigationText
                 text: "TRANSLATION  " + root.navigationLabel("TRANSLATION")
@@ -457,8 +482,9 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.topMargin: 8
                     Layout.bottomMargin: 5
-                    Layout.preferredHeight: 1
-                    color: prism.lineStrong
+                    Layout.preferredHeight: prism.refraDark ? 2 : 1
+                    color: prism.refraDark ? prism.electric : prism.lineStrong
+                    opacity: prism.refraDark ? 0.8 : 1
                 }
 
                 Repeater {
@@ -573,7 +599,7 @@ ApplicationWindow {
 
                 Rectangle {
                     objectName: "pageHeaderBar"
-                    clip: prism.dohna
+                    clip: prism.dohna || prism.refraDark
                     Layout.fillWidth: true
                     visible: !root.fullCanvasHome
                     Layout.preferredHeight: Math.max(
@@ -585,6 +611,29 @@ ApplicationWindow {
                     )
                     color: prism.headerSurface
                     border.color: prism.line
+
+                    Rectangle {
+                        objectName: "refraDarkHeaderFacet"
+                        visible: prism.refraDark
+                        x: parent.width * 0.36
+                        y: -parent.height * 0.54
+                        width: parent.width * 0.48
+                        height: parent.height * 2.1
+                        rotation: 14
+                        color: "#0b2a62"
+                        opacity: 0.58
+                    }
+                    Rectangle {
+                        objectName: "refraDarkHeaderLight"
+                        visible: prism.refraDark
+                        x: parent.width * 0.76
+                        y: -parent.height * 0.44
+                        width: parent.width * 0.16
+                        height: parent.height * 1.9
+                        rotation: 14
+                        color: "#1455c4"
+                        opacity: 0.24
+                    }
 
                     RowLayout {
                         anchors.fill: parent
@@ -615,6 +664,12 @@ ApplicationWindow {
                                 Layout.preferredHeight: displayTitleGroup.implicitHeight
                                 Layout.minimumHeight: displayTitleGroup.implicitHeight
                                 clip: false
+                                TextMetrics {
+                                    id: refraEnglishTitleMetrics
+                                    objectName: "refraEnglishTitleMetrics"
+                                    font: refraEnglishPageTitle.font
+                                    text: refraEnglishPageTitle.text
+                                }
                                 transform: Translate {
                                     id: pageHeaderTranslate
                                     objectName: "pageHeaderTranslate"
@@ -651,14 +706,13 @@ ApplicationWindow {
                                     horizontalAlignment: Text.AlignLeft
                                     verticalAlignment: Text.AlignVCenter
                                     elide: Text.ElideNone
-                                    transform: Scale { xScale: 0.76; origin.x: 0; origin.y: refraEnglishPageTitle.height / 2 }
                                     rotation: -3.2
                                 }
                                 Text {
                                     id: refraChinesePageTitle
                                     objectName: "refraChinesePageTitle"
                                     visible: prism.refraDark
-                                    x: refraEnglishPageTitle.width * 0.76 + 10
+                                    x: refraEnglishTitleMetrics.tightBoundingRect.width + 16
                                     y: 0
                                     width: Math.min(100, parent.width - x - 58)
                                     height: parent.height
@@ -923,9 +977,26 @@ ApplicationWindow {
                         }
                         Item { visible: prism.refraDark; Layout.fillWidth: true }
                         PrismButton {
+                            objectName: "darkStartLiveButton"
+                            visible: prism.refraDark
+                            theme: prism
+                            p3Action: true
+                            primary: true
+                            Layout.preferredWidth: 194
+                            Layout.preferredHeight: 48
+                            text: root.startPreludePending ? "正在启动…" : root.boundWorkbench.startButtonText
+                            enabled: root.boundWorkbench.runPhase !== "stopping"
+                                     && !root.startPreludePending
+                                     && (root.boundWorkbench.canStart || root.boundWorkbench.running)
+                            onClicked: root.requestLiveToggle()
+                        }
+                        PrismButton {
                             objectName: "darkSaveAllButton"
                             visible: prism.refraDark
                             theme: prism
+                            p3Action: true
+                            Layout.preferredWidth: 128
+                            Layout.preferredHeight: 48
                             text: "应用更改"
                             enabled: root.boundWorkbench.hasProfile
                             onClicked: {
@@ -933,17 +1004,6 @@ ApplicationWindow {
                                 if (root.boundWorkbench.currentPage === "SETTINGS")
                                     root.pulseVisualAction("calibrate")
                             }
-                        }
-                        PrismButton {
-                            objectName: "darkStartLiveButton"
-                            visible: prism.refraDark
-                            theme: prism
-                            primary: true
-                            text: root.startPreludePending ? "正在启动…" : root.boundWorkbench.startButtonText
-                            enabled: root.boundWorkbench.runPhase !== "stopping"
-                                     && !root.startPreludePending
-                                     && (root.boundWorkbench.canStart || root.boundWorkbench.running)
-                            onClicked: root.requestLiveToggle()
                         }
                     }
                 }
