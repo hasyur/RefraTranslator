@@ -17,7 +17,7 @@ GridLayout {
     property string rowTitle: ""
     property string rowMeta: ""
     property bool compact: false
-    readonly property bool detailed: theme.refraDark && rowTitle.length > 0
+    readonly property bool detailed: theme.refraStyle && rowTitle.length > 0
     readonly property bool stackedDetails: detailed && width < 400
     readonly property real compactWidth: compact ? 144 : suffix.length > 0 ? 200 : 176
     readonly property real suffixSpacing: 5
@@ -70,7 +70,7 @@ GridLayout {
                 objectName: "numberStepperRowMeta"
                 visible: root.rowMeta.length > 0
                 text: root.rowMeta
-                color: root.theme.accent
+                color: root.theme.accentText
                 font.family: root.theme.monoFontFor(text)
                 font.pixelSize: 10
                 font.letterSpacing: 0.6
@@ -103,7 +103,7 @@ GridLayout {
         objectName: "numberStepperDecrease"
         theme: root.theme
         text: "−"
-        implicitWidth: root.theme.refraDark && root.rowTitle.length > 0 ? 30 : root.compact ? 32 : 42
+        implicitWidth: root.theme.refraStyle && root.rowTitle.length > 0 ? 30 : root.compact ? 32 : 42
         Layout.preferredWidth: implicitWidth
         enabled: root.enabled && root.value > root.minimum
         dohnaEmbedded: root.theme.dohna
@@ -126,11 +126,11 @@ GridLayout {
     TextField {
         id: editor
         objectName: "numberStepperEditor"
-        Layout.fillWidth: !(root.theme.refraDark && root.rowTitle.length > 0)
-        Layout.minimumWidth: root.theme.refraDark && root.rowTitle.length > 0
+        Layout.fillWidth: !(root.theme.refraStyle && root.rowTitle.length > 0)
+        Layout.minimumWidth: root.theme.refraStyle && root.rowTitle.length > 0
                              ? 148 : root.compact ? 80 : root.suffix.length > 0 ? 116 : 92
-        Layout.preferredWidth: root.theme.refraDark && root.rowTitle.length > 0 ? 148 : -1
-        Layout.maximumWidth: root.theme.refraDark && root.rowTitle.length > 0
+        Layout.preferredWidth: root.theme.refraStyle && root.rowTitle.length > 0 ? 148 : -1
+        Layout.maximumWidth: root.theme.refraStyle && root.rowTitle.length > 0
                              ? 148 : Number.POSITIVE_INFINITY
         implicitHeight: 42
         text: String(root.value)
@@ -177,7 +177,7 @@ GridLayout {
         objectName: "numberStepperIncrease"
         theme: root.theme
         text: "+"
-        implicitWidth: root.theme.refraDark && root.rowTitle.length > 0 ? 30 : root.compact ? 32 : 42
+        implicitWidth: root.theme.refraStyle && root.rowTitle.length > 0 ? 30 : root.compact ? 32 : 42
         Layout.preferredWidth: implicitWidth
         enabled: root.enabled && root.value < root.maximum
         dohnaEmbedded: root.theme.dohna

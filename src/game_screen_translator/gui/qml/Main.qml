@@ -30,7 +30,7 @@ ApplicationWindow {
     readonly property bool pageMotionEnabled: animationsRunning && pageContentReady
     readonly property string visualPage: boundWorkbench.currentPage
     readonly property bool reduceMotion: boundWorkbench.reducedMotion
-    readonly property bool fullCanvasHome: prism.refraDark && boundWorkbench.currentPage === "HOME"
+    readonly property bool fullCanvasHome: prism.refraStyle && boundWorkbench.currentPage === "HOME"
     property string lastAnimatedPage: ""
     readonly property bool pageTransitioning: animationsRunning
                                               && (pageTransitionAnimation.running
@@ -55,7 +55,7 @@ ApplicationWindow {
     }
 
     function pageTitleLight(page) {
-        if (prism.refraDark) {
+        if (prism.refraStyle) {
             const p3Titles = {
                 "HOME": "HOME",
                 "CAPTURE": "CAPTURE",
@@ -92,7 +92,7 @@ ApplicationWindow {
     }
 
     function pageTitleHeavy(page) {
-        if (prism.refraDark)
+        if (prism.refraStyle)
             return pageTitleLightChinese(page)
         return ""
     }
@@ -397,7 +397,7 @@ ApplicationWindow {
         Rectangle {
             id: navigationRail
             implicitWidth: prism.dohna ? Math.ceil(dohnaNavigationText.width + 40)
-                         : prism.refraDark ? Math.max(168, Math.min(230, root.width * 0.18))
+                         : prism.refraStyle ? Math.max(168, Math.min(230, root.width * 0.18))
                          : root.width < 1100 ? 176 : 184
             Layout.preferredWidth: implicitWidth
             Layout.fillHeight: true
@@ -444,35 +444,38 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: prism.dohna
                                 ? (root.width < 1100 ? 14 : 20)
-                                : prism.refraDark ? 12
+                                : prism.refraStyle ? 12
                                 : (root.width < 1100 ? 12 : 16)
-                spacing: prism.refraDark ? 6 : 10
+                spacing: prism.refraStyle ? 6 : 10
 
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Layout.topMargin: prism.refraDark ? 12 : 7
+                    Layout.topMargin: prism.refraStyle ? 12 : 7
                     spacing: 0
                     Text {
                         objectName: "refraBrandWordmark"
-                        text: prism.refraDark ? "<font color='#00d9ff'>Refra</font>Translator" : "REFRA"
-                        textFormat: prism.refraDark ? Text.RichText : Text.PlainText
+                        text: prism.refraStyle
+                              ? (prism.refraLight ? "<font color='#075bff'>Refra</font>Translator"
+                                                  : "<font color='#00d9ff'>Refra</font>Translator")
+                              : "REFRA"
+                        textFormat: prism.refraStyle ? Text.RichText : Text.PlainText
                         color: prism.navigationText
-                        font.family: prism.refraDark ? "Arial Black" : prism.displayFontFor(text)
-                        font.pixelSize: prism.refraDark
+                        font.family: prism.refraStyle ? "Arial Black" : prism.displayFontFor(text)
+                        font.pixelSize: prism.refraStyle
                                         ? (root.width < 1100 ? 17 : 22) : 23
-                        font.weight: prism.refraDark ? Font.Black : Font.Bold
-                        font.letterSpacing: prism.refraDark ? 0 : 4
-                        fontSizeMode: prism.refraDark ? Text.HorizontalFit : Text.FixedSize
-                        minimumPixelSize: prism.refraDark ? 14 : 1
+                        font.weight: prism.refraStyle ? Font.Black : Font.Bold
+                        font.letterSpacing: prism.refraStyle ? 0 : 4
+                        fontSizeMode: prism.refraStyle ? Text.HorizontalFit : Text.FixedSize
+                        minimumPixelSize: prism.refraStyle ? 14 : 1
                         Layout.fillWidth: true
-                        elide: prism.refraDark ? Text.ElideNone : Text.ElideRight
+                        elide: prism.refraStyle ? Text.ElideNone : Text.ElideRight
                     }
                     Text {
-                        text: prism.refraDark ? "GAME SCREEN TRANSLATOR" : "TRANSLATOR / WORKBENCH"
-                        color: prism.accent
+                        text: prism.refraStyle ? "GAME SCREEN TRANSLATOR" : "TRANSLATOR / WORKBENCH"
+                        color: prism.accentText
                         font.family: prism.monoFontFor(text)
-                        font.pixelSize: prism.refraDark ? 10 : 12
-                        font.letterSpacing: prism.refraDark ? 0.8 : 1.1
+                        font.pixelSize: prism.refraStyle ? 10 : 12
+                        font.letterSpacing: prism.refraStyle ? 0.8 : 1.1
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
@@ -482,9 +485,9 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.topMargin: 8
                     Layout.bottomMargin: 5
-                    Layout.preferredHeight: prism.refraDark ? 2 : 1
-                    color: prism.refraDark ? prism.electric : prism.lineStrong
-                    opacity: prism.refraDark ? 0.8 : 1
+                    Layout.preferredHeight: prism.refraStyle ? 2 : 1
+                    color: prism.refraStyle ? prism.electric : prism.lineStrong
+                    opacity: prism.refraStyle ? 0.8 : 1
                 }
 
                 Repeater {
@@ -497,12 +500,12 @@ ApplicationWindow {
                         navigation: true
                         text: prism.dohna
                               ? String(modelData) + "  " + root.navigationLabel(String(modelData))
-                              : prism.refraDark ? root.navigationMenuTitle(String(modelData))
+                              : prism.refraStyle ? root.navigationMenuTitle(String(modelData))
                               : root.navigationLabel(String(modelData))
                         navigationNumber: String(index + 1).padStart(2, "0")
                         navigationCode: root.pageCode(String(modelData))
-                        navigationSubtitle: prism.refraDark ? root.navigationLabel(String(modelData)) : ""
-                        navigationTilt: prism.refraDark ? (index % 2 === 0 ? -4 : -6.2) : 0
+                        navigationSubtitle: prism.refraStyle ? root.navigationLabel(String(modelData)) : ""
+                        navigationTilt: prism.refraStyle ? (index % 2 === 0 ? -4 : -6.2) : 0
                         navigationHero: root.fullCanvasHome
                         primary: root.boundWorkbench.currentPage === modelData
                         quiet: root.boundWorkbench.currentPage !== modelData
@@ -526,7 +529,7 @@ ApplicationWindow {
 
                 Rectangle {
                     objectName: "activeProfileCard"
-                    visible: !prism.refraDark
+                    visible: !prism.refraStyle
                     Layout.fillWidth: true
                     implicitHeight: 72
                     color: "transparent"
@@ -557,7 +560,7 @@ ApplicationWindow {
 
                 Text {
                     text: "PRISM  /  SWISS GRID"
-                    visible: !prism.dohna && !prism.refraDark
+                    visible: !prism.dohna && !prism.refraStyle
                     color: prism.navigationTextDim
                     font.family: prism.monoFontFor(text)
                     font.pixelSize: 12
@@ -599,12 +602,12 @@ ApplicationWindow {
 
                 Rectangle {
                     objectName: "pageHeaderBar"
-                    clip: prism.dohna || prism.refraDark
+                    clip: prism.dohna || prism.refraStyle
                     Layout.fillWidth: true
                     visible: !root.fullCanvasHome
                     Layout.preferredHeight: Math.max(
                         root.fullCanvasHome ? 0
-                        : prism.refraDark ? (root.height <= 820 ? 148 : 164)
+                        : prism.refraStyle ? (root.height <= 820 ? 148 : 164)
                         : prism.dohna ? (root.height <= 820 ? 116 : 142)
                         : (root.height <= 820 ? 104 : 116),
                         pageHeaderTextColumn.implicitHeight + 16
@@ -646,7 +649,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             spacing: 0
                             Text {
-                                visible: !prism.refraDark
+                                visible: !prism.refraStyle
                                 text: String(root.pageIndex(root.boundWorkbench.currentPage) + 1).padStart(2, "0")
                                       + " / " + (prism.dohna
                                                   ? root.boundWorkbench.currentPage
@@ -679,7 +682,7 @@ ApplicationWindow {
                                     id: displayTitleGroup
                                     objectName: "pageDisplayTitle"
                                     anchors.fill: parent
-                                    visible: !prism.refraDark
+                                    visible: !prism.refraStyle
                                     theme: prism
                                     lightText: root.pageTitleLight(root.boundWorkbench.currentPage)
                                     heavyText: root.pageTitleHeavy(root.boundWorkbench.currentPage)
@@ -690,7 +693,7 @@ ApplicationWindow {
                                 Text {
                                     id: refraEnglishPageTitle
                                     objectName: "refraEnglishPageTitle"
-                                    visible: prism.refraDark
+                                    visible: prism.refraStyle
                                     x: 0
                                     y: -2
                                     width: Math.min(540, parent.width * 0.72)
@@ -711,13 +714,13 @@ ApplicationWindow {
                                 Text {
                                     id: refraChinesePageTitle
                                     objectName: "refraChinesePageTitle"
-                                    visible: prism.refraDark
+                                    visible: prism.refraStyle
                                     x: refraEnglishTitleMetrics.tightBoundingRect.width + 16
                                     y: 0
                                     width: Math.min(100, parent.width - x - 58)
                                     height: parent.height
                                     text: root.pageTitleHeavy(root.boundWorkbench.currentPage)
-                                    color: prism.accent
+                                    color: prism.accentText
                                     font.family: prism.uiFontFor(text)
                                     font.pixelSize: 24
                                     font.weight: Font.Bold
@@ -726,7 +729,7 @@ ApplicationWindow {
                                 }
                                 Item {
                                     objectName: "refraHeaderPrism"
-                                    visible: prism.refraDark
+                                    visible: prism.refraStyle
                                     x: refraChinesePageTitle.x + refraChinesePageTitle.implicitWidth + 9
                                     y: Math.max(0, (parent.height - height) / 2)
                                     width: 76
@@ -763,7 +766,7 @@ ApplicationWindow {
                             Text {
                                 objectName: "pageSubtitle"
                                 text: root.pageSubtitle(root.boundWorkbench.currentPage)
-                                visible: !prism.refraDark
+                                visible: !prism.refraStyle
                                 color: prism.textSoft
                                 font.family: prism.uiFontFor(text)
                                 font.pixelSize: 13
@@ -773,7 +776,7 @@ ApplicationWindow {
 
                         Text {
                             visible: root.boundWorkbench.settingsDirty
-                                     && !prism.refraDark
+                                     && !prism.refraStyle
                             text: "● 未应用"
                             color: prism.amber
                             font.family: prism.monoFontFor(text)
@@ -783,7 +786,7 @@ ApplicationWindow {
                             objectName: "saveAllButton"
                             theme: prism
                             text: "应用更改"
-                            visible: !prism.refraDark
+                            visible: !prism.refraStyle
                             enabled: root.boundWorkbench.hasProfile
                             onClicked: {
                                 root.boundWorkbench.saveAll()
@@ -795,7 +798,7 @@ ApplicationWindow {
                             objectName: "startLiveButton"
                             theme: prism
                             primary: true
-                            visible: !prism.refraDark
+                            visible: !prism.refraStyle
                             text: root.startPreludePending
                                   ? (prism.dohna ? "正在点亮光路…" : "正在启动…")
                                   : root.boundWorkbench.startButtonText
@@ -805,7 +808,7 @@ ApplicationWindow {
                             onClicked: root.requestLiveToggle()
                         }
                         ColumnLayout {
-                            visible: prism.refraDark
+                            visible: prism.refraStyle
                             Layout.maximumWidth: 170
                             spacing: 2
                             Text {
@@ -826,7 +829,7 @@ ApplicationWindow {
                             }
                             Text {
                                 text: root.boundWorkbench.running ? "● 正在翻译" : "● 未启动"
-                                color: root.boundWorkbench.running ? prism.accent : prism.textSoft
+                                color: root.boundWorkbench.running ? prism.accentText : prism.textSoft
                                 font.family: prism.uiFontFor(text)
                                 font.pixelSize: 12
                             }
@@ -851,7 +854,7 @@ ApplicationWindow {
                             objectName: "pageStack"
                             anchors.fill: parent
                             anchors.margins: root.fullCanvasHome ? 0
-                                              : prism.refraDark ? (root.width < 1100 ? 10 : 14)
+                                              : prism.refraStyle ? (root.width < 1100 ? 10 : 14)
                                               : root.width < 1100 ? 14 : 18
                             currentIndex: root.pageIndex(root.boundWorkbench.currentPage)
 
@@ -934,7 +937,7 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     visible: !root.fullCanvasHome
-                    Layout.preferredHeight: prism.refraDark ? 64 : 34
+                    Layout.preferredHeight: prism.refraStyle ? 64 : 34
                     color: prism.dohna ? prism.ink : prism.navigationSurface
                     border.color: prism.line
 
@@ -962,23 +965,23 @@ ApplicationWindow {
                         }
                         Text {
                             text: root.boundWorkbench.runPhase.toUpperCase()
-                            visible: !prism.refraDark
-                            color: root.boundWorkbench.running ? prism.accent : prism.navigationTextDim
+                            visible: !prism.refraStyle
+                            color: root.boundWorkbench.running ? prism.accentText : prism.navigationTextDim
                             font.family: prism.monoFontFor(text)
                             font.pixelSize: 12
                             font.letterSpacing: 1
                         }
                         Text {
-                            visible: prism.refraDark && root.boundWorkbench.settingsDirty
+                            visible: prism.refraStyle && root.boundWorkbench.settingsDirty
                             text: "● 有未应用更改"
                             color: prism.amber
                             font.family: prism.uiFontFor(text)
                             font.pixelSize: 12
                         }
-                        Item { visible: prism.refraDark; Layout.fillWidth: true }
+                        Item { visible: prism.refraStyle; Layout.fillWidth: true }
                         PrismButton {
                             objectName: "darkStartLiveButton"
-                            visible: prism.refraDark
+                            visible: prism.refraStyle
                             theme: prism
                             p3Action: true
                             primary: true
@@ -992,7 +995,7 @@ ApplicationWindow {
                         }
                         PrismButton {
                             objectName: "darkSaveAllButton"
-                            visible: prism.refraDark
+                            visible: prism.refraStyle
                             theme: prism
                             p3Action: true
                             Layout.preferredWidth: 128

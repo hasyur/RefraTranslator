@@ -356,8 +356,8 @@ Item {
         id: refraDarkHome
         objectName: "refraDarkHome"
         anchors.fill: parent
-        visible: root.theme.refraDark
-        enabled: root.theme.refraDark
+        visible: root.theme.refraStyle
+        enabled: root.theme.refraStyle
 
         ColumnLayout {
             anchors.fill: parent
@@ -371,7 +371,23 @@ Item {
                 clip: true
 
                 Rectangle {
+                    objectName: "refraLightHomeBlueStage"
+                    visible: root.theme.refraLight
+                    x: root.width * (root.width < 1100 ? 0.572 : 0.57)
+                    y: -parent.height * 0.12
+                    width: root.width * 0.58
+                    height: parent.height * 1.24
+                    rotation: root.width < 1100 ? 7.5 : 17
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0; color: "#075BFF" }
+                        GradientStop { position: 1; color: "#167BFF" }
+                    }
+                }
+
+                Rectangle {
                     objectName: "refraDarkHomeBlueLight"
+                    visible: root.theme.refraDark
                     x: root.width * 0.57
                     y: -parent.height * 0.14
                     width: root.width * 0.55
@@ -386,6 +402,7 @@ Item {
                     }
                 }
                 Rectangle {
+                    visible: root.theme.refraDark
                     x: root.width * 0.72
                     y: -parent.height * 0.18
                     width: root.width * 0.15
@@ -452,7 +469,9 @@ Item {
                     y: parent.height * 0.032
                     width: root.width * 0.34
                     height: 40
-                    text: "<font color='#00d9ff'>Refra</font>Translator"
+                    text: root.theme.refraLight
+                          ? "<font color='#075bff'>Refra</font>Translator"
+                          : "<font color='#00d9ff'>Refra</font>Translator"
                     textFormat: Text.RichText
                     color: root.theme.text
                     font.family: "Arial Black"
@@ -501,9 +520,9 @@ Item {
 
                 Image {
                     objectName: "refraDarkHeroImage"
-                    x: root.width * 0.52
+                    x: root.width * (root.theme.refraLight && root.width < 1100 ? 0.56 : 0.52)
                     y: parent.height * 0.12
-                    width: root.width * 0.48
+                    width: root.width * (root.theme.refraLight && root.width < 1100 ? 0.44 : 0.48)
                     height: root.height * 0.33
                     source: "../assets/refra-hero-dark.png"
                     fillMode: Image.PreserveAspectFit
@@ -517,7 +536,7 @@ Item {
                     spacing: 4
                     Text {
                         text: root.workbench.currentProfileName
-                        color: root.theme.text
+                        color: root.theme.refraLight ? "#FFFFFF" : root.theme.text
                         font.family: root.theme.uiFontFor(text)
                         font.pixelSize: 19
                         font.weight: Font.DemiBold
@@ -527,7 +546,9 @@ Item {
                     }
                     Text {
                         text: root.workbench.running ? "● 正在翻译" : "● 未启动"
-                        color: root.workbench.running ? root.theme.accent : root.theme.textSoft
+                        color: root.workbench.running
+                               ? root.theme.refraLight ? "#FFFFFF" : root.theme.accentText
+                              : root.theme.refraLight ? "#EAF2FF" : root.theme.textSoft
                         font.family: root.theme.uiFontFor(text)
                         font.pixelSize: 15
                         horizontalAlignment: Text.AlignHCenter
@@ -590,7 +611,7 @@ Item {
                                 text: root.workbench.runState
                                 color: root.workbench.runTone === "error" ? root.theme.danger
                                      : root.workbench.runTone === "warning" ? root.theme.amber
-                                     : root.workbench.running ? root.theme.accent : root.theme.text
+                                     : root.workbench.running ? root.theme.accentText : root.theme.text
                                 font.family: root.theme.uiFontFor(text)
                                 font.pixelSize: root.width < 1100 ? 18 : 20
                                 font.weight: Font.DemiBold
@@ -668,7 +689,7 @@ Item {
                         anchors.right: parent.right
                         anchors.top: parent.top
                         spacing: 7
-                        Text { objectName: "refraDarkOcrHeading"; text: "OCR"; color: root.theme.accent; font.family: root.theme.uiFontFor(text); font.pixelSize: 18; font.weight: Font.Bold }
+                        Text { objectName: "refraDarkOcrHeading"; text: "OCR"; color: root.theme.accentText; font.family: root.theme.uiFontFor(text); font.pixelSize: 18; font.weight: Font.Bold }
                         Text {
                             objectName: "refraDarkOcrStatus"
                             text: root.workbench.ocrStatus
@@ -771,7 +792,7 @@ Item {
                             text: root.workbench.lastRunAvailable
                                   ? "OCR " + root.workbench.lastRunOcrPeakText + "  ·  LLM " + root.workbench.lastRunLlmPeakText
                                   : "快捷键  " + root.workbench.hotkeyPreference
-                            color: root.theme.accent
+                            color: root.theme.accentText
                             font.family: root.theme.monoFontFor(text)
                             font.pixelSize: 14
                             elide: Text.ElideRight
@@ -844,7 +865,7 @@ Item {
                             color: root.workbench.settingsDirty ? root.theme.amber
                                  : root.workbench.statusTone === "error" ? root.theme.danger
                                  : root.workbench.statusTone === "warning" ? root.theme.amber
-                                 : root.workbench.statusTone === "success" ? root.theme.accent
+                                 : root.workbench.statusTone === "success" ? root.theme.accentText
                                  : root.theme.textDim
                         }
                         Text {
@@ -853,7 +874,7 @@ Item {
                             text: root.workbench.statusText
                             color: root.workbench.statusTone === "error" ? root.theme.danger
                                  : root.workbench.statusTone === "warning" ? root.theme.amber
-                                 : root.workbench.statusTone === "success" ? root.theme.accent
+                                 : root.workbench.statusTone === "success" ? root.theme.accentText
                                  : root.theme.textSoft
                             font.family: root.theme.uiFontFor(text)
                             font.pixelSize: 13
@@ -909,8 +930,8 @@ Item {
 
     RowLayout {
         anchors.fill: parent
-        visible: !root.theme.refraDark
-        enabled: !root.theme.refraDark
+        visible: !root.theme.refraStyle
+        enabled: !root.theme.refraStyle
         spacing: 16
 
         PrismPanel {
@@ -1108,7 +1129,7 @@ Item {
                         Text {
                             objectName: "homeLastRunStatus"
                             text: root.workbench.lastRunStatus
-                            color: root.theme.accent
+                            color: root.theme.accentText
                             font.family: root.theme.monoFontFor(text)
                             font.pixelSize: 13
                             font.letterSpacing: 1.1
@@ -1144,7 +1165,7 @@ Item {
                                     Text {
                                         objectName: "homeOcrPeakValue"
                                         text: root.workbench.lastRunOcrPeakText
-                                        color: root.theme.accent
+                                        color: root.theme.accentText
                                         font.family: root.theme.displayFontFor(text)
                                         font.pixelSize: 44
                                         font.weight: Font.Bold
@@ -1171,13 +1192,13 @@ Item {
                                     Rectangle {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: 2
-                                        color: root.theme.spectrum
+                                        color: root.theme.spectrumText
                                         opacity: 0.6
                                     }
                                     Text {
                                         objectName: "homeLlmPeakValue"
                                         text: root.workbench.lastRunLlmPeakText
-                                        color: root.theme.spectrum
+                                        color: root.theme.spectrumText
                                         font.family: root.theme.displayFontFor(text)
                                         font.pixelSize: 44
                                         font.weight: Font.Bold

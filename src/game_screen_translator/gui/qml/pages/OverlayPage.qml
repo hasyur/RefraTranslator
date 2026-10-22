@@ -186,7 +186,7 @@ Item {
                 Text {
                     objectName: "overlayOpacityValue"
                     text: Math.round(root.workbench.overlayOpacity * 100) + "%"
-                    color: root.theme.accent
+                    color: root.theme.accentText
                     font.family: root.theme.displayFontFor(text)
                     font.pixelSize: 38
                     font.weight: Font.DemiBold

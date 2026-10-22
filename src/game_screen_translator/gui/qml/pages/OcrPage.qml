@@ -62,7 +62,7 @@ Item {
                         spacing: 8
                         Text {
                             text: root.workbench.lastRunStatus
-                            color: root.theme.accent
+                            color: root.theme.accentText
                             font.family: root.theme.monoFontFor(text)
                             font.pixelSize: 12
                             Layout.fillWidth: true
@@ -230,7 +230,7 @@ Item {
                                 required property var modelData
                                 text: String(modelData)
                                 color: index === root.workbench.detectionQualityIndex
-                                       ? root.theme.accent : root.theme.textDim
+                                       ? root.theme.accentText : root.theme.textDim
                                 font.family: root.theme.uiFontFor(text)
                                 font.pixelSize: 13
                                 horizontalAlignment: Text.AlignHCenter

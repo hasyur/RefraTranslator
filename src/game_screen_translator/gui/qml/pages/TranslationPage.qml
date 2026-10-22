@@ -88,7 +88,7 @@ Item {
                         spacing: 8
                         Text {
                             text: root.workbench.lastRunStatus
-                            color: root.theme.accent
+                            color: root.theme.accentText
                             font.family: root.theme.monoFontFor(text)
                             font.pixelSize: 12
                             Layout.fillWidth: true
@@ -139,7 +139,7 @@ Item {
                         spacing: 4
                         Text {
                             text: "连接状态"
-                            color: root.theme.accent
+                            color: root.theme.accentText
                             font.family: root.theme.monoFontFor(text)
                             font.pixelSize: 12
                             font.letterSpacing: 1

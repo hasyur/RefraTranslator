@@ -31,7 +31,7 @@ Rectangle {
         Text {
             objectName: "unavailableStateEyebrow"
             text: root.eyebrow
-            color: root.theme.accent
+            color: root.theme.accentText
             font.family: root.theme.monoFontFor(text)
             font.pixelSize: 13
             font.letterSpacing: 1.2

@@ -155,7 +155,7 @@ Item {
 
                         Text {
                             text: String(rowItem.index + 1).padStart(2, "0")
-                            color: rowItem.selected ? root.theme.accent : root.theme.textDim
+                            color: rowItem.selected ? root.theme.accentText : root.theme.textDim
                             font.family: root.theme.monoFontFor(text)
                             font.pixelSize: 12
                             Layout.preferredWidth: 24

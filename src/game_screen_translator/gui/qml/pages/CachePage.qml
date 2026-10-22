@@ -179,7 +179,7 @@ Item {
                                     Text {
                                         objectName: "cacheHitCount"
                                         text: String(modelData.hits) + " 次"
-                                        color: root.theme.accent
+                                        color: root.theme.accentText
                                         font.family: root.theme.monoFontFor(text)
                                         font.pixelSize: 14
                                         fontSizeMode: Text.Fit

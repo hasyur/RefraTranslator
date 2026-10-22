@@ -43,7 +43,7 @@ Item {
                 ColumnLayout {
                     id: scheduleForm
                     width: parent.width - scheduleBar.contentInset
-                    spacing: root.theme.refraDark ? 8 : 12
+                    spacing: root.theme.refraStyle ? 8 : 12
 
                     SectionHeader {
                         theme: root.theme
@@ -66,7 +66,7 @@ Item {
                     SettingLabel {
                         objectName: "settingsPollLegacyLabel"
                         theme: root.theme
-                        visible: !root.theme.refraDark && root.workbench.triggerMethodIndex !== 2
+                        visible: !root.theme.refraStyle && root.workbench.triggerMethodIndex !== 2
                         title: "画面变化轮询"
                         meta: "FPS"
                         description: "设置画面变化的检查频率。"
@@ -95,7 +95,7 @@ Item {
                     SettingLabel {
                         objectName: "settingsClearAfterLegacyLabel"
                         theme: root.theme
-                        visible: !root.theme.refraDark && root.workbench.triggerMethodIndex !== 2
+                        visible: !root.theme.refraStyle && root.workbench.triggerMethodIndex !== 2
                         title: "字幕消失判定"
                         meta: "50—1000 MS"
                         description: "设置字幕多久未更新后被判定为消失。"
@@ -130,7 +130,7 @@ Item {
                         SettingLabel {
                             objectName: "settingsRoiLegacyLabel"
                             theme: root.theme
-                            visible: !root.theme.refraDark
+                            visible: !root.theme.refraStyle
                             title: "ROI 响应目标"
                             meta: "100—5000 MS"
                             description: "设置变化区域处理的目标响应时间。"
@@ -166,7 +166,7 @@ Item {
                         SettingLabel {
                             objectName: "settingsStableRescanLegacyLabel"
                             theme: root.theme
-                            visible: !root.theme.refraDark
+                            visible: !root.theme.refraStyle
                             title: "稳定后复扫"
                             meta: "0—60000 MS"
                             description: "设置画面稳定后再次检查的等待时间。"
@@ -194,7 +194,7 @@ Item {
                         SettingLabel {
                             objectName: "settingsIdleRescanLegacyLabel"
                             theme: root.theme
-                            visible: !root.theme.refraDark
+                            visible: !root.theme.refraStyle
                             title: "空闲复扫"
                             meta: "0—60000 MS"
                             description: "设置空闲时再次检查的等待时间。"
@@ -222,7 +222,7 @@ Item {
                         SettingLabel {
                             objectName: "settingsOcrCooldownLegacyLabel"
                             theme: root.theme
-                            visible: !root.theme.refraDark
+                            visible: !root.theme.refraStyle
                             title: "OCR 冷却"
                             meta: "0—10000 MS"
                             description: "设置两次文字识别之间的最短等待时间。"
@@ -343,7 +343,7 @@ Item {
 
             ColumnLayout {
                 anchors.fill: parent
-                spacing: root.theme.refraDark ? 8 : 12
+                spacing: root.theme.refraStyle ? 8 : 12
 
                 SectionHeader {
                     theme: root.theme
@@ -360,8 +360,8 @@ Item {
                     clip: true
                     Layout.fillWidth: true
                     Layout.minimumHeight: 110
-                    Layout.preferredHeight: root.theme.refraDark ? 126 : 158
-                    Layout.maximumHeight: root.theme.refraDark ? 126 : 158
+                    Layout.preferredHeight: root.theme.refraStyle ? 126 : 158
+                    Layout.maximumHeight: root.theme.refraStyle ? 126 : 158
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                     ScrollBar.vertical: PrismScrollBar {
                         id: profileBar
@@ -462,9 +462,9 @@ Item {
                             selectionColor: root.theme.accent
                             selectedTextColor: root.theme.ink
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: root.theme.refraDark ? 12 : 13
+                            font.pixelSize: root.theme.refraStyle ? 12 : 13
                             wrapMode: TextEdit.Wrap
-                            Layout.preferredHeight: root.theme.refraDark
+                            Layout.preferredHeight: root.theme.refraStyle
                                                      ? Math.max(34, ocrLatencyText.contentHeight + 8) : -1
                             Layout.fillWidth: true
                             background: null
@@ -482,9 +482,9 @@ Item {
                             selectionColor: root.theme.accent
                             selectedTextColor: root.theme.ink
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: root.theme.refraDark ? 12 : 13
+                            font.pixelSize: root.theme.refraStyle ? 12 : 13
                             wrapMode: TextEdit.Wrap
-                            Layout.preferredHeight: root.theme.refraDark
+                            Layout.preferredHeight: root.theme.refraStyle
                                                      ? Math.max(34, translationLatencyText.contentHeight + 8) : -1
                             Layout.fillWidth: true
                             background: null
@@ -502,9 +502,9 @@ Item {
                             selectionColor: root.theme.accent
                             selectedTextColor: root.theme.ink
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: root.theme.refraDark ? 12 : 13
+                            font.pixelSize: root.theme.refraStyle ? 12 : 13
                             wrapMode: TextEdit.Wrap
-                            Layout.preferredHeight: root.theme.refraDark
+                            Layout.preferredHeight: root.theme.refraStyle
                                                      ? Math.max(34, latencySummaryText.contentHeight + 8) : -1
                             Layout.fillWidth: true
                             background: null

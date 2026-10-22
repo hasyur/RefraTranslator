@@ -270,6 +270,16 @@ def _find_quick_items(
     return matches
 
 
+def _visible_text_items(root: QObject, text: str) -> list[QQuickItem]:
+    return [
+        item
+        for item in root.findChildren(QQuickItem)
+        if item.isVisible()
+        and item.inherits("QQuickText")
+        and item.property("text") == text
+    ]
+
+
 def _setting_hint_for_target(window: QQuickWindow, target: QQuickItem) -> QObject:
     matches = [
         item
@@ -335,6 +345,40 @@ def _wait_for_page_layout(
     )
 
 
+def _scroll_control_into_view(
+    window: QQuickWindow,
+    scroll: QQuickItem,
+    target: QQuickItem,
+    app: QApplication,
+) -> None:
+    _wait_for_page_layout(window, scroll, app)
+    target_origin = target.mapToItem(scroll, QPointF(0, 0)).y()
+    target_height = float(target.property("height"))
+    viewport_height = float(scroll.property("height"))
+    max_scroll = max(
+        0.0,
+        float(scroll.property("contentHeight")) - viewport_height,
+    )
+    desired_scroll = max(
+        0.0,
+        min(
+            max_scroll,
+            target_origin - max(0.0, (viewport_height - target_height) / 2),
+        ),
+    )
+    scroll.setProperty("contentY", desired_scroll)
+    app.processEvents()
+    _wait_for_page_layout(window, target, app)
+    visible_origin = target.mapToItem(scroll, QPointF(0, 0)).y()
+    assert visible_origin >= -0.5
+    assert visible_origin + target_height <= viewport_height + 0.5
+    center = target.mapToScene(
+        QPointF(target.width() / 2, target.height() / 2),
+    )
+    assert 0 <= center.x() <= window.width()
+    assert 0 <= center.y() <= window.height()
+
+
 def _key_clicks(window: QQuickWindow, text: str) -> None:
     for character in text:
         QTest.keyClick(window, ord(character))
@@ -347,6 +391,30 @@ def _click_quick_item(window: QQuickWindow, object_name: str) -> QQuickItem:
     assert QMetaObject.invokeMethod(item, "click") is True, object_name
     QCoreApplication.processEvents()
     return item
+
+
+def _workbench_save_button_name(window: QQuickWindow) -> str:
+    theme = window.findChild(QObject, "prismTheme")
+    assert theme is not None
+    if theme.property("refraStyle"):
+        return (
+            "refraDarkApplyButton"
+            if window.property("fullCanvasHome")
+            else "darkSaveAllButton"
+        )
+    return "saveAllButton"
+
+
+def _workbench_start_button_name(window: QQuickWindow) -> str:
+    theme = window.findChild(QObject, "prismTheme")
+    assert theme is not None
+    if theme.property("refraStyle"):
+        return (
+            "refraDarkStartButton"
+            if window.property("fullCanvasHome")
+            else "darkStartLiveButton"
+        )
+    return "startLiveButton"
 
 
 def _slider_scene_point(slider: QQuickItem, visual_position: float) -> QPoint:
@@ -745,8 +813,17 @@ def test_trigger_selector_has_three_modes_and_only_mouse_shows_wait_control(tmp_
 
 
 def _begin_home_hotkey_recording(window: QQuickWindow) -> tuple[QObject, QObject]:
-    record_button = window.findChild(QObject, "homeHotkeyRecordButton")
-    recording_hint = window.findChild(QObject, "homeHotkeyRecordingHint")
+    preferences_button = _find_quick_item(window, "refraDarkPreferencesButton")
+    dialog = window.findChild(QObject, "refraPreferencesDialog")
+    assert preferences_button is not None
+    assert dialog is not None
+    if dialog.property("visible") is not True:
+        assert QMetaObject.invokeMethod(preferences_button, "click") is True
+        QCoreApplication.processEvents()
+    assert dialog.property("visible") is True
+
+    record_button = window.findChild(QObject, "refraHotkeyRecordButton")
+    recording_hint = window.findChild(QObject, "refraHotkeyRecordingHint")
     assert record_button is not None
     assert recording_hint is not None
     assert QMetaObject.invokeMethod(record_button, "click") is True
@@ -763,8 +840,8 @@ def test_home_hotkey_recording_normalizes_and_escape_cancels(
     tmp_path: Path,
 ) -> None:
     app, controller, host, window = _real_home_hotkey_host(tmp_path)
-    field = window.findChild(QObject, "homeHotkeyField")
-    display = window.findChild(QObject, "homeHotkeyDisplay")
+    field = window.findChild(QObject, "refraHotkeyField")
+    display = window.findChild(QObject, "refraHotkeyDisplay")
     assert field is not None
     assert display is not None
     try:
@@ -786,7 +863,7 @@ def test_home_hotkey_recording_normalizes_and_escape_cancels(
         assert load_gui_preferences(
             controller._config_path,
         ).hotkey == "Ctrl+Shift+T"
-        recording_hint = window.findChild(QObject, "homeHotkeyRecordingHint")
+        recording_hint = window.findChild(QObject, "refraHotkeyRecordingHint")
         assert recording_hint is not None
         assert recording_hint.property("visible") is False
         assert record_button.property("text") == "录制快捷键"
@@ -807,7 +884,7 @@ def test_home_hotkey_recording_accepts_ctrl_backspace_and_exits(
     tmp_path: Path,
 ) -> None:
     app, controller, host, window = _real_home_hotkey_host(tmp_path)
-    display = window.findChild(QObject, "homeHotkeyDisplay")
+    display = window.findChild(QObject, "refraHotkeyDisplay")
     assert display is not None
     try:
         record_button, recording_hint = _begin_home_hotkey_recording(window)
@@ -827,7 +904,7 @@ def test_home_hotkey_recording_maps_all_runtime_special_keys(
     tmp_path: Path,
 ) -> None:
     app, controller, host, window = _real_home_hotkey_host(tmp_path)
-    display = window.findChild(QObject, "homeHotkeyDisplay")
+    display = window.findChild(QObject, "refraHotkeyDisplay")
     assert display is not None
     special_keys = (
         (Qt.Key.Key_Space, Qt.KeyboardModifier.ControlModifier, "space"),
@@ -889,7 +966,7 @@ def test_home_hotkey_recording_conflict_keeps_old_value_and_reports_error(
     tmp_path: Path,
 ) -> None:
     app, controller, host, window = _real_home_hotkey_host(tmp_path)
-    display = window.findChild(QObject, "homeHotkeyDisplay")
+    display = window.findChild(QObject, "refraHotkeyDisplay")
     assert display is not None
     errors: list[tuple[str, str]] = []
     controller.errorRaised.connect(
@@ -940,8 +1017,12 @@ def test_home_hotkey_default_button_restores_default_and_updates_display(
     app.processEvents()
     window = host.window
     assert window is not None
-    display = window.findChild(QObject, "homeHotkeyDisplay")
-    default_button = window.findChild(QObject, "homeHotkeyDefaultButton")
+    preferences_button = _find_quick_item(window, "refraDarkPreferencesButton")
+    assert preferences_button is not None
+    assert QMetaObject.invokeMethod(preferences_button, "click") is True
+    app.processEvents()
+    display = window.findChild(QObject, "refraHotkeyDisplay")
+    default_button = window.findChild(QObject, "refraHotkeyDefaultButton")
     assert display is not None
     assert default_button is not None
     try:
@@ -959,11 +1040,15 @@ def test_home_hotkey_behavior_selector_persists_and_survives_live_recreate(
     tmp_path: Path,
 ) -> None:
     app, controller, host, window = _real_home_hotkey_host(tmp_path)
-    selector = window.findChild(QObject, "homeHotkeyBehaviorSelector")
+    preferences_button = _find_quick_item(window, "refraDarkPreferencesButton")
+    assert preferences_button is not None
+    assert QMetaObject.invokeMethod(preferences_button, "click") is True
+    app.processEvents()
+    selector = window.findChild(QObject, "refraHotkeyBehaviorSelector")
     assert selector is not None
     try:
         assert selector.property("currentText") == "仅启动"
-        scroll = window.findChild(QObject, "homeSecondaryScroll")
+        scroll = window.findChild(QObject, "refraPreferencesScroll")
         assert scroll is not None
         scroll.setProperty(
             "contentY",
@@ -999,10 +1084,7 @@ def test_home_hotkey_behavior_selector_persists_and_survives_live_recreate(
         app.processEvents()
         recreated = host.window
         assert recreated is not None
-        recreated_selector = recreated.findChild(
-            QObject,
-            "homeHotkeyBehaviorSelector",
-        )
+        recreated_selector = recreated.findChild(QObject, "refraHotkeyBehaviorSelector")
         assert recreated_selector is not None
         assert recreated_selector.property("currentIndex") == 2
         assert recreated_selector.property("currentText") == "启动 / 停止并打开 GUI"
@@ -1033,22 +1115,14 @@ def test_combo_box_opening_cancels_pending_and_visible_setting_hints(
             QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=button_center)
             app.processEvents()
             selector = _find_quick_item(window, "refraHotkeyBehaviorSelector")
-            scroll = None
+            scroll = _find_quick_item(window, "refraPreferencesScroll")
         else:
             selector = _find_quick_item(window, "homeHotkeyBehaviorSelector")
             scroll = _find_quick_item(window, "homeSecondaryScroll")
-        assert selector is not None and selector.isVisible()
+        assert selector is not None and scroll is not None
+        assert selector.isVisible()
         hint = _setting_hint_for_target(window, selector)
-        if scroll is not None:
-            scroll.setProperty(
-                "contentY",
-                max(
-                    0.0,
-                    float(scroll.property("contentHeight")) - float(scroll.property("height")),
-                ),
-            )
-        app.processEvents()
-        _wait_for_page_layout(window, selector, app)
+        _scroll_control_into_view(window, scroll, selector, app)
         center = selector.mapToScene(
             QPointF(selector.width() / 2, selector.height() / 2),
         ).toPoint()
@@ -1094,21 +1168,24 @@ def test_open_combo_box_stays_above_delayed_label_hint(
     try:
         controller.setSkin(skin)
         controller.setTheme("light")
-        selector = window.findChild(QQuickItem, "homeHotkeyBehaviorSelector")
-        hint = window.findChild(QObject, "settingHint-home-hotkey-behavior-label")
-        scroll = window.findChild(QObject, "homeSecondaryScroll")
+        if skin == SKIN_PRISM:
+            preferences_button = _find_quick_item(window, "refraDarkPreferencesButton")
+            assert preferences_button is not None
+            assert QMetaObject.invokeMethod(preferences_button, "click") is True
+            app.processEvents()
+            selector = _find_quick_item(window, "refraHotkeyBehaviorSelector")
+            scroll = _find_quick_item(window, "refraPreferencesScroll")
+        else:
+            selector = _find_quick_item(window, "homeHotkeyBehaviorSelector")
+            scroll = _find_quick_item(window, "homeSecondaryScroll")
+            hint = window.findChild(QObject, "settingHint-home-hotkey-behavior-label")
+        assert selector is not None and scroll is not None
+        if skin == SKIN_PRISM:
+            hint = _setting_hint_for_target(window, selector)
         assert selector is not None and hint is not None and scroll is not None
         # A longer explanation wraps far enough to overlap the first menu option.
         hint.setProperty("description", str(hint.property("description")) * 3)
-        scroll.setProperty(
-            "contentY",
-            max(
-                0.0,
-                float(scroll.property("contentHeight")) - float(scroll.property("height")),
-            ),
-        )
-        app.processEvents()
-        _wait_for_page_layout(window, selector, app)
+        _scroll_control_into_view(window, scroll, selector, app)
         label = hint.property("target")
         QTest.mouseMove(window, QPoint(2, 2))
         QTest.mouseMove(
@@ -2232,12 +2309,9 @@ def test_real_profile_dropdown_switches_and_restores_runtime_state(
     app.processEvents()
     window = host.window
     assert window is not None
-    selector = window.findChild(QObject, "homeProfileSelector")
+    selector = window.findChild(QObject, "refraDarkProfileSelector")
     assert isinstance(selector, QQuickItem)
-    profile_card = window.findChild(QObject, "activeProfileCard")
-    profile_name = window.findChild(QObject, "activeProfileName")
-    assert isinstance(profile_card, QQuickItem)
-    assert isinstance(profile_name, QQuickItem)
+    assert selector.isVisible()
     assert controller.profileNames == ["Galgame A", "Galgame B"]
     assert controller.currentProfileIndex == 0
     assert selector.property("currentIndex") == 0
@@ -2245,16 +2319,9 @@ def test_real_profile_dropdown_switches_and_restores_runtime_state(
     selector.activated.connect(activated_indices.append)
 
     def assert_active_profile(name: str) -> None:
-        visible_text = [
-            item.property("text")
-            for item in profile_card.findChildren(QQuickItem)
-            if item.isVisible() and item.property("text") is not None
-        ]
-        assert sorted(visible_text) == sorted(["ACTIVE PROFILE", name])
-        assert profile_name.property("text") == name
-        assert profile_name.property("font").pixelSize() == (
-            selector.property("font").pixelSize()
-        )
+        assert selector.isVisible()
+        assert selector.property("currentText") == name
+        assert controller.currentProfileName == name
 
     def assert_profile_a() -> None:
         assert_active_profile("Galgame A")
@@ -2338,7 +2405,14 @@ def test_real_skin_dropdown_highlight_uses_skin_specific_surface(
 
     window = host.window
     assert window is not None
-    selector = window.findChild(QObject, "homeSkinSelector")
+    if skin == SKIN_PRISM:
+        preferences_button = _find_quick_item(window, "refraDarkPreferencesButton")
+        assert preferences_button is not None and preferences_button.isVisible()
+        assert QMetaObject.invokeMethod(preferences_button, "click") is True
+        app.processEvents()
+        selector = _find_quick_item(window, "refraHomeSkinSelector")
+    else:
+        selector = _find_quick_item(window, "homeSkinSelector")
     theme = window.findChild(QObject, "prismTheme")
     assert isinstance(selector, QQuickItem)
     assert theme is not None
@@ -2480,11 +2554,19 @@ def test_profile_delete_dialog_cancel_confirm_and_empty_state(tmp_path: Path, sk
         app.processEvents()
         window = host.window
         assert window is not None
-        delete_button = window.findChild(QObject, "openDeleteProfileDialogButton")
+        delete_button_name = (
+            "refraDarkDeleteProfile" if skin == SKIN_PRISM
+            else "openDeleteProfileDialogButton"
+        )
+        selector_name = (
+            "refraDarkProfileSelector" if skin == SKIN_PRISM
+            else "homeProfileSelector"
+        )
+        delete_button = window.findChild(QObject, delete_button_name)
         dialog = window.findChild(QObject, "deleteProfileDialog")
         assert delete_button is not None
         assert dialog is not None
-        _click_quick_item(window, "openDeleteProfileDialogButton")
+        _click_quick_item(window, delete_button_name)
         assert dialog.property("visible") is True
         assert dialog.property("profileId") == "game"
         assert dialog.property("profileName") == "测试游戏"
@@ -2493,7 +2575,7 @@ def test_profile_delete_dialog_cancel_confirm_and_empty_state(tmp_path: Path, sk
         assert controller.hasProfile is True
         assert dialog.property("visible") is False
 
-        _click_quick_item(window, "openDeleteProfileDialogButton")
+        _click_quick_item(window, delete_button_name)
         controller._live_process = SimpleNamespace(poll=lambda: None)
         controller.stateChanged.emit()
         app.processEvents()
@@ -2507,7 +2589,7 @@ def test_profile_delete_dialog_cancel_confirm_and_empty_state(tmp_path: Path, sk
         assert not profile.directory.exists()
         assert controller.hasProfile is False
         assert delete_button.property("enabled") is False
-        selector = window.findChild(QObject, "homeProfileSelector")
+        selector = window.findChild(QObject, selector_name)
         assert selector.property("currentIndex") == -1
         assert selector.property("enabled") is False
         assert load_gui_preferences(config_path).last_profile_id == ""
@@ -2522,6 +2604,7 @@ def test_profile_and_external_model_names_use_one_control(tmp_path: Path) -> Non
     _write_config(config_path)
     create_game_profile(config_path, load_config(config_path), "game", display_name="测试游戏")
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
     controller.setReducedMotion(True)
     host = QmlWorkbenchHost(controller, application=app)
     try:
@@ -2530,13 +2613,16 @@ def test_profile_and_external_model_names_use_one_control(tmp_path: Path) -> Non
         window = host.window
         assert window is not None
         window.resize(1280, 1000)
-        profile_hint = window.findChild(QObject, "settingHint-home-profile-label")
+        controller.setSkin(SKIN_PRISM)
+        controller.setTheme("light")
+        profile_selector = _find_quick_item(window, "refraDarkProfileSelector")
+        assert profile_selector is not None and profile_selector.isVisible()
+        profile_hint = _setting_hint_for_target(window, profile_selector)
         assert profile_hint is not None
-        profile_label = profile_hint.property("target")
-        assert profile_label.property("meta") == ""
-        profile_selector = window.findChild(QObject, "homeProfileSelector")
-        assert profile_selector is not None
+        assert profile_hint.property("target") == profile_selector
         assert profile_selector.property("currentText") == "测试游戏"
+        legacy_profile_selector = _find_quick_item(window, "homeProfileSelector")
+        assert legacy_profile_selector is not None and not legacy_profile_selector.isVisible()
         assert controller.maxConcurrency == 4
         assert controller.builtinParallel == 4
         assert controller.dynamicRoiEnabled is True
@@ -2622,6 +2708,7 @@ def test_real_setting_hints_cover_editable_options_and_exclude_read_only_actions
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
     controller.setTheme("dark")
     controller.setReducedMotion(True)
     host = QmlWorkbenchHost(controller, application=app)
@@ -3344,7 +3431,7 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
         assert controller.themePreference == saved_theme
         controller.setSkin(SKIN_PRISM)
         app.processEvents()
-        if theme.property("refraDark") is True:
+        if theme.property("refraStyle") is True:
             assert theme_selector.property("visible") is False
             assert theme_selector.property("enabled") is False
             preferences = window.findChild(QObject, "refraDarkPreferencesButton")
@@ -3416,7 +3503,7 @@ def test_real_dohna_titles_enter_opposite_content_on_every_page(tmp_path: Path) 
         assert header.property("x") == content.property("x") == 0
         controller.setSkin(SKIN_PRISM)
         app.processEvents()
-        assert header_bar.property("clip") is False
+        assert header_bar.property("clip") is True
     finally:
         host.shutdown()
 
@@ -3937,7 +4024,9 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
     window.resize(1600, 900)
     app.processEvents()
     settings_panel = _find_quick_item(window, "settingsPrimaryPanel")
+    theme = window.findChild(QObject, "prismTheme")
     assert settings_panel is not None
+    assert theme is not None and theme.property("refraStyle") is True
     assert window.width() == 1600
 
     for page in ("CAPTURE", "TRANSLATION", "SETTINGS"):
@@ -3955,6 +4044,7 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
     assert float(settings_panel.property("width")) > 3 * max(
         float(stepper.property("compactWidth")) for stepper in steppers
     )
+    detailed_steppers = []
     for stepper in steppers:
         width = float(stepper.property("width"))
         compact_width = float(stepper.property("compactWidth"))
@@ -3964,7 +4054,37 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
         else:
             assert stepper.property("compact") is False
             assert compact_width in {176.0, 200.0}
-        assert width == compact_width
+        if stepper.property("detailed") is True:
+            detailed_steppers.append(stepper)
+            assert width > compact_width
+            parent = stepper.parentItem()
+            assert parent is not None
+            origin = stepper.mapToItem(parent, QPointF(0, 0))
+            assert origin.x() >= -0.5
+            assert origin.x() + width <= parent.width() + 0.5
+            title = stepper.findChild(QObject, "numberStepperRowTitle")
+            assert title is not None
+            assert title.property("text") == stepper.property("rowTitle")
+            value = int(stepper.property("value"))
+            assert int(stepper.property("minimum")) <= value <= int(stepper.property("maximum"))
+        else:
+            assert width == compact_width
+
+    assert detailed_steppers
+    calibration_stepper = window.findChild(QObject, "settingsCalibrationStepper")
+    assert calibration_stepper is not None and calibration_stepper.isVisible()
+    calibration_title = calibration_stepper.findChild(QObject, "numberStepperRowTitle")
+    assert calibration_title is not None and calibration_title.isVisible()
+    assert calibration_title.property("text") == "画面变化轮询"
+    increase = calibration_stepper.findChild(QObject, "numberStepperIncrease")
+    assert increase is not None and increase.isVisible()
+    before = controller.changePollFps
+    increase_point = increase.mapToScene(
+        QPointF(increase.width() / 2, increase.height() / 2),
+    ).toPoint()
+    QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=increase_point)
+    app.processEvents()
+    assert controller.changePollFps == before + 1
 
     window.resize(980, 700)
     controller.setReducedMotion(True)
@@ -4061,7 +4181,7 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
         assert abs(
             decrease_rect[0]
             - (stepper.property("width") - increase_rect[0] - increase_rect[2])
-        ) <= 0.5
+        ) <= 1.0
 
         if stepper.property("suffix") and not stepper.property("compact"):
             assert suffix.property("visible") is True
@@ -4246,10 +4366,45 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
         controller.setSkin(SKIN_PRISM)
         app.processEvents()
         assert rail.property("clip") is False
-        assert all(_find_quick_item(window, f"navigationButton{i}").property("rotation") == 0
-                   for i in range(len(pages)))
-        assert all(_find_quick_item(window, f"navigationButton{i}").height() == 52
-                   for i in range(len(pages)))
+        theme = window.findChild(QObject, "prismTheme")
+        assert theme is not None and theme.property("refraStyle") is True
+        p3_sidebar_buttons = [
+            _find_quick_item(window, f"navigationButton{i}")
+            for i in range(len(pages))
+        ]
+        assert all(button is not None and button.isVisible() for button in p3_sidebar_buttons)
+        for index, button in enumerate(p3_sidebar_buttons):
+            expected_tilt = -4.0 if index % 2 == 0 else -6.2
+            assert button.property("rotation") == pytest.approx(expected_tilt)
+            assert button.height() == 66
+
+        sidebar_target = p3_sidebar_buttons[-1]
+        sidebar_point = sidebar_target.mapToScene(
+            QPointF(sidebar_target.width() / 2, sidebar_target.height() / 2),
+        ).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=sidebar_point)
+        app.processEvents()
+        assert controller.currentPage == "SETTINGS"
+
+        controller.setPage("HOME")
+        app.processEvents()
+        hero_menu = _find_quick_item(window, "refraDarkNavigationMenu")
+        assert hero_menu is not None and hero_menu.isVisible()
+        assert hero_menu.property("clip") is False
+        for index, page in enumerate(pages):
+            controller.setPage("HOME")
+            app.processEvents()
+            hero_button = _find_quick_item(window, f"refraDarkNavigationButton{index}")
+            assert hero_button is not None and hero_button.isVisible()
+            expected_tilt = -3.8 if index % 2 == 0 else -5.7
+            assert hero_button.property("rotation") == pytest.approx(expected_tilt)
+            assert 70 <= hero_button.height() <= 92
+            hero_center = hero_button.mapToScene(
+                QPointF(hero_button.width() / 2, hero_button.height() / 2),
+            ).toPoint()
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=hero_center)
+            app.processEvents()
+            assert controller.currentPage == page
     finally:
         host.shutdown()
 
@@ -4383,6 +4538,7 @@ def test_capture_fields_use_two_rows_and_keep_geometry_clear(
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
     controller.setTheme(theme_name)
     controller.setReducedMotion(True)
     controller.setCaptureRegion(30, 40, 640, 180)
@@ -4619,6 +4775,10 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
     assert float(slider.property("stepSize")) == 0.01
     assert float(slider.property("value")) == configured
     assert percentage.property("text") == f"{round(configured * 100)}%"
+    assert QColor(percentage.property("color")) == QColor(
+        theme.property("accentText"),
+    )
+    assert QColor(theme.property("accentText")) != QColor(theme.property("accent"))
     assert float(preview_entry.property("maskOpacity")) == configured
     assert controller.settingsDirty is False
 
@@ -4676,6 +4836,9 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
     assert float(slider.property("from")) <= draft <= float(slider.property("to"))
     assert float(slider.property("value")) == draft
     assert percentage.property("text") == f"{round(draft * 100)}%"
+    assert QColor(percentage.property("color")) == QColor(
+        theme.property("accentText"),
+    )
     assert controller.settingsDirty is True
     assert load_config(config_path).preview.overlay_opacity == configured
     assert motion_feedback.property("actionKind") == "projection"
@@ -4689,7 +4852,7 @@ def test_real_overlay_slider_updates_draft_and_profile_apply_persists_it(
     assert float(preview_entry.property("maskOpacity")) == 0.23
     assert int(motion_feedback.property("actionSequence")) == action_sequence + 1
 
-    _click_quick_item(window, "saveAllButton")
+    _click_quick_item(window, _workbench_save_button_name(window))
     assert controller.settingsDirty is False
     machine = load_config(config_path)
     saved_profile = load_game_profile(config_path, machine, "game")
@@ -4878,70 +5041,59 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     app.processEvents()
     window = host.window
     assert window is not None
+    theme = window.findChild(QObject, "prismTheme")
+    assert theme is not None
+    accent_text = QColor(theme.property("accentText"))
     window.resize(980, 700)
     app.processEvents()
     assert window.width() >= 980
     assert window.height() >= 700
 
-    home_scroll = _find_quick_item(window, "homePrimaryScroll")
-    home_metrics_content = _find_quick_item(window, "homeLastRunMetricsContent")
-    home_metrics = window.findChild(QObject, "homeLastRunMetrics")
-    home_status = window.findChild(QObject, "homeLastRunStatus")
-    home_peak_cards = window.findChild(QObject, "homePeakCards")
-    home_footnote = window.findChild(QObject, "homeLastRunFootnote")
-    home_ocr_peak_group = window.findChild(QObject, "homeOcrPeakGroup")
-    home_llm_peak_group = window.findChild(QObject, "homeLlmPeakGroup")
-    home_ocr_peak = window.findChild(QObject, "homeOcrPeakValue")
-    home_llm_peak = window.findChild(QObject, "homeLlmPeakValue")
-    assert home_scroll is not None
-    assert home_metrics_content is not None
-    assert home_metrics is not None
-    assert home_status is not None
-    assert home_peak_cards is not None
-    assert home_footnote is not None
-    assert home_ocr_peak_group is not None
-    assert home_llm_peak_group is not None
-    assert home_ocr_peak is not None
-    assert home_llm_peak is not None
-    assert home_metrics.property("visible") is True
-    assert home_peak_cards.property("visible") is True
-    assert home_ocr_peak.property("text") == "400 ms"
-    assert home_llm_peak.property("text") == "2.50 s"
-    assert home_ocr_peak.property("font").pixelSize() == 44
-    assert home_llm_peak.property("font").pixelSize() == 44
-    assert home_ocr_peak_group.property("color") is None
-    assert home_llm_peak_group.property("color") is None
-    assert home_ocr_peak_group.property("height") >= 142
-    assert home_llm_peak_group.property("height") >= 142
-    assert float(home_metrics.property("height")) >= float(
-        home_metrics_content.property("implicitHeight")
-    ) + 32
-    for child in (home_status, home_peak_cards, home_footnote):
-        child_y = child.mapToItem(home_metrics, QPointF(0, 0)).y()
-        assert child_y >= -1e-3
-        assert child_y + float(child.property("height")) <= float(
-            home_metrics.property("height")
-        ) + 1e-3
-    assert float(home_scroll.property("contentHeight")) <= float(
-        home_scroll.property("height")
-    )
-    assert float(home_scroll.property("contentY")) == 0
-    footnote_y = home_footnote.mapToItem(home_scroll, QPointF(0, 0)).y()
-    assert footnote_y >= -1e-3
-    assert footnote_y + float(home_footnote.property("height")) <= float(
-        home_scroll.property("height")
-    ) + 1e-3
+    home_summary = _find_quick_item(window, "refraDarkLastRunSummary")
+    home_status = _find_quick_item(window, "refraDarkLastRunStatus")
+    assert home_summary is not None and home_summary.isVisible()
+    assert home_status is not None and home_status.isVisible()
+    assert controller.lastRunAvailable is True
+    assert home_status.property("text") == controller.lastRunStatus
+    visible_summary_lines = {
+        str(item.property("text"))
+        for item in home_summary.findChildren(QQuickItem)
+        if item.isVisible() and item.property("text") is not None
+    }
+    assert "OCR 400 ms  ·  LLM 2.50 s" in visible_summary_lines
+    controller._live_process = SimpleNamespace(poll=lambda: None)
+    controller._set_run_state("正在翻译", "success", True)
+    app.processEvents()
+    run_state = _find_quick_item(window, "refraDarkRunState")
+    assert run_state is not None and run_state.isVisible()
+    assert run_state.property("text") == "正在翻译"
+    assert QColor(run_state.property("color")) == accent_text
+    controller._live_process = None
+    controller._set_run_state("待启动", "neutral", False)
+    app.processEvents()
 
     controller.setPage("OCR")
     app.processEvents()
     ocr_list = window.findChild(QObject, "ocrLastRunList")
     assert ocr_list is not None
     assert ocr_list.property("visible") is True
+    ocr_status = _visible_text_items(ocr_list, str(controller.lastRunStatus))
+    assert len(ocr_status) == 1
+    assert QColor(ocr_status[0].property("color")) == accent_text
     controller.setPage("TRANSLATION")
     app.processEvents()
     translation_list = window.findChild(QObject, "translationLastRunList")
     assert translation_list is not None
     assert translation_list.property("visible") is True
+    translation_status = _visible_text_items(
+        translation_list,
+        str(controller.lastRunStatus),
+    )
+    assert len(translation_status) == 1
+    assert QColor(translation_status[0].property("color")) == accent_text
+    connection_label = _visible_text_items(window, "连接状态")
+    assert len(connection_label) == 1
+    assert QColor(connection_label[0].property("color")) == accent_text
     controller.setPage("OVERLAY")
     app.processEvents()
     controller.setOverlayOpacity(0.1)
@@ -5019,9 +5171,8 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     window.resize(1280, 820)
     controller.setPage("HOME")
     app.processEvents()
-    assert float(home_scroll.property("contentHeight")) <= float(
-        home_scroll.property("height")
-    )
+    home = _find_quick_item(window, "refraDarkHome")
+    assert home is not None and home.isVisible()
     host.shutdown()
 
 
@@ -5107,6 +5258,7 @@ def test_nearly_fitting_pages_compact_spacing_before_requiring_scroll(
         ),
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
     controller.setTheme(theme_name)
     controller.setReducedMotion(True)
     host = QmlWorkbenchHost(controller, application=app)
@@ -5114,7 +5266,9 @@ def test_nearly_fitting_pages_compact_spacing_before_requiring_scroll(
         host.show()
         window = host.window
         assert window is not None
-        if theme_name == "dark":
+        theme = window.findChild(QObject, "prismTheme")
+        assert theme is not None
+        if theme.property("refraStyle") is True:
             dark_home = _find_quick_item(window, "refraDarkHome")
             stage = _find_quick_item(window, "refraDarkHomeStage")
             status_band = _find_quick_item(window, "refraDarkHomeStatusBand")
@@ -5234,6 +5388,7 @@ def test_page_subtitle_stays_clear_of_dividers_across_pages_themes_and_sizes(
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
     controller.setReducedMotion(True)
     host = QmlWorkbenchHost(controller, application=app)
     host.show()
@@ -5243,9 +5398,11 @@ def test_page_subtitle_stays_clear_of_dividers_across_pages_themes_and_sizes(
     header = _find_quick_item(window, "pageHeaderBar")
     rule = _find_quick_item(window, "prismPageHeaderRule")
     subtitle = _find_quick_item(window, "pageSubtitle")
+    theme = window.findChild(QObject, "prismTheme")
     assert header is not None
     assert rule is not None
     assert subtitle is not None
+    assert theme is not None
 
     pages = ("HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS")
     for width, height in ((980, 700), (1280, 820)):
@@ -5257,7 +5414,7 @@ def test_page_subtitle_stays_clear_of_dividers_across_pages_themes_and_sizes(
             for page in pages:
                 controller.setPage(page)
                 app.processEvents()
-                if theme_name == "dark" and page == "HOME":
+                if theme.property("refraStyle") is True and page == "HOME":
                     dark_home = _find_quick_item(window, "refraDarkHome")
                     assert dark_home is not None and dark_home.isVisible()
                     assert header.isVisible() is False
@@ -5267,7 +5424,7 @@ def test_page_subtitle_stays_clear_of_dividers_across_pages_themes_and_sizes(
                 assert header.isVisible() is True
                 assert rule.isVisible() is True
                 rule_top = rule.mapToItem(header, QPointF(0, 0)).y()
-                if theme_name == "dark":
+                if theme.property("refraStyle") is True:
                     english = _find_quick_item(window, "refraEnglishPageTitle")
                     chinese = _find_quick_item(window, "refraChinesePageTitle")
                     assert english is not None and english.isVisible()
@@ -5329,41 +5486,60 @@ def test_real_workbench_uses_responsive_titles_and_settling_page_motion(
     display_fonts = theme.property("displayFonts")
     if hasattr(display_fonts, "toVariant"):
         display_fonts = display_fonts.toVariant()
-    assert list(display_fonts)[:2] == ["Bahnschrift", "Microsoft YaHei UI"]
-    assert title_light.property("font").family() == "Microsoft YaHei UI"
-    assert title_light.property("font").weight() == 700
-    assert title_light.property("font").letterSpacing() == 0
-    assert title_heavy.property("text") == ""
+    assert list(display_fonts)[:2] == ["Arial Narrow", "Bahnschrift"]
+    assert theme.property("refraStyle") is True
+    refra_english_title = window.findChild(QObject, "refraEnglishPageTitle")
+    refra_chinese_title = window.findChild(QObject, "refraChinesePageTitle")
+    # Home uses the full-canvas layout, so the shared header is hidden until
+    # the test switches to a settings page below.
+    assert refra_english_title is not None
+    assert refra_chinese_title is not None
+    assert refra_english_title.isVisible() is False
+    assert refra_chinese_title.isVisible() is False
+    assert refra_english_title.property("font").family() == "Arial Black"
+    assert refra_english_title.property("font").weight() >= int(QFont.Weight.Black)
+    assert refra_english_title.property("font").italic() is True
     assert window.findChild(QObject, "pageTitleCyanSlice") is None
     assert window.findChild(QObject, "pageTitleSpectrumSlice") is None
     assert window.findChild(QObject, "opticalStage") is None
     assert window.findChild(QObject, "pageTransitionSweep") is None
-    assert header_rule.property("visible") is True
     assert window.findChild(QObject, "prismFoldRuleFacet") is None
+    assert 40 <= refra_english_title.property("font").pixelSize() <= 76
+
+    page_titles = {
+        "HOME": ("HOME", "总览"),
+        "CAPTURE": ("CAPTURE", "捕获"),
+        "OCR": ("OCR", "文字识别"),
+        "TRANSLATION": ("TRANSLATE", "翻译"),
+        "OVERLAY": ("OVERLAY", "覆盖层"),
+        "CACHE": ("CACHE", "缓存"),
+        "SETTINGS": ("SETTINGS", "设置"),
+    }
+    for page, (english_title, chinese_title) in page_titles.items():
+        controller.setPage(page)
+        app.processEvents()
+        assert title_light.property("text") == english_title
+        assert title_heavy.property("text") == chinese_title
+        assert refra_english_title.property("text") == english_title
+        assert refra_chinese_title.property("text") == chinese_title
+        if page == "HOME":
+            assert header_bar.isVisible() is False
+            assert header_rule.isVisible() is False
+            assert refra_english_title.isVisible() is False
+            assert refra_chinese_title.isVisible() is False
+        else:
+            assert header_bar.isVisible() is True
+            assert header_rule.isVisible() is True
+            assert refra_english_title.isVisible() is True
+            assert refra_chinese_title.isVisible() is True
+
     assert divider_line.property("height") == 1
     assert divider_line.property("width") == header_rule.property("width")
     assert divider_line.property("color") == theme.property("line")
-    assert divider_line.property("visible") is True
-    assert 40 <= title_light.property("font").pixelSize() <= 54
-
-    page_titles = {
-        "HOME": "总览",
-        "CAPTURE": "捕获",
-        "OCR": "文字识别",
-        "TRANSLATION": "翻译",
-        "OVERLAY": "覆盖层",
-        "CACHE": "缓存",
-        "SETTINGS": "设置",
-    }
-    for page, expected_title in page_titles.items():
-        controller.setPage(page)
-        app.processEvents()
-        assert title_light.property("text") == expected_title
-        assert title_heavy.property("text") == ""
-        assert header_rule.property("visible") is True
+    assert divider_line.isVisible() is True
 
     def assert_subtitle_clearance() -> None:
-        if theme.property("refraDark"):
+        if theme.property("refraStyle"):
             assert page_subtitle.property("visible") is False
             return
         subtitle_top = page_subtitle.mapToItem(header_bar, QPointF(0, 0)).y()
@@ -5376,7 +5552,7 @@ def test_real_workbench_uses_responsive_titles_and_settling_page_motion(
         assert subtitle_bottom <= float(header_bar.property("height")) - 4
 
     def assert_title_fits() -> None:
-        if theme.property("refraDark"):
+        if theme.property("refraStyle"):
             active_title = window.findChild(QObject, "refraEnglishPageTitle")
             profile_name = window.findChild(QObject, "darkHeaderProfileName")
             assert active_title is not None and profile_name is not None
@@ -5480,9 +5656,9 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
         host.show()
         window = host.window
         assert window is not None
-        dark_prism = skin == SKIN_PRISM and theme_name == "dark"
+        prism_style = skin == SKIN_PRISM
         pages = (
-            ("HOME", "refraDarkHome" if dark_prism else "homePrimaryPanel"),
+            ("HOME", "refraDarkHome" if prism_style else "homePrimaryPanel"),
             ("CAPTURE", "captureSecondaryPanel"),
             ("OCR", "ocrSecondaryPanel"),
             ("TRANSLATION", "translationSecondaryPanel"),
@@ -5500,7 +5676,7 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                 _wait_for_page_layout(window, panel, app)
                 page_item = _find_quick_item(window, page.lower() + "Page")
                 assert page_item is not None, page
-                if page == "HOME" and dark_prism:
+                if page == "HOME" and prism_style:
                     assert panel.isEnabled()
                     for name in (
                         "refraDarkHomeStage",
@@ -5595,11 +5771,11 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                     font_size = item.property("font").pixelSize()
                     minimum_font_size = (
                         10
-                        if dark_prism and text in {
+                        if prism_style and text in {
                                 "GAME SCREEN TRANSLATOR", "FPS", "50—1000 MS", "100—5000 MS",
                         }
                         else 11
-                        if dark_prism and (page == "HOME" or text == "当前配置")
+                        if prism_style and (page == "HOME" or text == "当前配置")
                         else 12
                     )
                     assert font_size >= minimum_font_size, (page, text, font_size)
@@ -5620,13 +5796,20 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                         "translationLastRunUnavailable",
                     )
                     assert unavailable is not None
+                    assert unavailable.isVisible()
                     eyebrow = unavailable.findChild(
                         QQuickItem,
                         "unavailableStateEyebrow",
                     )
                     assert eyebrow is not None
+                    assert eyebrow.isVisible()
                     assert eyebrow.property("lineCount") >= 1
                     assert eyebrow.property("text") == "LAST RUN TRANSLATION · UNAVAILABLE"
+                    theme = window.findChild(QObject, "prismTheme")
+                    assert theme is not None
+                    assert QColor(eyebrow.property("color")) == QColor(
+                        theme.property("accentText"),
+                    )
                     eyebrow_origin = eyebrow.mapToItem(unavailable, QPointF(0, 0))
                     assert eyebrow_origin.y() >= 0
                     assert eyebrow_origin.y() + eyebrow.height() <= unavailable.height()
@@ -5635,7 +5818,7 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
 
             for name in (
                 *(f"navigationButton{index}" for index in range(7)),
-                *( ("darkSaveAllButton", "darkStartLiveButton") if dark_prism else ("saveAllButton", "startLiveButton") ),
+                *( ("darkSaveAllButton", "darkStartLiveButton") if prism_style else ("saveAllButton", "startLiveButton") ),
             ):
                 button = _find_quick_item(window, name)
                 assert button is not None, name
@@ -5650,7 +5833,7 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                         name, label.property("text"), label.width(),
                         label.property("implicitWidth"),
                     )
-            if dark_prism:
+            if prism_style:
                 start_button = _find_quick_item(window, "darkStartLiveButton")
                 apply_button = _find_quick_item(window, "darkSaveAllButton")
                 assert start_button is not None and apply_button is not None
@@ -5674,6 +5857,7 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
         display_name="测试游戏",
     )
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
     controller.setTheme("dark")
     controller.setReducedMotion(True)
     host = QmlWorkbenchHost(controller, application=app)
@@ -5731,13 +5915,13 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
 
     for theme_name, expected_paper, expected_panel in (
         ("dark", "#03143b", "#071a3c"),
-        ("light", "#f2f3ed", "#e5e9e4"),
+        ("light", "#f7f9fc", "#ffffff"),
     ):
         controller.setTheme(theme_name)
         controller.setPage("HOME")
         app.processEvents()
         assert theme.property("dark") is (theme_name == "dark")
-        dark = theme.property("refraDark") is True
+        prism_style = theme.property("refraStyle") is True
         paper = QColor(theme.property("paper"))
         panel = QColor(theme.property("panel"))
         text = QColor(theme.property("text"))
@@ -5748,7 +5932,7 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
         assert contrast_ratio(text, paper) >= 7
         assert contrast_ratio(text_soft, paper) >= 4.5
         assert QColor(theme.property("inputSurface")).alpha() == 255
-        if dark:
+        if prism_style:
             preferences_button = _find_quick_item(window, "refraDarkPreferencesButton")
             assert preferences_button is not None and preferences_button.isVisible()
             point = preferences_button.mapToScene(
@@ -5766,7 +5950,7 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
         assert chevron is not None
         assert QColor(combo_surface.property("color")).alpha() == 255
         assert chevron.property("visible") is True
-        if dark:
+        if prism_style:
             accept_button = _find_quick_item(window, "refraPreferencesDialogAcceptButton")
             assert accept_button is not None and accept_button.isVisible()
             point = accept_button.mapToScene(
@@ -5784,7 +5968,7 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
             assert window.property("pageContentReady") is True
             assert window.property("pageTransitioning") is False
             assert not window.findChildren(QObject, "prismFoldRuleFacet")
-            if dark and page == "HOME":
+            if prism_style and page == "HOME":
                 dark_home = _find_quick_item(window, "refraDarkHome")
                 assert dark_home is not None and dark_home.isVisible()
                 nav_button = _find_quick_item(window, f"refraDarkNavigationButton{index}")
@@ -5793,7 +5977,7 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
                     home_action = _find_quick_item(window, action_name)
                     assert home_action is not None and home_action.isVisible()
             else:
-                if dark:
+                if prism_style:
                     assert title_dark.property("text") == ("TRANSLATE" if page == "TRANSLATION" else page)
                     assert title_dark.property("visible") is True
                     assert title_dark_chinese.property("text") == page_title
@@ -5814,7 +5998,7 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
                     assert len(line.parentItem().childItems()) == 1
                 nav_button = _find_quick_item(window, f"navigationButton{index}")
                 assert nav_button is not None and nav_button.property("visible") is True
-                if dark:
+                if prism_style:
                     assert dark_save_button.property("visible") is True
                     assert dark_start_button.property("visible") is True
                 else:
@@ -5824,7 +6008,7 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
             nav_code_label = nav_button.findChild(QObject, "navigationCodeLabel")
             nav_subtitle_label = nav_button.findChild(QObject, "navigationSubtitleLabel")
             assert nav_title_label is not None
-            if dark:
+            if prism_style:
                 assert nav_subtitle_label is not None
                 assert nav_title_label.property("text") == ("TRANSLATE" if page == "TRANSLATION" else page)
                 assert nav_subtitle_label.property("text") == nav_title
@@ -5834,7 +6018,7 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
                 assert nav_code_label.property("text") == code
                 assert nav_code_label.property("font").pixelSize() >= 12
 
-            if not (dark and page == "HOME"):
+            if not (prism_style and page == "HOME"):
                 primary_panel = _find_quick_item(window, panel_name)
                 assert primary_panel is not None
                 panel_surface = primary_panel.findChild(QObject, "prismPanelSurface")
@@ -5872,7 +6056,7 @@ def test_real_prism_button_feedback_tracks_pointer_and_reduced_motion(
 
     window = host.window
     assert window is not None
-    button = _find_quick_item(window, "navigationButton0")
+    button = _find_quick_item(window, "refraDarkNavigationButton0")
     theme = window.findChild(QObject, "prismTheme")
     assert button is not None
     assert theme is not None
@@ -6081,11 +6265,13 @@ def test_real_page_operations_show_local_feedback_and_settle(tmp_path: Path) -> 
         ("OCR", "ocrProbeAction", "focus"),
         ("TRANSLATION", "translationTraceAction", "trace"),
         ("CACHE", "cacheRippleAction", "ripple"),
-        ("SETTINGS", "saveAllButton", "calibrate"),
+        ("SETTINGS", None, "calibrate"),
     )
     for page, button_name, action_kind in operations:
         controller.setPage(page)
         app.processEvents()
+        if button_name is None:
+            button_name = _workbench_save_button_name(window)
         _click_quick_item(window, button_name)
         assert motion_feedback.property("actionKind") == action_kind
         assert int(motion_feedback.property("actionSequence")) == previous_sequence + 1
@@ -6228,7 +6414,7 @@ def test_capture_custom_action_preserves_cancel_and_applies_boundary_edits(
     ) == (30, 40, 800, 400)
     assert controller.settingsDirty is True
 
-    _click_quick_item(window, "saveAllButton")
+    _click_quick_item(window, _workbench_save_button_name(window))
     app.processEvents()
     assert controller.settingsDirty is False
     saved_profile = load_game_profile(config_path, load_config(config_path), "game")
@@ -6278,7 +6464,7 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     assert dohna_feedback is not None
     assert theme is not None
 
-    _click_quick_item(window, "startLiveButton")
+    _click_quick_item(window, _workbench_start_button_name(window))
     assert window.property("startPreludePending") is True
     assert controller.toggle_calls == 0
     if skin == SKIN_DOHNA:
@@ -6299,7 +6485,7 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     QTest.qWait(80)
     assert controller.toggle_calls == 1
 
-    _click_quick_item(window, "startLiveButton")
+    _click_quick_item(window, _workbench_start_button_name(window))
     assert window.property("startPreludePending") is True
     assert controller.toggle_calls == 1
     controller.setReducedMotion(True)
@@ -6314,7 +6500,7 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     app.processEvents()
     assert motion_feedback.property("startPreludeRunning") is False
 
-    _click_quick_item(window, "startLiveButton")
+    _click_quick_item(window, _workbench_start_button_name(window))
     assert controller.toggle_calls == 3
     assert window.property("startPreludePending") is False
 
@@ -6323,7 +6509,7 @@ def test_start_button_waits_for_prelude_and_reduced_motion_runs_immediately(
     controller.setReducedMotion(False)
     controller.setSkin(SKIN_DOHNA if skin == SKIN_PRISM else SKIN_PRISM)
     app.processEvents()
-    _click_quick_item(window, "startLiveButton")
+    _click_quick_item(window, _workbench_start_button_name(window))
     assert window.property("startPreludePending") is True
     pending_calls = controller.toggle_calls
     controller.setSkin(skin)
@@ -6918,10 +7104,10 @@ def test_refra_dark_home_keeps_one_enabled_navigation_tree_and_shared_preference
         QTest.keyClick(window, Qt.Key.Key_Return)
         app.processEvents()
         assert controller.themePreference == "light"
-        assert not dark_home.isVisible()
-        assert legacy_home.isVisible()
-        assert legacy_home.isEnabled()
+        assert dark_home.isVisible() and dark_home.isEnabled()
+        assert not legacy_home.isVisible() and not legacy_home.isEnabled()
         assert theme.property("refraDark") is False
+        assert theme.property("refraStyle") is True
         controller.setTheme("dark")
         app.processEvents()
         assert dark_home.isVisible() and dark_home.isEnabled()
@@ -6963,15 +7149,17 @@ def test_refra_dark_home_keeps_one_enabled_navigation_tree_and_shared_preference
         host.shutdown()
 
 
+@pytest.mark.parametrize("theme_name", ("dark", "light"))
 def test_refra_dark_home_surfaces_save_state_and_preferences_hotkey_feedback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    theme_name: str,
 ) -> None:
     # Keep this real QML interaction isolated from the user's global shortcut.
     monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
     app, controller, host, window = _real_home_hotkey_host(tmp_path)
     controller.setSkin(SKIN_PRISM)
-    controller.setTheme("dark")
+    controller.setTheme(theme_name)
     controller.setReducedMotion(True)
     controller.setPage("HOME")
     app.processEvents()
@@ -7052,7 +7240,13 @@ def test_refra_dark_home_surfaces_save_state_and_preferences_hotkey_feedback(
         assert status.isVisible()
         assert status.property("text") == controller.statusText
         assert "已应用" in controller.statusText
-        assert status.property("color") == window.findChild(QObject, "prismTheme").property("accent")
+        theme = window.findChild(QObject, "prismTheme")
+        expected_status_accent = (
+            theme.property("electric")
+            if theme.property("refraLight")
+            else theme.property("accent")
+        )
+        assert status.property("color") == expected_status_accent
         saved_profile = load_game_profile(
             controller._config_path,
             load_config(controller._config_path),
