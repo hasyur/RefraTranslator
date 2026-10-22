@@ -20,7 +20,9 @@ Item {
     readonly property var pageOrder: ["HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS"]
     readonly property var pageNames: ["首页", "画面捕获", "文字识别", "翻译", "字幕叠加", "缓存", "设置"]
     readonly property int currentIndex: Math.max(0, pageOrder.indexOf(workbench.currentPage))
-    readonly property int navWidth: width < 1080 ? 178 : 194
+    readonly property int navWidth: width < 1080 ? 184 : 204
+    readonly property bool fullScenePage: workbench.currentPage === "HOME"
+                                         || workbench.currentPage === "SETTINGS"
     property int transitionSerial: 0
 
     function pageName(page) {
@@ -51,7 +53,7 @@ Item {
 
     AzureTheme {
         id: theme
-        dark: root.workbench.effectiveTheme === "dark"
+        dark: true
         reducedMotion: root.reducedMotion
     }
 
@@ -95,6 +97,41 @@ Item {
             Layout.fillHeight: true
             clip: true
 
+                Shape {
+                    id: railBottomPlane
+                    x: 0
+                    y: parent.height * 0.61
+                    width: root.navWidth
+                    height: parent.height * 0.27
+                    antialiasing: true
+                    ShapePath {
+                        fillColor: "#0b2b6c"
+                        strokeWidth: 0
+                        startX: 0; startY: 0
+                        PathLine { x: railBottomPlane.width; y: railBottomPlane.height * 0.12 }
+                        PathLine { x: railBottomPlane.width * 0.65; y: railBottomPlane.height }
+                        PathLine { x: 0; y: railBottomPlane.height }
+                        PathLine { x: 0; y: 0 }
+                    }
+                }
+                Shape {
+                    id: railCyanPlane
+                    x: 0
+                    y: parent.height * 0.74
+                    width: root.navWidth * 0.62
+                    height: parent.height * 0.12
+                    antialiasing: true
+                    ShapePath {
+                        fillColor: "#05bde9"
+                        strokeWidth: 0
+                        startX: 0; startY: 0
+                        PathLine { x: railCyanPlane.width * 0.48; y: 0 }
+                        PathLine { x: railCyanPlane.width; y: railCyanPlane.height }
+                        PathLine { x: 0; y: railCyanPlane.height }
+                        PathLine { x: 0; y: 0 }
+                    }
+                }
+
             Shape {
                 anchors.right: parent.right
                 width: 18
@@ -114,9 +151,9 @@ Item {
                 anchors.fill: parent
                 anchors.leftMargin: root.width < 1080 ? 10 : 14
                 anchors.rightMargin: 7
-                anchors.topMargin: 16
+                    anchors.topMargin: 18
                 anchors.bottomMargin: 12
-                spacing: 9
+                spacing: root.height < 760 ? 5 : 9
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -172,13 +209,18 @@ Item {
                         required property var modelData
                         objectName: "azureNavigationButton" + index
                         Layout.fillWidth: true
-                        Layout.leftMargin: [0, 12, 3, 15, 1, 13, 4][index]
+                        Layout.preferredHeight: root.height < 760 ? 50 : 62
+                        Layout.minimumHeight: root.height < 760 ? 50 : 62
+                        Layout.maximumHeight: root.height < 760 ? 50 : 62
+                        Layout.leftMargin: [0, 14, 3, 18, 1, 15, 4][index]
                         Layout.rightMargin: 8
                         theme: theme
                         number: String(index + 1).padStart(2, "0")
                         code: String(modelData)
                         text: root.pageNames[index]
                         selected: root.workbench.currentPage === modelData
+                        selectedFontSize: root.height < 760 ? 30 : 38
+                        idleFontSize: root.height < 760 ? 16 : 20
                         onClicked: root.requestPage(String(modelData))
                         Accessible.description: "切换到" + text
                     }
@@ -233,22 +275,25 @@ Item {
             clip: true
 
             ColumnLayout {
+                id: workspaceColumn
                 anchors.fill: parent
-                anchors.leftMargin: root.width < 1080 ? 14 : 20
-                anchors.rightMargin: root.width < 1080 ? 14 : 20
-                anchors.topMargin: 8
-                anchors.bottomMargin: 8
-                spacing: 8
+                anchors.leftMargin: root.fullScenePage ? 0 : (root.width < 1080 ? 14 : 20)
+                anchors.rightMargin: root.fullScenePage ? 0 : (root.width < 1080 ? 14 : 20)
+                anchors.topMargin: root.fullScenePage ? 0 : 8
+                anchors.bottomMargin: root.fullScenePage ? 0 : 8
+                spacing: root.fullScenePage ? 0 : 8
 
                 RowLayout {
                     objectName: "azureActionBar"
+                    visible: !root.fullScenePage
                     Layout.fillWidth: true
                     Layout.preferredHeight: 42
                     spacing: 8
                     Text {
+                        objectName: "azureActionBarTitle"
                         text: String(root.currentIndex + 1).padStart(2, "0")
                               + "  /  " + root.pageName(root.workbench.currentPage).toUpperCase()
-                        color: theme.accentText
+                        color: "#dce7ff"
                         font.family: theme.monoFontFor(text)
                         font.pixelSize: 11
                         font.letterSpacing: 1
@@ -256,24 +301,29 @@ Item {
                         elide: Text.ElideRight
                     }
                     Text {
+                        objectName: "azureActionBarDirtyText"
                         visible: root.workbench.settingsDirty
                         text: "● 有未应用更改"
-                        color: theme.amber
+                        color: "#ffd16d"
                         font.family: theme.uiFontFor(text)
                         font.pixelSize: 12
                     }
                     AzureButton {
-                        objectName: "azureSaveAllButton"
+                        objectName: root.fullScenePage
+                                    ? "azureHiddenGlobalSaveAllButton" : "azureSaveAllButton"
                         theme: theme
                         text: "应用更改"
                         enabled: root.workbench.hasProfile
+                        visible: !root.fullScenePage
                         implicitHeight: 36
                         onClicked: root.workbench.saveAll()
                     }
                     AzureButton {
-                        objectName: "azureStartLiveButton"
+                        objectName: root.fullScenePage
+                                    ? "azureHiddenGlobalStartLiveButton" : "azureStartLiveButton"
                         theme: theme
                         visible: root.workbench.currentPage !== "HOME"
+                                 && root.workbench.currentPage !== "SETTINGS"
                         primary: true
                         text: root.startPending ? "正在准备…" : root.workbench.startButtonText
                         enabled: root.workbench.runPhase !== "stopping"
@@ -296,6 +346,13 @@ Item {
                         opacity: 1
                         transform: Translate {
                             x: root.reducedMotion ? 0 : (1 - pageSurface.opacity) * 12
+                        }
+
+                        Rectangle {
+                            objectName: "azureLegacyPageBacking"
+                            anchors.fill: parent
+                            visible: !root.fullScenePage
+                            color: root.legacyTheme.paper
                         }
 
                         StackLayout {
@@ -349,6 +406,8 @@ Item {
                                 objectName: "azureSettingsPage"
                                 theme: theme
                                 workbench: root.workbench
+                                startPending: root.startPending
+                                onRequestLiveToggle: root.requestLiveToggle()
                                 onVisualAction: action => root.visualAction(action)
                             }
                         }
@@ -364,8 +423,11 @@ Item {
                 }
 
                 Rectangle {
+                    id: statusBar
+                    objectName: "azureGlobalStatusBar"
                     Layout.fillWidth: true
                     Layout.preferredHeight: 28
+                    visible: !root.fullScenePage
                     color: "transparent"
                     Rectangle {
                         anchors.left: parent.left
@@ -377,11 +439,12 @@ Item {
                              : root.workbench.statusTone === "success" ? theme.accent : theme.spectrum
                     }
                     Text {
+                        objectName: "azureGlobalStatusText"
                         anchors.fill: parent
                         anchors.leftMargin: 12
                         anchors.rightMargin: 8
                         text: root.workbench.statusText
-                        color: theme.textSoft
+                        color: "#dce7ff"
                         font.family: theme.uiFontFor(text)
                         font.pixelSize: 11
                         verticalAlignment: Text.AlignVCenter

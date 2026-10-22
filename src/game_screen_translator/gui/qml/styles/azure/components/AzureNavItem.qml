@@ -8,9 +8,14 @@ Button {
     required property string number
     property bool selected: false
     property string code: ""
+    property int selectedFontSize: 38
+    property int idleFontSize: 20
+    readonly property int fittedSelectedFontSize: Math.min(
+        selectedFontSize,
+        Math.max(18, Math.floor((Math.max(0, width - 47) / Math.max(1, text.length)) * 0.92)))
     hoverEnabled: true
     implicitWidth: 148
-    implicitHeight: 48
+    implicitHeight: 62
     padding: 10
     Accessible.role: Accessible.PageTab
     Accessible.name: number + " " + text
@@ -18,14 +23,14 @@ Button {
     contentItem: Row {
         x: 8
         width: Math.max(0, control.width - 16)
-        spacing: 11
+        spacing: 9
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: control.number
             color: control.selected ? control.theme.accent : control.theme.navigationTextDim
             font.family: control.theme.monoFontFor(text)
-            font.pixelSize: control.selected ? 15 : 11
-            font.weight: control.selected ? Font.Bold : Font.Normal
+            font.pixelSize: control.selected ? 19 : 13
+            font.weight: control.selected ? Font.Black : Font.DemiBold
         }
         Text {
             anchors.verticalCenter: parent.verticalCenter
@@ -33,14 +38,25 @@ Button {
             text: control.text
             color: control.selected ? control.theme.ink : control.theme.navigationText
             font.family: control.theme.uiFontFor(text)
-            font.pixelSize: control.selected ? 20 : 14
-            font.weight: control.selected ? Font.DemiBold : Font.Normal
+            font.pixelSize: control.selected ? control.fittedSelectedFontSize : control.idleFontSize
+            font.weight: control.selected ? Font.Black : Font.Bold
+            font.italic: true
             elide: Text.ElideRight
         }
     }
 
     background: Shape {
         antialiasing: true
+        ShapePath {
+            fillColor: control.selected ? control.theme.spectrum : "transparent"
+            strokeWidth: 0
+            startX: 4; startY: 4
+            PathLine { x: control.width - 11; y: 4 }
+            PathLine { x: control.width + 2; y: control.height + 4 }
+            PathLine { x: 15; y: control.height + 4 }
+            PathLine { x: 4; y: 15 }
+            PathLine { x: 4; y: 4 }
+        }
         ShapePath {
             fillColor: control.selected ? "#f6f8ff"
                      : control.hovered || control.visualFocus ? "#203568" : "transparent"
@@ -68,6 +84,14 @@ Button {
         width: 3
         height: control.selected ? 26 : 0
         color: control.theme.spectrum
+        visible: control.selected
+    }
+    Rectangle {
+        x: -2
+        y: control.height * 0.48
+        width: 9
+        height: 3
+        color: "#ff3153"
         visible: control.selected
     }
 }

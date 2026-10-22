@@ -3401,10 +3401,41 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
         ),
     )
 
+    log_path = tmp_path / "output" / "live.log"
+    log_path.parent.mkdir()
+    stats = LiveLatencyStats()
+    for kind in ("roi", "full"):
+        stats.record_ocr_pipeline(
+            scan_kind=kind,
+            scan_label="局部 ROI" if kind == "roi" else "整帧回退",
+            change_activity_seconds=0.1,
+            scheduling_seconds=0.05,
+            preparation_seconds=0.01,
+            worker_queue_seconds=0,
+            ocr_seconds=0.2,
+            collection_seconds=0.01,
+            processing_seconds=0.02,
+        )
+    stats.record_translation(
+        stability_seconds=0.1,
+        queue_seconds=0.002,
+        llm_seconds=1.2,
+        total_seconds=1.8,
+        batch_size=2,
+    )
+    log_path.write_text(
+        "诊断测试夹具：不代表真实翻译运行。\n实时统计：OCR 2 次\n"
+        + "延迟统计：" + stats.render().replace("\n", "；") + "\n"
+        + stats.render_ocr_summary() + "\n",
+        encoding="utf-8",
+    )
+
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
     controller.selectProfile(controller.profileIds.index("game"))
     controller.setTheme("dark")
     controller.setReducedMotion(True)
+    controller.refreshStats()
+    assert controller.latencyDiagnostics["available"] is True
     host = QmlWorkbenchHost(controller, application=app)
     try:
         window = host.window
@@ -3424,6 +3455,26 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
             assert item is not None and item.isVisible(), name
             click(item)
             return item
+
+        def assert_settings_feedback_layout() -> QQuickItem:
+            page = _find_quick_item(window, "azureSettingsPage")
+            work_area = _find_quick_item(window, "azureSettingsWorkArea")
+            action_row = _find_quick_item(window, "azureSettingsActionRow")
+            feedback = _find_quick_item(window, "azureSettingsSaveFeedbackText")
+            diagnostic_action = _find_quick_item(window, "azureSettingsExpandDiagnostics")
+            assert page is not None and work_area is not None and action_row is not None
+            assert feedback is not None and feedback.isVisible()
+            assert diagnostic_action is not None and diagnostic_action.isVisible()
+            action_top = action_row.mapToItem(page, QPointF(0, 0)).y()
+            work_origin = work_area.mapToItem(page, QPointF(0, 0))
+            assert action_top >= work_origin.y() + work_area.height() - 1
+            assert action_top + action_row.height() <= page.height() + 1
+            diagnostic_bottom = diagnostic_action.mapToItem(
+                page, QPointF(0, diagnostic_action.height())
+            ).y()
+            assert diagnostic_bottom <= action_top
+            assert feedback.width() >= 145
+            return feedback
 
         def wheel(item: QQuickItem, delta: int) -> None:
             position = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
@@ -3458,12 +3509,61 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
         assert load_gui_preferences(config_path).theme == "dark"
         assert _find_quick_item(window, "azureNavigationRail") is not None
 
+        # Real clicks select every navigation destination; the selected CJK
+        # label must still fit its text item at the minimum window width.
+        expected_pages = (
+            "首页", "画面捕获", "文字识别", "翻译", "字幕叠加", "缓存", "设置"
+        )
+
+        def descendants(item: QQuickItem):
+            for child in item.childItems():
+                yield child
+                yield from descendants(child)
+
+        for index, (page, label_text) in enumerate(
+            zip(("HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS"), expected_pages)
+        ):
+            nav_item = click_named(f"azureNavigationButton{index}")
+            assert controller.currentPage == page
+            assert nav_item.property("selected") is True
+            label = next(
+                child for child in descendants(nav_item)
+                if child.property("text") == label_text
+            )
+            assert label.property("implicitWidth") <= label.width() + 1, (
+                label_text, label.property("implicitWidth"), label.width()
+            )
+            legacy_backing = _find_quick_item(window, "azureLegacyPageBacking")
+            assert legacy_backing is not None
+            assert legacy_backing.isVisible() is (page not in ("HOME", "SETTINGS"))
+        click_named("azureNavigationButton0")
+
         # The lower HOME controls remain reachable by scrolling the real page.
         home_scroll = _find_quick_item(window, "azureHomeScroll")
         assert home_scroll is not None
         assert home_scroll.property("contentHeight") > home_scroll.height()
         click_named("azureManageProfilesButton")
         assert home_scroll.property("contentY") > 0
+        home_control_panel = _find_quick_item(window, "azureHomeControlPanel")
+        assert home_control_panel is not None
+        for name in (
+            "azureHomeProfileSelector",
+            "azureHomeSkinSelector",
+            "azureHomeThemeSelector",
+            "azureHomeReduceMotionToggle",
+            "azureHomeStartupToggle",
+            "azureHotkeyField",
+            "azureHotkeyBehaviorSelector",
+            "azureHotkeyRecordButton",
+            "azureHotkeyDefaultButton",
+        ):
+            control = _find_quick_item(window, name)
+            assert control is not None, name
+            control_origin = control.mapToScene(QPointF(0, 0))
+            assert control_origin.x() >= 0, (name, control_origin.x())
+            assert control_origin.x() + control.width() <= window.width() + 0.5, (
+                name, control_origin.x(), control.width(), window.width()
+            )
         record_button = _find_quick_item(window, "azureHotkeyRecordButton")
         assert record_button is not None and record_button.isVisible()
         record_position = record_button.mapToScene(
@@ -3483,6 +3583,20 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
         # that Azure preserves the source page's parameter visibility rules.
         click_named("azureNavigationButton6")
         assert controller.currentPage == "SETTINGS"
+        initial_feedback = assert_settings_feedback_layout()
+        assert controller.settingsDirty is False
+        assert initial_feedback.property("text") == controller.statusText
+        # The full-width bottom feedback/action strip stays below the settings
+        # work area at both supported sizes, leaving diagnostics and controls
+        # unobstructed.
+        window.resize(1280, 820)
+        QTest.qWait(35)
+        app.processEvents()
+        assert_settings_feedback_layout()
+        window.resize(980, 700)
+        QTest.qWait(35)
+        app.processEvents()
+        initial_feedback = assert_settings_feedback_layout()
         controller.setTriggerMethodIndex(2)
         app.processEvents()
         assert not _find_quick_item(window, "azureSettingsPollFpsRow").isVisible()
@@ -3500,24 +3614,32 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
         ):
             assert _find_quick_item(window, name).isVisible(), name
 
-        # Scroll the embedded diagnostic view with wheel input and expose the
-        # complete real Profile/OCR/translation summary in the modal.
+        # The inline panel shows one authentic OCR, translation and total
+        # latency metric. Complete raw strings remain in the expanded dialog.
         embedded_diagnostics = _find_quick_item(
             window, "azureSettingsDiagnosticsScroll"
         )
         assert embedded_diagnostics is not None
-        assert embedded_diagnostics.property("contentHeight") > embedded_diagnostics.height()
-        for _ in range(16):
-            wheel(embedded_diagnostics, -120)
-            if embedded_diagnostics.property("contentY") > 0:
-                break
-        assert embedded_diagnostics.property("contentY") > 0
+        diagnostics = controller.latencyDiagnostics
+        assert embedded_diagnostics.property("contentHeight") <= embedded_diagnostics.height()
+        for name, source, marker in (
+            ("azureSettingsOcrLatency", diagnostics["ocr"], "OCR："),
+            ("azureSettingsTranslationLatency", diagnostics["translation"], "LLM 请求"),
+            ("azureSettingsLatencySummary", diagnostics["summary"], "最近总延迟"),
+        ):
+            metric = _find_quick_item(window, name)
+            assert metric is not None and metric.isVisible()
+            expected_metric = next(line for line in source.splitlines() if marker in line)
+            assert metric.property("text") == expected_metric
 
         increase = _find_quick_item(window, "OCR 冷却IncreaseButton")
         assert increase is not None and increase.isVisible()
         starting_cooldown = controller.ocrCooldownMs
         click(increase)
         assert controller.ocrCooldownMs == starting_cooldown + 50
+        assert controller.settingsDirty is True
+        feedback = assert_settings_feedback_layout()
+        assert feedback.property("text") == "有未应用更改 · 点击应用更改后生效"
 
         value_field = _find_quick_item(window, "OCR 冷却ValueField")
         assert value_field is not None and value_field.isVisible()
@@ -3532,6 +3654,9 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
         click_named("azureSaveAllButton")
         assert controller.ocrCooldownMs == starting_cooldown + 50
         assert value_field.property("text") == str(starting_cooldown + 50)
+        assert controller.settingsDirty is False
+        assert feedback.property("text") == controller.statusText
+        assert str(feedback.property("text")).startswith("已应用")
 
         field_position = value_field.mapToScene(
             QPointF(value_field.width() / 2, value_field.height() / 2)
@@ -3564,9 +3689,45 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
             assert field.property("text") == expected, name
             assert field.property("readOnly") is True, name
             assert field.property("selectByMouse") is True, name
+        full_scroll = _find_quick_item(window, "azureFullDiagnosticsScroll")
+        assert full_scroll is not None
+        full_scroll_content = full_scroll.property("contentItem")
+        assert isinstance(full_scroll_content, QQuickItem)
+        assert full_scroll.property("contentHeight") > full_scroll.height()
+        for _ in range(16):
+            wheel(full_scroll, -120)
+            if full_scroll_content.property("contentY") > 0:
+                break
+        assert full_scroll_content.property("contentY") > 0
         QTest.keyClick(window, Qt.Key.Key_Escape)
         app.processEvents()
         assert full_dialog.property("visible") is False
+
+        # A change made on SETTINGS remains visible in the shared shell when
+        # navigating to an older page, including its title, dirty marker and
+        # status text. The global Apply button then clears the dirty marker.
+        controller.setDebugEnabled(not controller.debugEnabled)
+        assert controller.settingsDirty is True
+        click_named("azureNavigationButton2")
+        action_title = _find_quick_item(window, "azureActionBarTitle")
+        dirty_text = _find_quick_item(window, "azureActionBarDirtyText")
+        status_text = _find_quick_item(window, "azureGlobalStatusText")
+        assert action_title is not None and "文字识别" in action_title.property("text")
+        assert QColor(action_title.property("color")).name() == "#dce7ff"
+        assert dirty_text is not None and dirty_text.isVisible()
+        assert QColor(dirty_text.property("color")).name() == "#ffd16d"
+        assert status_text is not None and status_text.isVisible()
+        assert QColor(status_text.property("color")).name() == "#dce7ff"
+        assert status_text.property("text") == controller.statusText
+        visible_apply_buttons = [
+            item for item in descendants(window.contentItem())
+            if item.objectName() == "azureSaveAllButton" and item.isVisible()
+        ]
+        assert len(visible_apply_buttons) == 1
+        click(visible_apply_buttons[0])
+        assert controller.settingsDirty is False
+        assert dirty_text.isVisible() is False
+        assert status_text.property("text") == controller.statusText
 
         # Select a second real Profile through HOME and verify bound values
         # refresh after a different runtime configuration is loaded.

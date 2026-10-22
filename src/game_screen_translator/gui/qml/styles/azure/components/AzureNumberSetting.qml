@@ -17,10 +17,30 @@ Item {
     property int stagger: 0
     signal edited(int value)
     signal activated(string key)
-    implicitHeight: 52
+    implicitHeight: 48
     Layout.fillWidth: true
 
     Shape {
+        id: selectionOffset
+        x: 5
+        y: 4
+        width: root.width - 2
+        height: root.height
+        visible: root.highlighted
+        antialiasing: true
+        ShapePath {
+            fillColor: root.theme.spectrum
+            strokeWidth: 0
+            startX: 0; startY: 0
+            PathLine { x: selectionOffset.width - 12; y: 0 }
+            PathLine { x: selectionOffset.width; y: selectionOffset.height }
+            PathLine { x: 0; y: selectionOffset.height }
+            PathLine { x: 0; y: 0 }
+        }
+    }
+
+    Shape {
+        id: selectionShape
         anchors.fill: parent
         visible: root.highlighted
         antialiasing: true
@@ -34,15 +54,23 @@ Item {
             PathLine { x: 0; y: 0 }
         }
     }
-    Rectangle {
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: root.highlighted ? 8 : 0
-        color: root.theme.spectrum
+    Shape {
+        id: highlightPointer
+        x: 0
+        y: 10
+        width: 11
+        height: 31
         visible: root.highlighted
+        antialiasing: true
+        ShapePath {
+            fillColor: "#ff3153"
+            strokeWidth: 0
+            startX: 0; startY: 0
+            PathLine { x: highlightPointer.width; y: highlightPointer.height * 0.5 }
+            PathLine { x: 0; y: highlightPointer.height }
+            PathLine { x: 0; y: 0 }
+        }
     }
-
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 13 + root.stagger
@@ -56,7 +84,7 @@ Item {
                 text: root.title
                 color: root.highlighted ? "#ffffff" : root.theme.text
                 font.family: root.theme.uiFontFor(text)
-                font.pixelSize: root.highlighted ? 14 : 13
+                font.pixelSize: root.highlighted ? 17 : 14
                 font.weight: root.highlighted ? Font.DemiBold : Font.Medium
                 elide: Text.ElideRight
                 Layout.fillWidth: true

@@ -37,6 +37,7 @@ Item {
             text: "−"
             quiet: true
             onAccent: root.highlighted
+            font.pixelSize: 18
             implicitWidth: 38
             Layout.preferredHeight: 32
             Accessible.name: root.accessibleName + " 减少"
@@ -45,8 +46,8 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 32
-            color: root.theme.inputSurface
-            border.color: root.theme.line
+            color: root.highlighted ? "transparent" : root.theme.inputSurface
+            border.color: root.highlighted ? "transparent" : root.theme.line
             clip: true
             TextField {
                 id: valueField
@@ -54,7 +55,7 @@ Item {
                 leftPadding: 5
                 rightPadding: 5
                 text: String(root.value)
-                color: root.theme.text
+                color: root.highlighted ? "#ffffff" : root.theme.text
                 selectedTextColor: "#ffffff"
                 selectionColor: root.theme.accent
                 horizontalAlignment: Text.AlignHCenter
@@ -81,7 +82,7 @@ Item {
             Layout.preferredWidth: 38
             Layout.preferredHeight: 32
             text: root.suffix
-            color: root.highlighted ? "#dce8ff" : root.theme.textSoft
+            color: root.highlighted ? "#ffffff" : root.theme.textSoft
             font.family: root.theme.monoFontFor(text)
             font.pixelSize: 12
             verticalAlignment: Text.AlignVCenter
@@ -93,6 +94,7 @@ Item {
             text: "+"
             quiet: true
             onAccent: root.highlighted
+            font.pixelSize: 18
             implicitWidth: 38
             Layout.preferredHeight: 32
             Accessible.name: root.accessibleName + " 增加"
