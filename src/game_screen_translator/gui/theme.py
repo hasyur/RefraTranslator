@@ -27,9 +27,11 @@ THEME_OPTIONS = (
 _VALID_THEMES = frozenset(value for value, _label in THEME_OPTIONS)
 SKIN_PRISM = "prism"
 SKIN_DOHNA = "dohna"
+SKIN_AZURE = "azure"
 SKIN_OPTIONS = (
     (SKIN_PRISM, "Prism"),
     (SKIN_DOHNA, "Dohna"),
+    (SKIN_AZURE, "蓝色剪影"),
 )
 _VALID_SKINS = frozenset(value for value, _label in SKIN_OPTIONS)
 HOTKEY_BEHAVIOR_START_ONLY = "start_only"
@@ -215,7 +217,7 @@ def effective_theme(
         raise GuiSettingsError(f"未知界面主题：{preference}")
     if skin not in _VALID_SKINS:
         raise GuiSettingsError(f"未知界面皮肤：{skin}")
-    if skin == SKIN_DOHNA:
+    if skin in {SKIN_DOHNA, SKIN_AZURE}:
         return THEME_LIGHT
     if preference != THEME_SYSTEM:
         return preference

@@ -55,6 +55,10 @@ version = {attr = "game_screen_translator._version.__version__"}
   "qml/*.qml",
   "qml/components/*.qml",
   "qml/pages/*.qml",
+  "qml/styles/azure/*.qml",
+  "qml/styles/azure/components/*.qml",
+  "qml/styles/azure/pages/*.qml",
+  "qml/styles/azure/assets/*.png",
 ]
 
 [tool.pytest.ini_options]

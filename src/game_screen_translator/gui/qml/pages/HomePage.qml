@@ -12,7 +12,7 @@ Item {
     property bool pageMotionEnabled: false
     readonly property bool compactOverview: height < 580
     readonly property var themeValues: ["system", "dark", "light"]
-    readonly property var skinValues: ["prism", "dohna"]
+    readonly property var skinValues: ["prism", "dohna", "azure"]
     readonly property var hotkeyBehaviorValues: ["start_only", "toggle", "toggle_show"]
     readonly property var hotkeyBehaviorLabels: ["仅启动", "启动 / 停止翻译", "启动 / 停止并打开 GUI"]
     property bool hotkeyRecording: false
@@ -539,8 +539,8 @@ Item {
                 SettingLabel {
                     theme: root.theme
                     title: "界面皮肤"
-                    meta: "PRISM / DOHNA"
-                    description: "选择工作台的视觉皮肤；Dohna 使用固定的明亮配色。"
+                    meta: "PRISM / DOHNA / AZURE"
+                    description: "选择独立布局皮肤；Dohna 与蓝色剪影使用固定的明亮配色。"
                     settingKey: "home-skin"
                 }
                 PrismComboBox {
@@ -548,9 +548,9 @@ Item {
                     objectName: "homeSkinSelector"
                     theme: root.theme
                     accessibleName: "界面皮肤"
-                    settingDescription: "选择工作台的视觉皮肤；Dohna 使用固定的明亮配色。"
+                    settingDescription: "选择独立布局皮肤；Dohna 与蓝色剪影使用固定的明亮配色。"
                     settingKey: "home-skin"
-                    model: ["Prism", "Dohna"]
+                    model: ["Prism", "Dohna", "蓝色剪影"]
                     currentIndex: Math.max(0, root.skinValues.indexOf(root.workbench.skinPreference))
                     Layout.fillWidth: true
                     onActivated: index => {

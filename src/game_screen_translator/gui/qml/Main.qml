@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import QtQuick.Window
 import "components"
 import "pages"
+import "styles/azure"
 
 ApplicationWindow {
     id: root
@@ -16,7 +17,10 @@ ApplicationWindow {
     height: 820
     minimumWidth: prism.dohna ? navigationRail.implicitWidth + 802 : 980
     minimumHeight: 700
-    title: "RefraTranslator · Prism Workbench"
+    title: root.boundWorkbench.skinPreference === "azure"
+           ? "RefraTranslator · Azure"
+           : root.boundWorkbench.skinPreference === "dohna"
+             ? "RefraTranslator · Dohna" : "RefraTranslator · Prism Workbench"
 
     // The sole context property is intentionally injected by QmlWorkbenchHost.
     // qmllint disable unqualified
@@ -272,6 +276,7 @@ ApplicationWindow {
     }
 
     background: Rectangle {
+        visible: root.boundWorkbench.skinPreference !== "azure"
         gradient: Gradient {
             GradientStop { position: 0; color: prism.backgroundTop }
             GradientStop { position: 0.62; color: prism.dohna ? prism.inkRaised : prism.paper }
@@ -315,7 +320,27 @@ ApplicationWindow {
         }
     }
 
+    Loader {
+        id: azureShellLoader
+        objectName: "azureWorkbenchShellLoader"
+        anchors.fill: parent
+        active: root.boundWorkbench.skinPreference === "azure"
+        sourceComponent: Component {
+            AzureShell {
+                objectName: "azureWorkbenchShell"
+                anchors.fill: parent
+                workbench: root.boundWorkbench
+                legacyTheme: prism
+                reducedMotion: root.boundWorkbench.reducedMotion
+                startPending: root.startPreludePending
+                onRequestLiveToggle: root.requestLiveToggle()
+                onVisualAction: action => root.pulseVisualAction(action)
+            }
+        }
+    }
+
     RowLayout {
+        visible: root.boundWorkbench.skinPreference !== "azure"
         anchors.fill: parent
         spacing: 0
 

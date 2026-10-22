@@ -375,7 +375,7 @@ class QmlWorkbenchHost(QObject):
         if window is None:
             return
         skin = getattr(self._controller, "skinPreference", "prism")
-        preference = "light" if skin == "dohna" else self._controller.themePreference
+        preference = "light" if skin in {"dohna", "azure"} else self._controller.themePreference
         effective_theme = self._controller.effectiveTheme
         signature = (id(window), skin, preference, effective_theme)
         if not force and signature == self._last_theme_signature:

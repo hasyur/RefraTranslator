@@ -43,6 +43,7 @@ from game_screen_translator.gui.qml_workbench import QmlWorkbenchHost
 from game_screen_translator.gui.theme import (
     HOTKEY_BEHAVIOR_TOGGLE,
     HOTKEY_BEHAVIOR_TOGGLE_SHOW,
+    SKIN_AZURE,
     SKIN_DOHNA,
     SKIN_PRISM,
     load_gui_preferences,
@@ -2430,8 +2431,17 @@ def test_real_skin_dropdown_highlight_uses_skin_specific_surface(
     host.shutdown()
 
 
-@pytest.mark.parametrize("skin", [SKIN_PRISM, SKIN_DOHNA])
-def test_profile_delete_dialog_cancel_confirm_and_empty_state(tmp_path: Path, skin: str) -> None:
+@pytest.mark.parametrize("skin", [SKIN_PRISM, SKIN_DOHNA, SKIN_AZURE])
+def test_profile_delete_dialog_cancel_confirm_and_empty_state(
+    tmp_path: Path,
+    skin: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        host_module.WindowsGlobalHotkey,
+        "register",
+        lambda *_args, **_kwargs: False,
+    )
     app = _application()
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
@@ -2445,39 +2455,129 @@ def test_profile_delete_dialog_cancel_confirm_and_empty_state(tmp_path: Path, sk
         app.processEvents()
         window = host.window
         assert window is not None
-        delete_button = window.findChild(QObject, "openDeleteProfileDialogButton")
-        dialog = window.findChild(QObject, "deleteProfileDialog")
+        if skin == SKIN_AZURE:
+            _click_quick_item(window, "azureManageProfilesButton")
+            delete_button = window.findChild(QObject, "azureDeleteProfileButton")
+            dialog = window.findChild(QObject, "azureDeleteProfileDialog")
+            reject_button_name = "azureDeleteProfileCancelButton"
+            accept_button_name = "azureDeleteProfileConfirmButton"
+        else:
+            delete_button = window.findChild(QObject, "openDeleteProfileDialogButton")
+            dialog = window.findChild(QObject, "deleteProfileDialog")
+            reject_button_name = "deleteProfileDialogRejectButton"
+            accept_button_name = "deleteProfileDialogAcceptButton"
         assert delete_button is not None
         assert dialog is not None
-        _click_quick_item(window, "openDeleteProfileDialogButton")
+        _click_quick_item(window, delete_button.objectName())
         assert dialog.property("visible") is True
         assert dialog.property("profileId") == "game"
         assert dialog.property("profileName") == "测试游戏"
-        _click_quick_item(window, "deleteProfileDialogRejectButton")
+        _click_quick_item(window, reject_button_name)
         assert profile.settings_path.is_file()
         assert controller.hasProfile is True
         assert dialog.property("visible") is False
 
-        _click_quick_item(window, "openDeleteProfileDialogButton")
+        _click_quick_item(window, delete_button.objectName())
         controller._live_process = SimpleNamespace(poll=lambda: None)
         controller.stateChanged.emit()
         app.processEvents()
         assert delete_button.property("enabled") is False
-        assert dialog.property("acceptEnabled") is False
+        if skin == SKIN_AZURE:
+            confirm_button = window.findChild(QObject, accept_button_name)
+            assert confirm_button is not None
+            assert confirm_button.property("enabled") is False
+        else:
+            assert dialog.property("acceptEnabled") is False
         controller._live_process = None
         controller.stateChanged.emit()
         app.processEvents()
-        _click_quick_item(window, "deleteProfileDialogAcceptButton")
+        _click_quick_item(window, accept_button_name)
         assert dialog.property("visible") is False
         assert not profile.directory.exists()
         assert controller.hasProfile is False
         assert delete_button.property("enabled") is False
-        selector = window.findChild(QObject, "homeProfileSelector")
+        selector_name = (
+            "azureHomeProfileSelector" if skin == SKIN_AZURE else "homeProfileSelector"
+        )
+        selector = window.findChild(QObject, selector_name)
         assert selector.property("currentIndex") == -1
         assert selector.property("enabled") is False
         assert load_gui_preferences(config_path).last_profile_id == ""
     finally:
         controller._live_process = None
+        host.shutdown()
+
+
+def test_azure_primary_button_and_toggle_show_keyboard_focus(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        host_module.WindowsGlobalHotkey,
+        "register",
+        lambda *_args, **_kwargs: False,
+    )
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(config_path, load_config(config_path), "game", display_name="测试游戏")
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_AZURE)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        host.show()
+        app.processEvents()
+        window = host.window
+        assert window is not None
+        window.resize(980, 700)
+        host.show()
+        app.processEvents()
+
+        _click_quick_item(window, "azureManageProfilesButton")
+        primary_button = _find_quick_item(window, "azureCreateProfileButton")
+        startup_toggle = _find_quick_item(window, "azureHomeStartupToggle")
+        assert primary_button is not None and primary_button.isVisible()
+        assert startup_toggle is not None and startup_toggle.isVisible()
+
+        home_navigation = _find_quick_item(window, "azureNavigationButton0")
+        assert home_navigation is not None
+        home_navigation.forceActiveFocus(Qt.FocusReason.TabFocusReason)
+        for _ in range(30):
+            QTest.keyClick(window, Qt.Key.Key_Tab)
+            app.processEvents()
+            if primary_button.property("visualFocus") is True:
+                break
+        assert primary_button.property("visualFocus") is True
+        button_background = primary_button.property("background")
+        assert isinstance(button_background, QObject)
+        assert QQmlProperty(button_background, "border.width").read() == 3
+        assert QColor(QQmlProperty(button_background, "border.color").read()) == QColor(
+            "#05bde9"
+        )
+
+        for _ in range(20):
+            QTest.keyClick(window, Qt.Key.Key_Tab)
+            app.processEvents()
+            if startup_toggle.property("visualFocus") is True:
+                break
+        assert startup_toggle.property("visualFocus") is True
+        indicator = startup_toggle.property("indicator")
+        assert isinstance(indicator, QObject)
+        assert QQmlProperty(indicator, "border.width").read() == 3
+        assert QColor(QQmlProperty(indicator, "border.color").read()) == QColor(
+            "#05bde9"
+        )
+        assert controller.reducedMotion is True
+
+        QTest.keyClick(window, Qt.Key.Key_Backtab)
+        app.processEvents()
+        assert startup_toggle.property("visualFocus") is False
+        QTest.keyClick(window, Qt.Key.Key_Tab)
+        app.processEvents()
+        assert startup_toggle.property("visualFocus") is True
+        assert controller.startWithWindows is False
+    finally:
         host.shutdown()
 
 
@@ -3262,6 +3362,248 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
         assert theme_selector.property("currentText") == label
         assert theme_selector.property("enabled") is True
     host.shutdown()
+
+
+def test_real_azure_skin_home_settings_and_diagnostics_user_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        host_module.WindowsGlobalHotkey,
+        "register",
+        lambda *_args, **_kwargs: False,
+    )
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    machine_config = load_config(config_path)
+    create_game_profile(
+        config_path,
+        machine_config,
+        "game",
+        display_name="主配置",
+    )
+    second_profile = create_game_profile(
+        config_path,
+        machine_config,
+        "second",
+        display_name="第二配置",
+    )
+    save_profile_runtime_settings(
+        second_profile,
+        replace(
+            machine_config,
+            live=replace(
+                machine_config.live,
+                dynamic_roi_enabled=False,
+                ocr_cooldown_ms=650,
+            ),
+        ),
+    )
+
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.selectProfile(controller.profileIds.index("game"))
+    controller.setTheme("dark")
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        window = host.window
+        assert window is not None
+        window.resize(980, 700)
+        host.show()
+        QTest.qWait(40)
+        app.processEvents()
+
+        def click(item: QQuickItem) -> None:
+            position = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=position)
+            app.processEvents()
+
+        def click_named(name: str) -> QQuickItem:
+            item = _find_quick_item(window, name)
+            assert item is not None and item.isVisible(), name
+            click(item)
+            return item
+
+        def wheel(item: QQuickItem, delta: int) -> None:
+            position = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
+            QTest.mouseMove(window, position.toPoint())
+            QTest.qWait(10)
+            event = QWheelEvent(
+                position,
+                QPointF(window.mapToGlobal(position.toPoint())),
+                QPoint(0, 0),
+                QPoint(0, delta),
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+                Qt.ScrollPhase.NoScrollPhase,
+                False,
+            )
+            QCoreApplication.sendEvent(window, event)
+            app.processEvents()
+            QTest.qWait(10)
+
+        # Switch skin using the actual HOME combo and keyboard selection.
+        old_skin_selector = _find_quick_item(window, "homeSkinSelector")
+        assert old_skin_selector is not None
+        click(old_skin_selector)
+        QTest.keyClick(window, Qt.Key.Key_Down)
+        QTest.keyClick(window, Qt.Key.Key_Down)
+        QTest.keyClick(window, Qt.Key.Key_Return)
+        app.processEvents()
+        QTest.qWait(30)
+        assert controller.skinPreference == SKIN_AZURE
+        assert controller.effectiveTheme == "light"
+        assert load_gui_preferences(config_path).skin == SKIN_AZURE
+        assert load_gui_preferences(config_path).theme == "dark"
+        assert _find_quick_item(window, "azureNavigationRail") is not None
+
+        # The lower HOME controls remain reachable by scrolling the real page.
+        home_scroll = _find_quick_item(window, "azureHomeScroll")
+        assert home_scroll is not None
+        assert home_scroll.property("contentHeight") > home_scroll.height()
+        click_named("azureManageProfilesButton")
+        assert home_scroll.property("contentY") > 0
+        record_button = _find_quick_item(window, "azureHotkeyRecordButton")
+        assert record_button is not None and record_button.isVisible()
+        record_position = record_button.mapToScene(
+            QPointF(record_button.width() / 2, record_button.height() / 2)
+        ).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=record_position)
+        app.processEvents()
+        QTest.keyClick(
+            window,
+            Qt.Key.Key_G,
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+        )
+        app.processEvents()
+        assert controller.hotkeyPreference == "Ctrl+Shift+G"
+
+        # Navigation is also a real mouse action; switching triggers verifies
+        # that Azure preserves the source page's parameter visibility rules.
+        click_named("azureNavigationButton6")
+        assert controller.currentPage == "SETTINGS"
+        controller.setTriggerMethodIndex(2)
+        app.processEvents()
+        assert not _find_quick_item(window, "azureSettingsPollFpsRow").isVisible()
+        assert not _find_quick_item(window, "azureSettingsClearAfterRow").isVisible()
+        assert _find_quick_item(window, "azureSettingsRoiResponseRow").isVisible()
+        controller.setTriggerMethodIndex(0)
+        app.processEvents()
+        assert not _find_quick_item(window, "azureSettingsRoiResponseRow").isVisible()
+        for name in (
+            "azureSettingsPollFpsRow",
+            "azureSettingsClearAfterRow",
+            "azureSettingsStableRescanRow",
+            "azureSettingsIdleRescanRow",
+            "azureSettingsOcrCooldownRow",
+        ):
+            assert _find_quick_item(window, name).isVisible(), name
+
+        # Scroll the embedded diagnostic view with wheel input and expose the
+        # complete real Profile/OCR/translation summary in the modal.
+        embedded_diagnostics = _find_quick_item(
+            window, "azureSettingsDiagnosticsScroll"
+        )
+        assert embedded_diagnostics is not None
+        assert embedded_diagnostics.property("contentHeight") > embedded_diagnostics.height()
+        for _ in range(16):
+            wheel(embedded_diagnostics, -120)
+            if embedded_diagnostics.property("contentY") > 0:
+                break
+        assert embedded_diagnostics.property("contentY") > 0
+
+        increase = _find_quick_item(window, "OCR 冷却IncreaseButton")
+        assert increase is not None and increase.isVisible()
+        starting_cooldown = controller.ocrCooldownMs
+        click(increase)
+        assert controller.ocrCooldownMs == starting_cooldown + 50
+
+        value_field = _find_quick_item(window, "OCR 冷却ValueField")
+        assert value_field is not None and value_field.isVisible()
+        field_position = value_field.mapToScene(
+            QPointF(value_field.width() / 2, value_field.height() / 2)
+        ).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=field_position)
+        QTest.keyClick(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyClick(window, Qt.Key.Key_Backspace)
+        app.processEvents()
+        assert value_field.property("text") == ""
+        click_named("azureSaveAllButton")
+        assert controller.ocrCooldownMs == starting_cooldown + 50
+        assert value_field.property("text") == str(starting_cooldown + 50)
+
+        field_position = value_field.mapToScene(
+            QPointF(value_field.width() / 2, value_field.height() / 2)
+        ).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=field_position)
+        QTest.keyClick(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        for character in "999999":
+            QTest.keyClick(window, ord(character))
+        app.processEvents()
+        assert value_field.property("text") == "999999"
+        click_named("azureSaveAllButton")
+        assert controller.ocrCooldownMs == 10_000
+        assert controller.settingsDirty is False
+        assert value_field.property("text") == "10000"
+        saved = load_game_profile(config_path, load_config(config_path), "game")
+        assert saved.runtime_settings.live.ocr_cooldown_ms == 10_000
+
+        click_named("azureSettingsExpandDiagnostics")
+        full_dialog = window.findChild(QObject, "azureFullDiagnosticsDialog")
+        assert full_dialog is not None and full_dialog.property("visible") is True
+        diagnostics = controller.latencyDiagnostics
+        for name, expected in (
+            ("azureSettingsProfileDiagnostic", controller.infoText),
+            ("azureSettingsOcrLatency", diagnostics["ocr"]),
+            ("azureSettingsTranslationLatency", diagnostics["translation"]),
+            ("azureSettingsLatencySummary", diagnostics["summary"]),
+        ):
+            field = full_dialog.findChild(QObject, name)
+            assert field is not None, name
+            assert field.property("text") == expected, name
+            assert field.property("readOnly") is True, name
+            assert field.property("selectByMouse") is True, name
+        QTest.keyClick(window, Qt.Key.Key_Escape)
+        app.processEvents()
+        assert full_dialog.property("visible") is False
+
+        # Select a second real Profile through HOME and verify bound values
+        # refresh after a different runtime configuration is loaded.
+        click_named("azureNavigationButton0")
+        profile_selector = _find_quick_item(window, "azureHomeProfileSelector")
+        assert profile_selector is not None and profile_selector.isVisible()
+        first_index = controller.currentProfileIndex
+        target_index = controller.profileIds.index("second")
+        click(profile_selector)
+        QTest.keyClick(
+            window,
+            Qt.Key.Key_Down if target_index > first_index else Qt.Key.Key_Up,
+        )
+        QTest.keyClick(window, Qt.Key.Key_Return)
+        app.processEvents()
+        assert controller.currentProfileId == "second"
+        assert controller.ocrCooldownMs == 650
+        click_named("azureNavigationButton6")
+        refreshed_field = _find_quick_item(window, "OCR 冷却ValueField")
+        assert refreshed_field is not None
+        assert refreshed_field.property("text") == "650"
+
+        # Return to Prism and prove its dark-theme preference survived Azure.
+        click_named("azureNavigationButton0")
+        azure_skin_selector = _find_quick_item(window, "azureHomeSkinSelector")
+        assert azure_skin_selector is not None
+        click(azure_skin_selector)
+        QTest.keyClick(window, Qt.Key.Key_Up)
+        QTest.keyClick(window, Qt.Key.Key_Up)
+        QTest.keyClick(window, Qt.Key.Key_Return)
+        app.processEvents()
+        preferences = load_gui_preferences(config_path)
+        assert controller.skinPreference == SKIN_PRISM
+        assert preferences.skin == SKIN_PRISM
+        assert controller.themePreference == preferences.theme == "dark"
+    finally:
+        host.shutdown()
 
 
 def test_real_dohna_titles_enter_opposite_content_on_every_page(tmp_path: Path) -> None:

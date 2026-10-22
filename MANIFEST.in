@@ -23,7 +23,7 @@ include tests/test_*.py
 include tests/integration/test_*.py
 include tests/manual/animated_ocr_scenes.py
 include tests/manual/README.md
-recursive-include src/game_screen_translator/gui/qml *.qml
+recursive-include src/game_screen_translator/gui/qml *.qml *.png
 prune scripts
 prune .local-tools
 prune .cache
