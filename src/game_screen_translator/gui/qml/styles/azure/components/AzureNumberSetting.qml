@@ -15,10 +15,19 @@ Item {
     property bool highlighted: false
     property string settingKey: ""
     property int stagger: 0
+    readonly property real stepperPreferredWidth: root.highlighted ? 250 : 184
+    readonly property real stepperMinimumWidth: root.highlighted ? 248 : 180
+    readonly property real layoutRowWidth: parent
+                                               ? Math.max(0, Math.min(parent.width - root.stagger,
+                                                   root.highlighted ? 520 : (parent.width < 500 ? 360 : 430)))
+                                               : 0
     signal edited(int value)
     signal activated(string key)
     implicitHeight: 48
-    Layout.fillWidth: true
+    Layout.fillWidth: false
+    Layout.preferredWidth: root.layoutRowWidth
+    Layout.minimumWidth: Math.min(root.layoutRowWidth, root.highlighted ? 360 : 330)
+    Layout.leftMargin: root.stagger
 
     Shape {
         id: selectionOffset
@@ -28,6 +37,7 @@ Item {
         height: root.height
         visible: root.highlighted
         antialiasing: true
+        preferredRendererType: Shape.CurveRenderer
         ShapePath {
             fillColor: root.theme.spectrum
             strokeWidth: 0
@@ -41,9 +51,13 @@ Item {
 
     Shape {
         id: selectionShape
-        anchors.fill: parent
+        x: -7
+        y: 0
+        width: root.width + 14
+        height: root.height
         visible: root.highlighted
         antialiasing: true
+        preferredRendererType: Shape.CurveRenderer
         ShapePath {
             fillColor: root.theme.accent
             strokeWidth: 0
@@ -62,6 +76,7 @@ Item {
         height: 31
         visible: root.highlighted
         antialiasing: true
+        preferredRendererType: Shape.CurveRenderer
         ShapePath {
             fillColor: "#ff3153"
             strokeWidth: 0
@@ -73,19 +88,20 @@ Item {
     }
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 13 + root.stagger
+        anchors.leftMargin: 13
         anchors.rightMargin: 12
         spacing: 8
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.minimumWidth: 85
+            Layout.minimumWidth: 100
             spacing: 2
             Text {
                 text: root.title
                 color: root.highlighted ? "#ffffff" : root.theme.text
                 font.family: root.theme.uiFontFor(text)
-                font.pixelSize: root.highlighted ? 17 : 14
+                font.pixelSize: root.highlighted ? 22 : 16
                 font.weight: root.highlighted ? Font.DemiBold : Font.Medium
+                maximumLineCount: 1
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
@@ -93,7 +109,7 @@ Item {
                 text: root.description
                 color: root.highlighted ? "#dce8ff" : root.theme.textDim
                 font.family: root.theme.uiFontFor(text)
-                font.pixelSize: 10
+                font.pixelSize: 11
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
@@ -108,9 +124,9 @@ Item {
             stepSize: root.stepSize
             suffix: root.suffix
             highlighted: root.highlighted
-            Layout.preferredWidth: 176
-            Layout.minimumWidth: 146
-            Layout.preferredHeight: 32
+            Layout.preferredWidth: root.stepperPreferredWidth
+            Layout.minimumWidth: root.stepperMinimumWidth
+            Layout.preferredHeight: 40
             onEdited: next => {
                 root.activated(root.settingKey)
                 root.edited(next)

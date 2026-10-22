@@ -72,6 +72,8 @@ Item {
         width: Math.max(0, root.width - x)
         height: Math.min(root.height * 0.36, 300)
         enabled: false
+        antialiasing: true
+        preferredRendererType: Shape.CurveRenderer
         ShapePath {
             fillColor: theme.heroPlane
             strokeWidth: 0
@@ -91,6 +93,7 @@ Item {
             id: rail
             objectName: "azureNavigationRail"
             color: theme.navigationSurface
+            z: 1
             Layout.preferredWidth: root.navWidth
             Layout.minimumWidth: root.navWidth
             Layout.maximumWidth: root.navWidth
@@ -104,6 +107,7 @@ Item {
                     width: root.navWidth
                     height: parent.height * 0.27
                     antialiasing: true
+                    preferredRendererType: Shape.CurveRenderer
                     ShapePath {
                         fillColor: "#0b2b6c"
                         strokeWidth: 0
@@ -121,6 +125,7 @@ Item {
                     width: root.navWidth * 0.62
                     height: parent.height * 0.12
                     antialiasing: true
+                    preferredRendererType: Shape.CurveRenderer
                     ShapePath {
                         fillColor: "#05bde9"
                         strokeWidth: 0
@@ -137,6 +142,8 @@ Item {
                 width: 18
                 height: parent.height
                 enabled: false
+                antialiasing: true
+                preferredRendererType: Shape.CurveRenderer
                 ShapePath {
                     fillColor: theme.backgroundTop
                     strokeWidth: 0
@@ -155,42 +162,59 @@ Item {
                 anchors.bottomMargin: 12
                 spacing: root.height < 760 ? 5 : 9
 
-                RowLayout {
+                Item {
+                    objectName: "azureBrandBadge"
                     Layout.fillWidth: true
+                    Layout.preferredHeight: root.height < 760 ? 40 : 44
                     Layout.bottomMargin: 9
-                    spacing: 9
-                    Rectangle {
-                        Layout.preferredWidth: 30
-                        Layout.preferredHeight: 30
-                        color: "#ffffff"
-                        Shape {
-                            anchors.fill: parent
-                            ShapePath {
-                                fillColor: theme.accent
-                                strokeWidth: 0
-                                startX: 2; startY: 25
-                                PathLine { x: 25; y: 2 }
-                                PathLine { x: 25; y: 9 }
-                                PathLine { x: 9; y: 25 }
-                                PathLine { x: 2; y: 25 }
-                            }
+                    Shape {
+                        id: brandBadgeShape
+                        anchors.fill: parent
+                        antialiasing: true
+                        preferredRendererType: Shape.CurveRenderer
+                        ShapePath {
+                            fillColor: "#ffffff"
+                            strokeWidth: 0
+                            startX: 0; startY: 0
+                            PathLine { x: brandBadgeShape.width - 9; y: 0 }
+                            PathLine { x: brandBadgeShape.width; y: brandBadgeShape.height * 0.72 }
+                            PathLine { x: brandBadgeShape.width - 7; y: brandBadgeShape.height }
+                            PathLine { x: 0; y: brandBadgeShape.height }
+                            PathLine { x: 0; y: 0 }
                         }
                     }
-                    ColumnLayout {
-                        spacing: -2
-                        Text {
-                            text: "Refra"
-                            color: theme.navigationText
-                            font.family: theme.displayFontFor(text)
-                            font.pixelSize: 16
-                            font.weight: Font.Bold
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 10
+                        spacing: 8
+                        Rectangle {
+                            Layout.preferredWidth: 23
+                            Layout.preferredHeight: 23
+                            color: "#104bf5"
+                            Shape {
+                                anchors.fill: parent
+                                antialiasing: true
+                                preferredRendererType: Shape.CurveRenderer
+                                ShapePath {
+                                    fillColor: "#05bde9"
+                                    strokeWidth: 0
+                                    startX: 2; startY: 19
+                                    PathLine { x: 19; y: 2 }
+                                    PathLine { x: 19; y: 8 }
+                                    PathLine { x: 8; y: 19 }
+                                    PathLine { x: 2; y: 19 }
+                                }
+                            }
                         }
                         Text {
-                            text: "TRANSLATOR"
-                            color: theme.navigationTextDim
-                            font.family: theme.monoFontFor(text)
-                            font.pixelSize: 8
-                            font.letterSpacing: 1.1
+                            text: "RefraTranslator"
+                            color: "#071b50"
+                            font.family: theme.displayFontFor(text)
+                            font.pixelSize: root.width < 1080 ? 15 : 16
+                            font.weight: Font.Black
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
                         }
                     }
                 }
@@ -209,9 +233,9 @@ Item {
                         required property var modelData
                         objectName: "azureNavigationButton" + index
                         Layout.fillWidth: true
-                        Layout.preferredHeight: root.height < 760 ? 50 : 62
-                        Layout.minimumHeight: root.height < 760 ? 50 : 62
-                        Layout.maximumHeight: root.height < 760 ? 50 : 62
+                        Layout.preferredHeight: root.height < 760 ? 52 : 68
+                        Layout.minimumHeight: root.height < 760 ? 52 : 68
+                        Layout.maximumHeight: root.height < 760 ? 52 : 68
                         Layout.leftMargin: [0, 14, 3, 18, 1, 15, 4][index]
                         Layout.rightMargin: 8
                         theme: theme
@@ -219,8 +243,8 @@ Item {
                         code: String(modelData)
                         text: root.pageNames[index]
                         selected: root.workbench.currentPage === modelData
-                        selectedFontSize: root.height < 760 ? 30 : 38
-                        idleFontSize: root.height < 760 ? 16 : 20
+                        selectedFontSize: root.height < 760 ? 35 : 46
+                        idleFontSize: root.height < 760 ? 17 : 21
                         onClicked: root.requestPage(String(modelData))
                         Accessible.description: "切换到" + text
                     }
@@ -231,6 +255,8 @@ Item {
                 Shape {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 1
+                    antialiasing: true
+                    preferredRendererType: Shape.CurveRenderer
                     ShapePath {
                         strokeColor: "#355083"
                         strokeWidth: 1

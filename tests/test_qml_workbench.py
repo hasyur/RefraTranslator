@@ -3432,6 +3432,9 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
 
     controller = WorkbenchController(config_path, probe_ocr_devices=False)
     controller.selectProfile(controller.profileIds.index("game"))
+    controller.setOcrCooldownMs(0)
+    controller.setDynamicRoiEnabled(False)
+    assert controller.saveAll()
     controller.setTheme("dark")
     controller.setReducedMotion(True)
     controller.refreshStats()
@@ -3467,8 +3470,10 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
             assert diagnostic_action is not None and diagnostic_action.isVisible()
             action_top = action_row.mapToItem(page, QPointF(0, 0)).y()
             work_origin = work_area.mapToItem(page, QPointF(0, 0))
-            assert action_top >= work_origin.y() + work_area.height() - 1
-            assert action_top + action_row.height() <= page.height() + 1
+            work_bottom = work_origin.y() + work_area.height()
+            assert action_top >= work_origin.y()
+            assert action_top + action_row.height() <= work_bottom + 1
+            assert action_top >= work_bottom - action_row.height() - 22
             diagnostic_bottom = diagnostic_action.mapToItem(
                 page, QPointF(0, diagnostic_action.height())
             ).y()
@@ -3613,6 +3618,81 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
             "azureSettingsOcrCooldownRow",
         ):
             assert _find_quick_item(window, name).isVisible(), name
+        mode_text = _find_quick_item(window, "azureSettingsModeText")
+        assert mode_text is not None and mode_text.isVisible()
+        assert "整帧处理" in mode_text.property("text")
+        if window.width() <= 980:
+            # The narrow composition extends the paper shoulder just enough
+            # to keep the first row's plus control on its white surface.
+            paper = _find_quick_item(window, "azureSettingsParameterProtection")
+            first_increase = _find_quick_item(
+                window, "画面变化轮询IncreaseButton"
+            )
+            assert paper is not None and first_increase is not None
+            for y_fraction in (0.08, 0.92):
+                point = first_increase.mapToItem(
+                    paper,
+                    QPointF(first_increase.width(), first_increase.height() * y_fraction),
+                )
+                if point.y() <= paper.height() * 0.60:
+                    right_edge = paper.width() * (
+                        0.76 + 0.24 * point.y() / (paper.height() * 0.60)
+                    )
+                else:
+                    right_edge = paper.width() - 18 * (
+                        point.y() / paper.height() - 0.60
+                    ) / 0.40
+                assert point.x() <= right_edge - 8, (
+                    "first-row increase control must stay on the settings paper",
+                    point.x(), point.y(), right_edge,
+                )
+        assert mode_text.mapToScene(QPointF(0, 0)).x() < window.width() * 0.60
+        form_panel = _find_quick_item(window, "azureSettingsFormPanel")
+        assert form_panel is not None
+        assert form_panel.property("rotation") == pytest.approx(-3.5)
+        staggered_rows = [
+            _find_quick_item(window, name)
+            for name in (
+                "azureSettingsPollFpsRow",
+                "azureSettingsClearAfterRow",
+                "azureSettingsStableRescanRow",
+                "azureSettingsIdleRescanRow",
+                "azureSettingsOcrCooldownRow",
+            )
+        ]
+        stagger_origins = [
+            row.mapToItem(form_panel, QPointF(0, 0)).x()
+            for row in staggered_rows
+        ]
+        assert all(
+            right > left
+            for left, right in zip(stagger_origins, stagger_origins[1:])
+        ), stagger_origins
+        value_field = _find_quick_item(window, "OCR 冷却ValueField")
+        assert value_field is not None and value_field.isVisible()
+
+        def assert_number_text_fits(expected: int) -> None:
+            expected_text = str(expected)
+            assert value_field.property("text") == expected_text
+            metrics = QFontMetricsF(value_field.property("font"))
+            available_width = (
+                value_field.width()
+                - float(value_field.property("leftPadding"))
+                - float(value_field.property("rightPadding"))
+            )
+            available_height = (
+                value_field.height()
+                - float(value_field.property("topPadding"))
+                - float(value_field.property("bottomPadding"))
+            )
+            assert metrics.horizontalAdvance(expected_text) <= available_width + 1, (
+                expected_text, metrics.horizontalAdvance(expected_text), available_width
+            )
+            assert metrics.height() <= available_height + 1, (
+                expected_text, metrics.height(), available_height
+            )
+
+        assert_number_text_fits(0)
 
         # The inline panel shows one authentic OCR, translation and total
         # latency metric. Complete raw strings remain in the expanded dialog.
@@ -3637,6 +3717,7 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
         starting_cooldown = controller.ocrCooldownMs
         click(increase)
         assert controller.ocrCooldownMs == starting_cooldown + 50
+        assert_number_text_fits(starting_cooldown + 50)
         assert controller.settingsDirty is True
         feedback = assert_settings_feedback_layout()
         assert feedback.property("text") == "有未应用更改 · 点击应用更改后生效"
@@ -3654,9 +3735,23 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
         click_named("azureSaveAllButton")
         assert controller.ocrCooldownMs == starting_cooldown + 50
         assert value_field.property("text") == str(starting_cooldown + 50)
+        assert_number_text_fits(starting_cooldown + 50)
         assert controller.settingsDirty is False
         assert feedback.property("text") == controller.statusText
         assert str(feedback.property("text")).startswith("已应用")
+
+        field_position = value_field.mapToScene(
+            QPointF(value_field.width() / 2, value_field.height() / 2)
+        ).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=field_position)
+        QTest.keyClick(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        for character in "200":
+            QTest.keyClick(window, ord(character))
+        app.processEvents()
+        click_named("azureSaveAllButton")
+        assert controller.ocrCooldownMs == 200
+        assert_number_text_fits(200)
+        assert controller.settingsDirty is False
 
         field_position = value_field.mapToScene(
             QPointF(value_field.width() / 2, value_field.height() / 2)
@@ -3671,6 +3766,7 @@ def test_real_azure_skin_home_settings_and_diagnostics_user_path(
         assert controller.ocrCooldownMs == 10_000
         assert controller.settingsDirty is False
         assert value_field.property("text") == "10000"
+        assert_number_text_fits(10_000)
         saved = load_game_profile(config_path, load_config(config_path), "game")
         assert saved.runtime_settings.live.ocr_cooldown_ms == 10_000
 

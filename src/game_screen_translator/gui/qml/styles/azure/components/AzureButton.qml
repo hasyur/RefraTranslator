@@ -43,6 +43,7 @@ Button {
             id: angularSurface
             anchors.fill: parent
             antialiasing: true
+            preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 fillColor: control.angular && !control.quiet
                          ? control.theme.spectrum : "transparent"

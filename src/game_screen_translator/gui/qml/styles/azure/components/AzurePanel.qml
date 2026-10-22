@@ -16,6 +16,7 @@ Item {
     Shape {
         anchors.fill: parent
         antialiasing: true
+        preferredRendererType: Shape.CurveRenderer
         ShapePath {
             fillColor: root.fillColor
             strokeColor: root.strokeColor

@@ -27,6 +27,7 @@ ComboBox {
         width: 12
         height: 8
         antialiasing: true
+        preferredRendererType: Shape.CurveRenderer
         ShapePath {
             fillColor: control.theme.accent
             strokeWidth: 0

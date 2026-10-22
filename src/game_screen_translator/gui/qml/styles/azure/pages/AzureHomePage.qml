@@ -186,6 +186,7 @@ Item {
                     width: parent.width * 0.96
                     height: parent.height * 0.34
                     antialiasing: true
+                    preferredRendererType: Shape.CurveRenderer
                     z: -3
                     ShapePath {
                         fillColor: "#f7f9ff"
@@ -216,6 +217,7 @@ Item {
                         width: hero.width * modelData.w
                         height: hero.height * modelData.h
                         antialiasing: true
+                        preferredRendererType: Shape.CurveRenderer
                         ShapePath {
                             fillColor: modelData.c
                             strokeWidth: 0
@@ -273,6 +275,7 @@ Item {
                         id: homeStatusShape
                         anchors.fill: parent
                         antialiasing: true
+                        preferredRendererType: Shape.CurveRenderer
                         ShapePath {
                             fillColor: "#071535"
                             strokeWidth: 0
@@ -340,6 +343,7 @@ Item {
                         width: parent.width
                         height: parent.height
                         antialiasing: true
+                        preferredRendererType: Shape.CurveRenderer
                         ShapePath {
                             fillColor: "#05bde9"
                             strokeWidth: 0
@@ -355,6 +359,7 @@ Item {
                         id: homeCommandPaper
                         anchors.fill: parent
                         antialiasing: true
+                        preferredRendererType: Shape.CurveRenderer
                         ShapePath {
                             fillColor: "#f7f9ff"
                             strokeWidth: 0
@@ -444,6 +449,7 @@ Item {
                     width: 28
                     height: 32
                     antialiasing: true
+                    preferredRendererType: Shape.CurveRenderer
                     z: 3
                     ShapePath {
                         fillColor: "#ff3153"
@@ -459,11 +465,12 @@ Item {
             Item {
                 objectName: "azureHomeSignalPanel"
                 Layout.fillWidth: true
-                Layout.preferredHeight: 126
+                Layout.preferredHeight: root.width < 1000 ? 198 : 126
                 Shape {
                     id: homeSignalPaper
                     anchors.fill: parent
                     antialiasing: true
+                    preferredRendererType: Shape.CurveRenderer
                     ShapePath {
                         fillColor: root.theme.panel
                         strokeWidth: 0
@@ -477,61 +484,67 @@ Item {
                         PathLine { x: 0; y: 12 }
                     }
                 }
-                RowLayout {
-                    anchors.fill: parent
-                    spacing: 7
-                    Repeater {
-                        model: 4
-                        Item {
-                            required property int index
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.minimumWidth: 0
-                            Rectangle {
-                                anchors.left: parent.left
-                                anchors.top: parent.top
-                                width: index === 0 ? 3 : 2
-                                height: parent.height
-                                color: [root.theme.accent, root.theme.spectrum, root.theme.violet, root.theme.lineStrong][index]
+                Repeater {
+                    model: 4
+                    Item {
+                        required property int index
+                        readonly property bool compact: root.width < 1000
+                        x: compact
+                           ? parent.width * (index % 2 === 0 ? 0.03 : 0.54)
+                           : parent.width * [0.025, 0.27, 0.53, 0.78][index]
+                        y: compact
+                           ? (index < 2 ? 14 : 104)
+                           : [16, 34, 12, 31][index]
+                        width: compact
+                               ? parent.width * 0.42
+                               : parent.width * [0.205, 0.205, 0.205, 0.20][index]
+                        height: compact ? 78 : 88
+                        Rectangle {
+                            x: 0
+                            y: 7
+                            width: 3
+                            height: 36
+                            color: [root.theme.accent, root.theme.spectrum,
+                                    root.theme.violet, root.theme.lineStrong][index]
+                        }
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 5
+                            spacing: compact ? 3 : 4
+                            Text {
+                                text: ["RUN STATE", "OCR", "TRANSLATION", "LAST RUN"][index]
+                                color: root.theme.accentText
+                                font.family: root.theme.monoFontFor(text)
+                                font.pixelSize: 10
+                                font.letterSpacing: 0.7
                             }
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 12
-                                spacing: 4
-                                Text {
-                                    text: ["RUN STATE", "OCR", "TRANSLATION", "LAST RUN"][index]
-                                    color: root.theme.accentText
-                                    font.family: root.theme.monoFontFor(text)
-                                    font.pixelSize: 9
-                                    font.letterSpacing: 0.7
-                                }
-                                Text {
-                                    text: [root.workbench.runState,
-                                           root.workbench.ocrStatus,
-                                           root.workbench.backend === "builtin" ? "内置本地模型" : "外部 API",
-                                           root.workbench.lastRunStatus][index]
-                                    color: root.theme.text
-                                    font.family: root.theme.uiFontFor(text)
-                                    font.pixelSize: index === 3 ? 11 : 13
-                                    font.weight: Font.DemiBold
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                                Text {
-                                    visible: index === 1 || index === 2 || index === 3
-                                    text: index === 1 ? root.workbench.detectionQualitySummary
-                                        : index === 2 ? (root.workbench.backend === "builtin"
-                                            ? root.workbench.builtinModel : root.workbench.model)
-                                        : index === 3 && root.workbench.lastRunAvailable
-                                            ? "OCR " + root.workbench.lastRunOcrPeakText
-                                              + "  /  LLM " + root.workbench.lastRunLlmPeakText
-                                            : ""
-                                    color: root.theme.textSoft
-                                    font.family: root.theme.monoFontFor(text)
-                                    font.pixelSize: 10
-                                    elide: Text.ElideMiddle
-                                    Layout.fillWidth: true
-                                }
+                            Text {
+                                text: [root.workbench.runState,
+                                       root.workbench.ocrStatus,
+                                       root.workbench.backend === "builtin" ? "内置本地模型" : "外部 API",
+                                       root.workbench.lastRunStatus][index]
+                                color: root.theme.text
+                                font.family: root.theme.uiFontFor(text)
+                                font.pixelSize: index === 3 ? 12 : 14
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                visible: index === 1 || index === 2 || index === 3
+                                text: index === 1 ? root.workbench.detectionQualitySummary
+                                    : index === 2 ? (root.workbench.backend === "builtin"
+                                        ? root.workbench.builtinModel : root.workbench.model)
+                                    : index === 3 && root.workbench.lastRunAvailable
+                                        ? "OCR " + root.workbench.lastRunOcrPeakText
+                                          + "  /  LLM " + root.workbench.lastRunLlmPeakText
+                                        : ""
+                                color: root.theme.textSoft
+                                font.family: root.theme.monoFontFor(text)
+                                font.pixelSize: 10
+                                elide: Text.ElideMiddle
+                                Layout.fillWidth: true
                             }
                         }
                     }
@@ -542,11 +555,13 @@ Item {
                 objectName: "azureHomeControlPanel"
                 Layout.fillWidth: true
                 Layout.preferredHeight: root.width < 1000
-                                        ? homeControlGrid.implicitHeight + 8 : 458
+                                        ? homeControlGrid.implicitHeight + 16
+                                        : Math.max(380, homeControlGrid.implicitHeight + 16)
                 Shape {
                     id: homeControlPaper
                     anchors.fill: parent
                     antialiasing: true
+                    preferredRendererType: Shape.CurveRenderer
                     ShapePath {
                         fillColor: root.theme.panel
                         strokeWidth: 0
@@ -573,6 +588,7 @@ Item {
                         objectName: "azureHomeProfileColumn"
                         Layout.fillWidth: true
                         Layout.minimumWidth: 190
+                        Layout.maximumWidth: root.width < 1000 ? root.width * 0.48 : root.width * 0.33
                         Layout.topMargin: 0
                         Layout.leftMargin: 0
                         Layout.alignment: Qt.AlignTop
@@ -588,8 +604,9 @@ Item {
                             text: "当前游戏配置"
                             color: root.theme.text
                             font.family: root.theme.displayFontFor(text)
-                            font.pixelSize: 19
-                            font.weight: Font.Bold
+                            font.pixelSize: 22
+                            font.weight: Font.Black
+                            font.italic: true
                         }
                         AzureComboBox {
                             objectName: "azureHomeProfileSelector"
@@ -644,6 +661,7 @@ Item {
                         objectName: "azureHomeAppearanceColumn"
                         Layout.fillWidth: true
                         Layout.minimumWidth: 190
+                        Layout.maximumWidth: root.width * 0.33
                         Layout.topMargin: root.width < 1000 ? 0 : 24
                         Layout.leftMargin: root.width < 1000 ? 0 : 12
                         Layout.alignment: Qt.AlignTop
@@ -659,8 +677,9 @@ Item {
                             text: "外观与动效"
                             color: root.theme.text
                             font.family: root.theme.displayFontFor(text)
-                            font.pixelSize: 19
-                            font.weight: Font.Bold
+                            font.pixelSize: 22
+                            font.weight: Font.Black
+                            font.italic: true
                         }
                         AzureComboBox {
                             objectName: "azureHomeSkinSelector"
@@ -701,7 +720,9 @@ Item {
                         objectName: "azureHomeBehaviorColumn"
                         Layout.fillWidth: true
                         Layout.minimumWidth: 190
-                        Layout.topMargin: root.width < 1000 ? 0 : 48
+                        Layout.maximumWidth: root.width < 1000 ? root.width * 0.96 : root.width * 0.33
+                        Layout.columnSpan: root.width < 1000 ? 2 : 1
+                        Layout.topMargin: root.width < 1000 ? 14 : 48
                         Layout.leftMargin: root.width < 1000 ? 0 : 20
                         Layout.alignment: Qt.AlignTop
                         spacing: 7
@@ -716,8 +737,9 @@ Item {
                             text: "启动与快捷键"
                             color: root.theme.text
                             font.family: root.theme.displayFontFor(text)
-                            font.pixelSize: 19
-                            font.weight: Font.Bold
+                            font.pixelSize: 22
+                            font.weight: Font.Black
+                            font.italic: true
                         }
                         AzureToggle {
                             objectName: "azureHomeStartupToggle"

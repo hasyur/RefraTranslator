@@ -67,31 +67,58 @@ Item {
         Shape {
             id: settingsConfigBand
             x: root.width * 0.29
-            y: -root.height * 0.02
-            width: root.width * 0.74
-            height: root.height * 0.26
+            y: -root.height * 0.08
+            width: root.width * 0.80
+            height: root.height * 0.31
             antialiasing: true
+            preferredRendererType: Shape.CurveRenderer
             z: -3
             ShapePath {
                 fillColor: "#f7f9ff"
                 strokeWidth: 0
-                startX: 70; startY: 0
+                startX: 68; startY: 0
                 PathLine { x: settingsConfigBand.width; y: 0 }
-                PathLine { x: settingsConfigBand.width; y: settingsConfigBand.height * 0.68 }
-                PathLine { x: 0; y: settingsConfigBand.height }
-                PathLine { x: 70; y: 0 }
+                PathLine { x: settingsConfigBand.width; y: settingsConfigBand.height * 0.55 }
+                PathLine { x: settingsConfigBand.width * 0.14; y: settingsConfigBand.height }
+                PathLine { x: 0; y: settingsConfigBand.height * 0.70 }
+                PathLine { x: 68; y: 0 }
+            }
+        }
+
+        Shape {
+            id: settingsPaper
+            objectName: "azureSettingsPaper"
+            x: -18
+            y: root.height * 0.205
+            width: root.width + 28
+            height: root.height * 0.80
+            antialiasing: true
+            preferredRendererType: Shape.CurveRenderer
+            z: 0
+            ShapePath {
+                fillColor: "#f7f9ff"
+                strokeWidth: 0
+                startX: 0; startY: 42
+                PathLine { x: settingsPaper.width * 0.04; y: 14 }
+                PathLine { x: settingsPaper.width * 0.16; y: 0 }
+                PathLine { x: settingsPaper.width * 0.26; y: 24 }
+                PathLine { x: settingsPaper.width * 0.38; y: 4 }
+                PathLine { x: settingsPaper.width * 0.48; y: 22 }
+                PathLine { x: settingsPaper.width * 0.64; y: 0 }
+                PathLine { x: settingsPaper.width * 0.78; y: 17 }
+                PathLine { x: settingsPaper.width; y: 32 }
+                PathLine { x: settingsPaper.width; y: settingsPaper.height - 28 }
+                PathLine { x: settingsPaper.width - 20; y: settingsPaper.height }
+                PathLine { x: 0; y: settingsPaper.height * 0.96 }
+                PathLine { x: 0; y: 42 }
             }
         }
 
         Repeater {
             z: 2
             model: [
-                { x: 0.29, y: 0.11, w: 0.055, h: 0.10, c: "#05bde9" },
-                { x: 0.66, y: 0.20, w: 0.060, h: 0.13, c: "#1054f5" },
-                { x: 0.84, y: 0.04, w: 0.050, h: 0.10, c: "#05bde9" },
-                { x: 0.92, y: 0.38, w: 0.080, h: 0.12, c: "#1054f5" },
-                { x: 0.73, y: 0.52, w: 0.042, h: 0.10, c: "#05bde9" },
-                { x: 0.97, y: 0.68, w: 0.055, h: 0.10, c: "#05bde9" }
+                { x: 0.49, y: 0.33, w: 0.060, h: 0.13, c: "#1054f5" },
+                { x: 0.88, y: 0.43, w: 0.090, h: 0.16, c: "#05bde9" }
             ]
             Shape {
                 id: shardShape
@@ -101,6 +128,7 @@ Item {
                 width: settingsScene.width * modelData.w
                 height: settingsScene.height * modelData.h
                 antialiasing: true
+                preferredRendererType: Shape.CurveRenderer
                 ShapePath {
                     fillColor: modelData.c
                     strokeWidth: 0
@@ -114,11 +142,12 @@ Item {
 
         Shape {
             id: settingAccentShard
-            x: root.width * 0.22
-            y: root.height * 0.13
-            width: root.width * 0.060
-            height: root.height * 0.095
+            x: root.width * 0.30
+            y: root.height * 0.035
+            width: root.width * 0.040
+            height: root.height * 0.075
             antialiasing: true
+            preferredRendererType: Shape.CurveRenderer
             z: 2
             ShapePath {
                 fillColor: "#05bde9"
@@ -132,11 +161,12 @@ Item {
 
         Shape {
             id: settingCoralShard
-            x: root.width * 0.18
-            y: root.height * 0.13
-            width: 22
-            height: 30
+            x: root.width * 0.335
+            y: root.height * 0.075
+            width: 17
+            height: 23
             antialiasing: true
+            preferredRendererType: Shape.CurveRenderer
             z: 2
             ShapePath {
                 fillColor: "#ff3153"
@@ -155,6 +185,7 @@ Item {
             width: root.width * 0.055
             height: root.height * 0.10
             antialiasing: true
+            preferredRendererType: Shape.CurveRenderer
             z: 2
             ShapePath {
                 fillColor: "#104bf5"
@@ -168,20 +199,20 @@ Item {
 
         Text {
             objectName: "azureSettingsWordmark"
-            x: root.width * 0.31
-            y: -root.height * 0.075
-            width: root.width * 0.80
-            height: root.height * 0.30
+            x: root.width * 0.34
+            y: -root.height * 0.12
+            width: root.width * 0.78
+            height: root.height * 0.34
             text: "CONFIG"
             color: "#104bf5"
             font.family: root.theme.displayFontFor(text)
-            font.pixelSize: Math.max(112, Math.min(202, root.width * 0.19))
+            font.pixelSize: Math.max(132, Math.min(232, root.width * 0.225))
             font.weight: Font.Black
             font.italic: true
-            font.letterSpacing: -10
-            rotation: -8
+            font.letterSpacing: -12
+            rotation: -9
             opacity: 1
-            z: 1
+            z: 0.5
         }
 
         Image {
@@ -192,57 +223,105 @@ Item {
             fillMode: Image.PreserveAspectFit
             horizontalAlignment: Image.AlignRight
             verticalAlignment: Image.AlignTop
-            x: root.width * 0.30
-            y: root.height * 0.015
-            width: root.width * 0.73
-            height: root.height * 0.76
+            x: root.width * 0.33
+            y: -root.height * 0.010
+            width: root.width * 0.70
+            height: root.height * 0.69
             asynchronous: true
             smooth: true
             visible: status === Image.Ready
             z: 1
         }
 
+        Shape {
+            id: parameterProtection
+            objectName: "azureSettingsParameterProtection"
+            x: -5
+            y: root.height * 0.215
+            // The narrow layout needs a slightly wider upper shoulder for the
+            // first row's +/- controls, while keeping the original long diagonal.
+            width: root.width * 0.61
+            height: root.height * 0.64
+            antialiasing: true
+            preferredRendererType: Shape.CurveRenderer
+            z: 2.5
+            ShapePath {
+                fillColor: "#f7f9ff"
+                strokeWidth: 0
+                startX: 0; startY: 34
+                PathLine { x: parameterProtection.width * 0.08; y: 0 }
+                PathLine { x: parameterProtection.width * 0.28; y: 15 }
+                PathLine { x: parameterProtection.width * 0.47; y: 0 }
+                PathLine {
+                    x: parameterProtection.width * (root.width < 900 ? 0.76 : 0.60)
+                    y: 0
+                }
+                PathLine { x: parameterProtection.width; y: parameterProtection.height * 0.60 }
+                PathLine { x: parameterProtection.width - 18; y: parameterProtection.height }
+                PathLine { x: 0; y: parameterProtection.height * 0.97 }
+                PathLine { x: 0; y: 34 }
+            }
+        }
+
+        Shape {
+            id: diagnosticsProtection
+            objectName: "azureSettingsDiagnosticsProtection"
+            x: root.width * 0.50
+            y: root.height * 0.50
+            width: root.width * 0.50
+            height: root.height * 0.45
+            antialiasing: true
+            preferredRendererType: Shape.CurveRenderer
+            z: 2.5
+            ShapePath {
+                fillColor: "#f7f9ff"
+                strokeWidth: 0
+                startX: 0; startY: diagnosticsProtection.height * 0.18
+                PathLine { x: diagnosticsProtection.width * 0.30; y: 0 }
+                PathLine { x: diagnosticsProtection.width; y: 0 }
+                PathLine { x: diagnosticsProtection.width; y: diagnosticsProtection.height - 20 }
+                PathLine { x: diagnosticsProtection.width - 20; y: diagnosticsProtection.height }
+                PathLine { x: 0; y: diagnosticsProtection.height }
+                PathLine { x: 14; y: 18 }
+                PathLine { x: 28; y: 0 }
+            }
+        }
+
         Item {
             objectName: "azureSettingsHero"
-            x: 18
-            y: 20
-            width: root.width * 0.56
-            height: root.height * 0.31
+            x: 20
+            y: 0
+            width: root.width * 0.46
+            height: root.height * 0.22
             clip: false
             z: 4
 
             ColumnLayout {
-                x: 12
-                y: 12
+                x: 10
+                y: 4
                 spacing: 0
                 z: 4
-                Text {
-                    text: "07  /  SYSTEM CONFIGURATION"
-                    color: root.theme.spectrum
-                    font.family: root.theme.monoFontFor(text)
-                    font.pixelSize: 11
-                    font.letterSpacing: 1.1
-                }
                 RowLayout {
-                    spacing: 8
+                    spacing: 7
                     Text {
                         text: "设置"
                         color: "#ffffff"
                         font.family: root.theme.displayFontFor(text)
-                        font.pixelSize: root.height < 720 ? 56 : 72
+                        font.pixelSize: root.height < 720 ? 72 : 94
                         font.weight: Font.Black
                         font.italic: true
                     }
                     Shape {
                         Layout.preferredWidth: 30
-                        Layout.preferredHeight: 34
+                        Layout.preferredHeight: 42
                         antialiasing: true
+                        preferredRendererType: Shape.CurveRenderer
                         ShapePath {
                             fillColor: root.theme.spectrum
                             strokeWidth: 0
                             startX: 0; startY: 0
-                            PathLine { x: 30; y: 11 }
-                            PathLine { x: 13; y: 34 }
+                            PathLine { x: 30; y: 14 }
+                            PathLine { x: 13; y: 42 }
                             PathLine { x: 0; y: 0 }
                         }
                     }
@@ -251,53 +330,36 @@ Item {
                     text: "运行参数与诊断"
                     color: "#c8d7ff"
                     font.family: root.theme.uiFontFor(text)
-                    font.pixelSize: 14
+                    font.pixelSize: root.height < 720 ? 19 : 22
+                    font.weight: Font.DemiBold
                 }
             }
         }
 
-        RowLayout {
+        Item {
             objectName: "azureSettingsWorkArea"
             x: 0
-            y: root.height * 0.20
+            y: 0
             width: root.width
-            height: root.height * 0.70
-            spacing: 0
+            height: root.height
             z: 3
 
             Item {
                 objectName: "azureSettingsFormPanel"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.preferredWidth: 1.13
-                Layout.minimumWidth: 330
-                Shape {
-                    id: formPaper
-                    anchors.fill: parent
-                    antialiasing: true
-                    ShapePath {
-                        fillColor: "#f7f9ff"
-                        strokeWidth: 0
-                        startX: 0; startY: 22
-                        PathLine { x: 38; y: 0 }
-                        PathLine { x: formPaper.width * 0.26; y: 0 }
-                        PathLine { x: formPaper.width * 0.36; y: 19 }
-                        PathLine { x: formPaper.width * 0.52; y: 0 }
-                        PathLine { x: formPaper.width - 54; y: 0 }
-                        PathLine { x: formPaper.width; y: 38 }
-                        PathLine { x: formPaper.width - 30; y: formPaper.height }
-                        PathLine { x: 0; y: formPaper.height * 0.96 }
-                        PathLine { x: 18; y: 0 }
-                    }
-                }
+                x: root.width * 0.018
+                y: root.height * 0.235
+                width: root.width * 0.56
+                height: root.height * 0.65
+                rotation: -3.5
+                transformOrigin: Item.TopLeft
                 Flickable {
                     id: settingsFormScroll
                     objectName: "azureSettingsFormScroll"
                     anchors.fill: parent
-                    anchors.leftMargin: 18
-                    anchors.rightMargin: 36
-                    anchors.topMargin: 22
-                    anchors.bottomMargin: 14
+                    anchors.leftMargin: 5
+                    anchors.rightMargin: 6
+                    anchors.topMargin: 12
+                    anchors.bottomMargin: 4
                     contentWidth: width
                     contentHeight: settingsForm.implicitHeight
                     clip: true
@@ -307,7 +369,7 @@ Item {
                     ColumnLayout {
                         id: settingsForm
                         width: settingsFormScroll.width - 5
-                        spacing: 5
+                        spacing: 2
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -330,20 +392,17 @@ Item {
                                     font.italic: true
                                 }
                                 Text {
-                                    text: "触发方式在 OCR 页选择；此处调整对应参数。"
+                                    objectName: "azureSettingsModeText"
+                                    text: "当前模式："
+                                          + (root.workbench.triggerMethodIndex === 2 ? "鼠标停留"
+                                             : root.workbench.dynamicRoiEnabled ? "动态 ROI" : "整帧处理")
+                                          + " · 触发来源在 OCR 页设置。"
                                     color: root.theme.textDim
                                     font.family: root.theme.uiFontFor(text)
                                     font.pixelSize: 10
                                     wrapMode: Text.WordWrap
                                     Layout.fillWidth: true
                                 }
-                            }
-                            Text {
-                                text: root.workbench.triggerMethodIndex === 2 ? "鼠标停留"
-                                    : root.workbench.dynamicRoiEnabled ? "动态 ROI" : "整帧处理"
-                                color: root.theme.accentText
-                                font.family: root.theme.monoFontFor(text)
-                                font.pixelSize: 10
                             }
                         }
 
@@ -521,52 +580,29 @@ Item {
 
             Item {
                 objectName: "azureSettingsDiagnosticsPanel"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.preferredWidth: 0.87
-                Layout.minimumWidth: 285
-                Layout.topMargin: root.height * 0.29
-                Shape {
-                    id: diagnosticsBackdrop
-                    anchors.fill: parent
-                    antialiasing: true
-                    ShapePath {
-                        fillColor: "#f4f7ff"
-                        strokeWidth: 0
-                        startX: 24; startY: 0
-                        PathLine { x: diagnosticsBackdrop.width; y: 0 }
-                        PathLine { x: diagnosticsBackdrop.width; y: diagnosticsBackdrop.height - 20 }
-                        PathLine { x: diagnosticsBackdrop.width - 20; y: diagnosticsBackdrop.height }
-                        PathLine { x: 0; y: diagnosticsBackdrop.height }
-                        PathLine { x: 0; y: 24 }
-                        PathLine { x: 24; y: 0 }
-                    }
-                }
-                Rectangle {
-                    x: 0
-                    y: 20
-                    width: 3
-                    height: Math.max(80, parent.height - 20)
-                    color: root.theme.spectrum
-                }
+                x: root.width * 0.60
+                y: root.height * 0.56
+                width: root.width * 0.36
+                height: root.height * 0.33
                 Column {
                     id: diagnosticsColumn
                     anchors.fill: parent
-                    anchors.leftMargin: 16
+                    anchors.leftMargin: 10
                     anchors.rightMargin: 8
-                    anchors.topMargin: 8
-                    anchors.bottomMargin: 8
-                    spacing: 7
+                    anchors.topMargin: 1
+                    anchors.bottomMargin: 0
+                    spacing: 5
                     RowLayout {
                         id: diagnosticsHeading
                         width: diagnosticsColumn.width
-                        height: 48
+                        height: 54
                         Text {
                             text: "03"
                             color: root.theme.accent
                             font.family: root.theme.displayFontFor(text)
-                            font.pixelSize: 36
+                            font.pixelSize: 43
                             font.weight: Font.Black
+                            font.italic: true
                         }
                         ColumnLayout {
                             spacing: -1
@@ -575,15 +611,15 @@ Item {
                                 text: "运行诊断"
                                 color: root.theme.text
                                 font.family: root.theme.displayFontFor(text)
-                                font.pixelSize: 25
+                                font.pixelSize: 29
                                 font.weight: Font.Black
                                 font.italic: true
                             }
                             Text {
-                                text: "完整 Profile · OCR · 翻译 · 汇总"
+                                text: "最近完成运行 · 独立流程与峰值"
                                 color: root.theme.textDim
-                                font.family: root.theme.monoFontFor(text)
-                                font.pixelSize: 9
+                                font.family: root.theme.uiFontFor(text)
+                                font.pixelSize: 11
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
@@ -622,7 +658,7 @@ Item {
                             quiet: true
                             Layout.fillWidth: true
                             Layout.minimumWidth: 66
-                            Layout.preferredHeight: 42
+                            Layout.preferredHeight: 39
                             enabled: root.workbench.hasProfile
                             onClicked: root.workbench.refreshStats()
                         }
@@ -633,7 +669,7 @@ Item {
                             primary: true
                             Layout.fillWidth: true
                             Layout.minimumWidth: 100
-                            Layout.preferredHeight: 42
+                            Layout.preferredHeight: 39
                             onClicked: fullDiagnosticsDialog.open()
                         }
                     }
@@ -643,34 +679,18 @@ Item {
 
         RowLayout {
             objectName: "azureSettingsActionRow"
-            x: 22
-            y: root.height - height - 6
-            width: root.width - 44
-            height: 56
-            spacing: 10
+            x: root.width * 0.025
+            y: root.height - height - root.height * 0.020
+            width: root.width * 0.58
+            height: 62
+            spacing: 7
             z: 5
             Item {
                 objectName: "azureSettingsSaveFeedback"
                 Layout.fillWidth: true
-                Layout.minimumWidth: 150
-                Layout.preferredWidth: root.width * 0.42
+                Layout.minimumWidth: 120
+                Layout.preferredWidth: root.width * 0.22
                 Layout.fillHeight: true
-                Shape {
-                    id: saveFeedbackPaper
-                    anchors.fill: parent
-                    antialiasing: true
-                    ShapePath {
-                        fillColor: "#0b2459"
-                        strokeWidth: 0
-                        startX: 12; startY: 0
-                        PathLine { x: saveFeedbackPaper.width - 14; y: 0 }
-                        PathLine { x: saveFeedbackPaper.width; y: 12 }
-                        PathLine { x: saveFeedbackPaper.width - 10; y: saveFeedbackPaper.height }
-                        PathLine { x: 0; y: saveFeedbackPaper.height }
-                        PathLine { x: 0; y: 12 }
-                        PathLine { x: 12; y: 0 }
-                    }
-                }
                 Rectangle {
                     x: 0
                     y: 8
@@ -685,17 +705,17 @@ Item {
                 Text {
                     objectName: "azureSettingsSaveFeedbackText"
                     anchors.fill: parent
-                    anchors.leftMargin: 14
+                    anchors.leftMargin: 12
                     anchors.rightMargin: 12
                     text: root.workbench.settingsDirty
                           ? "有未应用更改 · 点击应用更改后生效"
                           : root.workbench.statusText
-                    color: root.workbench.settingsDirty ? "#ffdbe2" : "#f4f7ff"
+                    color: root.workbench.settingsDirty ? "#c91e43" : root.theme.text
                     font.family: root.theme.uiFontFor(text)
                     font.pixelSize: 12
                     font.weight: Font.DemiBold
                     wrapMode: Text.Wrap
-                    maximumLineCount: 2
+                    maximumLineCount: 3
                     elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
                 }
@@ -704,13 +724,14 @@ Item {
                 objectName: "azureSaveAllButton"
                 theme: root.theme
                 text: "应用更改  →"
-                font.pixelSize: 18
+                font.pixelSize: root.width < 900 ? 15 : 18
                 font.weight: Font.Black
                 font.italic: true
                 enabled: root.workbench.hasProfile
-                implicitHeight: 48
-                Layout.minimumWidth: 155
+                implicitHeight: 54
+                Layout.minimumWidth: 126
                 Layout.fillWidth: true
+                Layout.preferredWidth: root.width * 0.17
                 onClicked: root.workbench.saveAll()
             }
             AzureButton {
@@ -718,15 +739,16 @@ Item {
                 theme: root.theme
                 text: root.startPending ? "正在准备…" : root.workbench.startButtonText + "  →"
                 primary: true
-                font.pixelSize: 20
+                font.pixelSize: root.width < 900 ? 16 : 20
                 font.weight: Font.Black
                 font.italic: true
                 enabled: root.workbench.runPhase !== "stopping"
                          && !root.startPending
                          && (root.workbench.canStart || root.workbench.running)
-                implicitHeight: 48
-                Layout.minimumWidth: 150
+                implicitHeight: 54
+                Layout.minimumWidth: 126
                 Layout.fillWidth: true
+                Layout.preferredWidth: root.width * 0.17
                 onClicked: root.requestLiveToggle()
             }
         }

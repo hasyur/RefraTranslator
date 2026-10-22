@@ -36,6 +36,7 @@ Item {
             font.pixelSize: root.compact ? 10 : 12
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
+            visible: !root.compact || !root.diagnostics.available
         }
         Text {
             visible: !root.compact
@@ -80,8 +81,9 @@ Item {
             text: "OCR 流程"
             color: root.theme.text
             font.family: root.theme.uiFontFor(text)
-            font.pixelSize: root.compact ? 11 : 12
+            font.pixelSize: root.compact ? 11 : 14
             font.weight: Font.DemiBold
+            visible: !root.compact
         }
         TextArea {
             objectName: "azureSettingsOcrLatency"
@@ -96,23 +98,25 @@ Item {
             selectionColor: root.theme.accent
             selectedTextColor: "#ffffff"
             font.family: root.theme.monoFontFor(text)
-            font.pixelSize: root.compact ? 10 : 11
+            font.pixelSize: root.compact ? 13 : 12
+            font.weight: root.compact ? Font.DemiBold : Font.Normal
             wrapMode: TextEdit.Wrap
-            height: root.compact ? Math.max(22, contentHeight + 4)
+            height: root.compact ? Math.max(30, contentHeight + 12)
                                  : Math.max(30, contentHeight + 10)
             background: Rectangle {
                 color: root.compact ? "transparent" : root.theme.inputSurface
                 border.color: root.compact ? "transparent" : root.theme.line
             }
         }
-        Rectangle { width: diagnosticsContent.width; height: 1; color: root.theme.line }
+        Rectangle { width: diagnosticsContent.width; height: 1; color: root.theme.line; visible: !root.compact }
         Text {
             width: diagnosticsContent.width
             text: "翻译流程"
             color: root.theme.text
             font.family: root.theme.uiFontFor(text)
-            font.pixelSize: root.compact ? 11 : 12
+            font.pixelSize: root.compact ? 11 : 14
             font.weight: Font.DemiBold
+            visible: !root.compact
         }
         TextArea {
             objectName: "azureSettingsTranslationLatency"
@@ -127,23 +131,25 @@ Item {
             selectionColor: root.theme.accent
             selectedTextColor: "#ffffff"
             font.family: root.theme.monoFontFor(text)
-            font.pixelSize: root.compact ? 10 : 11
+            font.pixelSize: root.compact ? 13 : 12
+            font.weight: root.compact ? Font.DemiBold : Font.Normal
             wrapMode: TextEdit.Wrap
-            height: root.compact ? Math.max(22, contentHeight + 4)
+            height: root.compact ? Math.max(30, contentHeight + 12)
                                  : Math.max(30, contentHeight + 10)
             background: Rectangle {
                 color: root.compact ? "transparent" : root.theme.inputSurface
                 border.color: root.compact ? "transparent" : root.theme.line
             }
         }
-        Rectangle { width: diagnosticsContent.width; height: 1; color: root.theme.line }
+        Rectangle { width: diagnosticsContent.width; height: 1; color: root.theme.line; visible: !root.compact }
         Text {
             width: diagnosticsContent.width
             text: "延迟汇总"
             color: root.theme.text
             font.family: root.theme.uiFontFor(text)
-            font.pixelSize: root.compact ? 11 : 12
+            font.pixelSize: root.compact ? 11 : 14
             font.weight: Font.DemiBold
+            visible: !root.compact
         }
         TextArea {
             objectName: "azureSettingsLatencySummary"
@@ -158,9 +164,10 @@ Item {
             selectionColor: root.theme.accent
             selectedTextColor: "#ffffff"
             font.family: root.theme.monoFontFor(text)
-            font.pixelSize: root.compact ? 10 : 11
+            font.pixelSize: root.compact ? 13 : 12
+            font.weight: root.compact ? Font.DemiBold : Font.Normal
             wrapMode: TextEdit.Wrap
-            height: root.compact ? Math.max(22, contentHeight + 4)
+            height: root.compact ? Math.max(30, contentHeight + 12)
                                  : Math.max(30, contentHeight + 10)
             background: Rectangle {
                 color: root.compact ? "transparent" : root.theme.inputSurface

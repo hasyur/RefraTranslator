@@ -13,8 +13,8 @@ Item {
     property string accessibleName: ""
     property bool highlighted: false
     signal edited(int value)
-    implicitHeight: 32
-    implicitWidth: 190
+    implicitHeight: 40
+    implicitWidth: 250
 
     function refreshValueText() {
         valueField.text = String(root.value)
@@ -37,15 +37,16 @@ Item {
             text: "−"
             quiet: true
             onAccent: root.highlighted
-            font.pixelSize: 18
+            font.pixelSize: root.highlighted ? 24 : 20
+            font.weight: Font.Black
             implicitWidth: 38
-            Layout.preferredHeight: 32
+            Layout.preferredHeight: 40
             Accessible.name: root.accessibleName + " 减少"
             onClicked: root.edited(Math.max(root.minimum, root.value - root.stepSize))
         }
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 32
+            Layout.preferredHeight: 40
             color: root.highlighted ? "transparent" : root.theme.inputSurface
             border.color: root.highlighted ? "transparent" : root.theme.line
             clip: true
@@ -54,6 +55,8 @@ Item {
                 anchors.fill: parent
                 leftPadding: 5
                 rightPadding: 5
+                topPadding: 0
+                bottomPadding: 0
                 text: String(root.value)
                 color: root.highlighted ? "#ffffff" : root.theme.text
                 selectedTextColor: "#ffffff"
@@ -61,7 +64,8 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
                 font.family: root.theme.monoFontFor(text)
-                font.pixelSize: 16
+                font.pixelSize: root.highlighted ? 24 : 19
+                font.weight: Font.Bold
                 objectName: root.accessibleName + "ValueField"
                 validator: IntValidator { bottom: -2147483648; top: 2147483647 }
                 background: null
@@ -80,11 +84,12 @@ Item {
         }
         Text {
             Layout.preferredWidth: 38
-            Layout.preferredHeight: 32
+            Layout.preferredHeight: 40
             text: root.suffix
             color: root.highlighted ? "#ffffff" : root.theme.textSoft
             font.family: root.theme.monoFontFor(text)
-            font.pixelSize: 12
+            font.pixelSize: root.highlighted ? 16 : 13
+            font.weight: root.highlighted ? Font.DemiBold : Font.Normal
             verticalAlignment: Text.AlignVCenter
             horizontalAlignment: Text.AlignHCenter
         }
@@ -94,9 +99,10 @@ Item {
             text: "+"
             quiet: true
             onAccent: root.highlighted
-            font.pixelSize: 18
+            font.pixelSize: root.highlighted ? 24 : 20
+            font.weight: Font.Black
             implicitWidth: 38
-            Layout.preferredHeight: 32
+            Layout.preferredHeight: 40
             Accessible.name: root.accessibleName + " 增加"
             onClicked: root.edited(Math.min(root.maximum, root.value + root.stepSize))
         }

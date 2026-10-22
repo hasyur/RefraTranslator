@@ -45,29 +45,33 @@ Button {
         }
     }
 
-    background: Shape {
-        antialiasing: true
-        ShapePath {
-            fillColor: control.selected ? control.theme.spectrum : "transparent"
-            strokeWidth: 0
-            startX: 4; startY: 4
-            PathLine { x: control.width - 11; y: 4 }
-            PathLine { x: control.width + 2; y: control.height + 4 }
-            PathLine { x: 15; y: control.height + 4 }
-            PathLine { x: 4; y: 15 }
-            PathLine { x: 4; y: 4 }
-        }
-        ShapePath {
-            fillColor: control.selected ? "#f6f8ff"
-                     : control.hovered || control.visualFocus ? "#203568" : "transparent"
-            strokeColor: control.visualFocus ? control.theme.spectrum : "transparent"
-            strokeWidth: control.visualFocus ? 2 : 0
-            startX: control.selected ? 0 : 8
-            startY: 0
-            PathLine { x: control.width - 15; y: 0 }
-            PathLine { x: control.width; y: control.height }
-            PathLine { x: control.selected ? 12 : 8; y: control.height }
-            PathLine { x: 0; y: control.selected ? 11 : 0 }
+    background: Item {
+        Shape {
+            anchors.fill: parent
+            antialiasing: true
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                fillColor: control.selected ? control.theme.spectrum : "transparent"
+                strokeWidth: 0
+                startX: 4; startY: 4
+                PathLine { x: control.width - 11; y: 4 }
+                PathLine { x: control.width + 2; y: control.height + 4 }
+                PathLine { x: 15; y: control.height + 4 }
+                PathLine { x: 4; y: 15 }
+                PathLine { x: 4; y: 4 }
+            }
+            ShapePath {
+                fillColor: control.selected ? "#f6f8ff"
+                         : control.hovered || control.visualFocus ? "#203568" : "transparent"
+                strokeColor: control.visualFocus ? control.theme.spectrum : "transparent"
+                strokeWidth: control.visualFocus ? 2 : 0
+                startX: control.selected ? 0 : 8
+                startY: 0
+                PathLine { x: control.width - 15; y: 0 }
+                PathLine { x: control.width; y: control.height }
+                PathLine { x: control.selected ? 12 : 8; y: control.height }
+                PathLine { x: 0; y: control.selected ? 11 : 0 }
+            }
         }
     }
 
