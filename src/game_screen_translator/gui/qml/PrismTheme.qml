@@ -6,47 +6,54 @@ QtObject {
     property bool dark: true
     property bool dohna: false
     property bool reducedMotion: false
+    readonly property bool refraDark: !dohna && dark
 
     // Dohna keeps its fixed-light print palette. Prism uses opaque surfaces
     // and a restrained neutral palette in both theme modes.
-    readonly property color paper: dohna ? "#F7F3E8" : (dark ? "#14191d" : "#f2f3ed")
-    readonly property color white: dohna ? "#FFFDF7" : (dark ? "#1c2429" : "#e5e9e4")
-    readonly property color ink: dohna ? "#17151E" : "#14191d"
-    readonly property color inkRaised: dohna ? "#FFFDF7" : (dark ? "#1c2429" : "#e5e9e4")
-    readonly property color panel: dohna ? "#FFFDF7" : (dark ? "#1c2429" : "#e5e9e4")
-    readonly property color line: dohna ? "#17151E" : (dark ? "#354147" : "#bbc4bf")
-    readonly property color lineStrong: dohna ? "#17151E" : (dark ? "#536168" : "#88948e")
-    readonly property color text: dohna ? "#17151E" : (dark ? "#edf0ec" : "#182126")
-    readonly property color textSoft: dohna ? "#4F4653" : (dark ? "#b2bbb8" : "#46534f")
-    readonly property color textDim: dohna ? "#766D77" : (dark ? "#87938f" : "#65716c")
-    readonly property color accent: dohna ? "#FF4384" : (dark ? "#62cbd0" : "#177780")
-    readonly property color spectrum: dohna ? "#00DAD5" : (dark ? "#62cbd0" : "#177780")
+    readonly property color paper: dohna ? "#F7F3E8" : refraDark ? "#03143b" : (dark ? "#14191d" : "#f2f3ed")
+    readonly property color white: dohna ? "#FFFDF7" : refraDark ? "#071d48" : (dark ? "#1c2429" : "#e5e9e4")
+    readonly property color ink: dohna ? "#17151E" : refraDark ? "#020d27" : "#14191d"
+    readonly property color inkRaised: dohna ? "#FFFDF7" : refraDark ? "#061a42" : (dark ? "#1c2429" : "#e5e9e4")
+    readonly property color panel: dohna ? "#FFFDF7" : refraDark ? "#071a3c" : (dark ? "#1c2429" : "#e5e9e4")
+    readonly property color line: dohna ? "#17151E" : refraDark ? "#17467e" : (dark ? "#354147" : "#bbc4bf")
+    readonly property color lineStrong: dohna ? "#17151E" : refraDark ? "#2871bb" : (dark ? "#536168" : "#88948e")
+    readonly property color text: dohna ? "#17151E" : refraDark ? "#f1f7ff" : (dark ? "#edf0ec" : "#182126")
+    readonly property color textSoft: dohna ? "#4F4653" : refraDark ? "#b8c9e5" : (dark ? "#b2bbb8" : "#46534f")
+    readonly property color textDim: dohna ? "#766D77" : refraDark ? "#7894bc" : (dark ? "#87938f" : "#65716c")
+    readonly property color accent: dohna ? "#FF4384" : refraDark ? "#00d9ff" : (dark ? "#62cbd0" : "#177780")
+    readonly property color spectrum: dohna ? "#00DAD5" : refraDark ? "#ff36c7" : (dark ? "#62cbd0" : "#177780")
     readonly property color accentText: dohna ? "#B51F59" : accent
     readonly property color spectrumText: dohna ? "#007A78" : spectrum
-    readonly property color violet: dohna ? "#F5F044" : (dark ? "#92a9a7" : "#526b69")
+    readonly property color violet: dohna ? "#F5F044" : refraDark ? "#5e87ff" : (dark ? "#92a9a7" : "#526b69")
     readonly property color amber: dohna ? "#8D7600" : (dark ? "#ffc857" : "#9b6800")
-    readonly property color electric: dohna ? "#00DAD5" : (dark ? "#62cbd0" : "#177780")
-    readonly property color glass: dohna ? "#FFFDF7" : (dark ? "#1c2429" : "#e5e9e4")
-    readonly property color glassRaised: dohna ? "#FFFDF7" : (dark ? "#1c2429" : "#e5e9e4")
+    readonly property color electric: dohna ? "#00DAD5" : refraDark ? "#00aaff" : (dark ? "#62cbd0" : "#177780")
+    readonly property color glass: dohna ? "#FFFDF7" : refraDark ? "#0a2455" : (dark ? "#1c2429" : "#e5e9e4")
+    readonly property color glassRaised: dohna ? "#FFFDF7" : refraDark ? "#0c2a61" : (dark ? "#1c2429" : "#e5e9e4")
     readonly property color stageShadow: dohna ? "#4017151E" : (dark ? "#6b000000" : "#3d253d47")
     readonly property color danger: dohna ? "#D62855" : (dark ? "#ff7f8f" : "#a62d43")
-    readonly property color backgroundTop: dohna ? paper : paper
-    readonly property color backgroundBottom: dohna ? paper : paper
-    readonly property color navigationSurface: dohna ? ink : (dark ? "#1c2429" : "#e5e9e4")
+    readonly property color backgroundTop: dohna ? paper : refraDark ? "#061c51" : paper
+    readonly property color backgroundBottom: dohna ? paper : refraDark ? "#020d2c" : paper
+    readonly property color navigationSurface: dohna ? ink : refraDark ? "#041338" : (dark ? "#1c2429" : "#e5e9e4")
     readonly property color navigationText: dohna ? white : text
     readonly property color navigationTextDim: dohna ? "#F5F044" : textDim
-    readonly property color headerSurface: dohna ? paper : paper
-    readonly property color inputSurface: dohna ? white : (dark ? "#252f34" : "#f2f3ed")
-    readonly property color inputTrack: dohna ? paper : (dark ? "#303a3f" : "#d1d8d2")
-    readonly property color previewSurface: dohna ? white : (dark ? "#14191d" : "#f2f3ed")
+    readonly property color headerSurface: dohna ? paper : refraDark ? "#05183f" : paper
+    readonly property color inputSurface: dohna ? white : refraDark ? "#071c43" : (dark ? "#252f34" : "#f2f3ed")
+    readonly property color inputTrack: dohna ? paper : refraDark ? "#123166" : (dark ? "#303a3f" : "#d1d8d2")
+    readonly property color previewSurface: dohna ? white : refraDark ? "#020d27" : (dark ? "#14191d" : "#f2f3ed")
     readonly property color selectionEdge: dohna ? "#F5F044" : accent
-    readonly property color buttonPrimary: dohna ? white : (dark ? "#e5e9e4" : "#1c2429")
-    readonly property color buttonPrimaryText: dohna ? ink : (dark ? "#14191d" : "#f2f3ed")
+    readonly property color buttonPrimary: dohna ? white : refraDark ? "#0758dd" : (dark ? "#e5e9e4" : "#1c2429")
+    readonly property color buttonPrimaryText: dohna ? ink : refraDark ? "#ffffff" : (dark ? "#14191d" : "#f2f3ed")
 
     readonly property var displayFonts: dohna ? [
         "Arial Black",
         "Microsoft YaHei UI",
         "Bahnschrift",
+        "Arial",
+        "sans-serif"
+    ] : refraDark ? [
+        "Arial Narrow",
+        "Bahnschrift",
+        "DIN Alternate",
         "Arial",
         "sans-serif"
     ] : [
@@ -75,7 +82,7 @@ QtObject {
     readonly property string displayFont: displayFonts[0]
     readonly property string uiFont: uiFonts[0]
     readonly property string monoFont: monoFonts[0]
-    readonly property string displayCjkFont: displayFonts[1]
+    readonly property string displayCjkFont: dohna ? displayFonts[1] : "Microsoft YaHei UI"
     readonly property string uiCjkFont: uiFonts[1]
     readonly property string monoCjkFont: monoFonts[1]
 
@@ -96,7 +103,9 @@ QtObject {
     }
 
     function displayTitleSize(viewportWidth) {
-        return dohna
+        return refraDark
+                ? Math.max(46, Math.min(74, viewportWidth * 0.056))
+                : dohna
                 ? Math.max(48, Math.min(68, viewportWidth * 0.052))
                 : Math.max(40, Math.min(54, viewportWidth * 0.042))
     }

@@ -43,7 +43,7 @@ Item {
                 ColumnLayout {
                     id: scheduleForm
                     width: parent.width - scheduleBar.contentInset
-                    spacing: 12
+                    spacing: root.theme.refraDark ? 8 : 12
 
                     SectionHeader {
                         theme: root.theme
@@ -64,9 +64,10 @@ Item {
                     }
 
                     SettingLabel {
+                        objectName: "settingsPollLegacyLabel"
                         theme: root.theme
+                        visible: !root.theme.refraDark && root.workbench.triggerMethodIndex !== 2
                         title: "画面变化轮询"
-                        visible: root.workbench.triggerMethodIndex !== 2
                         meta: "FPS"
                         description: "设置画面变化的检查频率。"
                         settingKey: "settings-poll-fps"
@@ -78,6 +79,8 @@ Item {
                         accessibleName: "画面变化轮询频率"
                         settingDescription: "设置画面变化的检查频率。"
                         settingKey: "settings-poll-fps"
+                        rowTitle: "画面变化轮询"
+                        rowMeta: "FPS"
                         value: root.workbench.changePollFps
                         minimum: 1
                         maximum: 120
@@ -90,19 +93,23 @@ Item {
                     }
 
                     SettingLabel {
+                        objectName: "settingsClearAfterLegacyLabel"
                         theme: root.theme
+                        visible: !root.theme.refraDark && root.workbench.triggerMethodIndex !== 2
                         title: "字幕消失判定"
-                        visible: root.workbench.triggerMethodIndex !== 2
                         meta: "50—1000 MS"
                         description: "设置字幕多久未更新后被判定为消失。"
                         settingKey: "settings-clear-after"
                     }
                     NumberStepper {
+                        objectName: "settingsClearAfterStepper"
                         theme: root.theme
                         accessibleName: "字幕消失判定时间"
                         visible: root.workbench.triggerMethodIndex !== 2
                         settingDescription: "设置字幕多久未更新后被判定为消失。"
                         settingKey: "settings-clear-after"
+                        rowTitle: "字幕消失判定"
+                        rowMeta: "50—1000 MS"
                         value: root.workbench.clearAfterMs
                         minimum: 50
                         maximum: 1000
@@ -121,17 +128,22 @@ Item {
                         Layout.fillWidth: true
                         spacing: 10
                         SettingLabel {
+                            objectName: "settingsRoiLegacyLabel"
                             theme: root.theme
+                            visible: !root.theme.refraDark
                             title: "ROI 响应目标"
                             meta: "100—5000 MS"
                             description: "设置变化区域处理的目标响应时间。"
                             settingKey: "settings-roi-response"
                         }
                         NumberStepper {
+                            objectName: "settingsRoiResponseStepper"
                             theme: root.theme
                             accessibleName: "动态 ROI 响应目标"
                             settingDescription: "设置变化区域处理的目标响应时间。"
                             settingKey: "settings-roi-response"
+                            rowTitle: "ROI 响应目标"
+                            rowMeta: "100—5000 MS"
                             value: root.workbench.roiResponseTargetMs
                             minimum: 100
                             maximum: 5000
@@ -152,17 +164,22 @@ Item {
                         spacing: 10
 
                         SettingLabel {
+                            objectName: "settingsStableRescanLegacyLabel"
                             theme: root.theme
+                            visible: !root.theme.refraDark
                             title: "稳定后复扫"
                             meta: "0—60000 MS"
                             description: "设置画面稳定后再次检查的等待时间。"
                             settingKey: "settings-stable-rescan"
                         }
                         NumberStepper {
+                            objectName: "settingsStableRescanStepper"
                             theme: root.theme
                             accessibleName: "稳定后复扫时间"
                             settingDescription: "设置画面稳定后再次检查的等待时间。"
                             settingKey: "settings-stable-rescan"
+                            rowTitle: "稳定后复扫"
+                            rowMeta: "0—60000 MS"
                             value: root.workbench.settleRescanMs
                             minimum: 0
                             maximum: 60000
@@ -175,17 +192,22 @@ Item {
                             }
                         }
                         SettingLabel {
+                            objectName: "settingsIdleRescanLegacyLabel"
                             theme: root.theme
+                            visible: !root.theme.refraDark
                             title: "空闲复扫"
                             meta: "0—60000 MS"
                             description: "设置空闲时再次检查的等待时间。"
                             settingKey: "settings-idle-rescan"
                         }
                         NumberStepper {
+                            objectName: "settingsIdleRescanStepper"
                             theme: root.theme
                             accessibleName: "空闲复扫时间"
                             settingDescription: "设置空闲时再次检查的等待时间。"
                             settingKey: "settings-idle-rescan"
+                            rowTitle: "空闲复扫"
+                            rowMeta: "0—60000 MS"
                             value: root.workbench.idleRescanMs
                             minimum: 0
                             maximum: 60000
@@ -198,17 +220,22 @@ Item {
                             }
                         }
                         SettingLabel {
+                            objectName: "settingsOcrCooldownLegacyLabel"
                             theme: root.theme
+                            visible: !root.theme.refraDark
                             title: "OCR 冷却"
                             meta: "0—10000 MS"
                             description: "设置两次文字识别之间的最短等待时间。"
                             settingKey: "settings-ocr-cooldown"
                         }
                         NumberStepper {
+                            objectName: "settingsOcrCooldownStepper"
                             theme: root.theme
                             accessibleName: "OCR 冷却时间"
                             settingDescription: "设置两次文字识别之间的最短等待时间。"
                             settingKey: "settings-ocr-cooldown"
+                            rowTitle: "OCR 冷却"
+                            rowMeta: "0—10000 MS"
                             value: root.workbench.ocrCooldownMs
                             minimum: 0
                             maximum: 10000
@@ -316,7 +343,7 @@ Item {
 
             ColumnLayout {
                 anchors.fill: parent
-                spacing: 12
+                spacing: root.theme.refraDark ? 8 : 12
 
                 SectionHeader {
                     theme: root.theme
@@ -333,8 +360,8 @@ Item {
                     clip: true
                     Layout.fillWidth: true
                     Layout.minimumHeight: 110
-                    Layout.preferredHeight: 158
-                    Layout.maximumHeight: 158
+                    Layout.preferredHeight: root.theme.refraDark ? 126 : 158
+                    Layout.maximumHeight: root.theme.refraDark ? 126 : 158
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                     ScrollBar.vertical: PrismScrollBar {
                         id: profileBar
@@ -425,6 +452,7 @@ Item {
                         }
                         SettingLabel { theme: root.theme; title: "OCR 流程" }
                         TextArea {
+                            id: ocrLatencyText
                             objectName: "settingsOcrLatency"
                             Accessible.name: "OCR 流程延迟"
                             text: root.diagnostics.ocr
@@ -434,14 +462,17 @@ Item {
                             selectionColor: root.theme.accent
                             selectedTextColor: root.theme.ink
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 13
+                            font.pixelSize: root.theme.refraDark ? 12 : 13
                             wrapMode: TextEdit.Wrap
+                            Layout.preferredHeight: root.theme.refraDark
+                                                     ? Math.max(34, ocrLatencyText.contentHeight + 8) : -1
                             Layout.fillWidth: true
                             background: null
                         }
                         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.line }
                         SettingLabel { theme: root.theme; title: "翻译流程" }
                         TextArea {
+                            id: translationLatencyText
                             objectName: "settingsTranslationLatency"
                             Accessible.name: "翻译流程延迟"
                             text: root.diagnostics.translation
@@ -451,14 +482,17 @@ Item {
                             selectionColor: root.theme.accent
                             selectedTextColor: root.theme.ink
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 13
+                            font.pixelSize: root.theme.refraDark ? 12 : 13
                             wrapMode: TextEdit.Wrap
+                            Layout.preferredHeight: root.theme.refraDark
+                                                     ? Math.max(34, translationLatencyText.contentHeight + 8) : -1
                             Layout.fillWidth: true
                             background: null
                         }
                         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.line }
                         SettingLabel { theme: root.theme; title: "延迟汇总" }
                         TextArea {
+                            id: latencySummaryText
                             objectName: "settingsLatencySummary"
                             Accessible.name: "延迟汇总"
                             text: root.diagnostics.summary
@@ -468,8 +502,10 @@ Item {
                             selectionColor: root.theme.accent
                             selectedTextColor: root.theme.ink
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 13
+                            font.pixelSize: root.theme.refraDark ? 12 : 13
                             wrapMode: TextEdit.Wrap
+                            Layout.preferredHeight: root.theme.refraDark
+                                                     ? Math.max(34, latencySummaryText.contentHeight + 8) : -1
                             Layout.fillWidth: true
                             background: null
                         }

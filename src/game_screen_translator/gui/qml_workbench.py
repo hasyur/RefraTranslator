@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPointF, QRect, Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QScreen, QWindow
+from PySide6.QtGui import (
+    QColor,
+    QFontDatabase,
+    QIcon,
+    QPainter,
+    QPen,
+    QPixmap,
+    QScreen,
+    QWindow,
+)
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -32,6 +42,8 @@ from .workbench_controller import WorkbenchController
 _CONTEXT_PROPERTY = "workbench"
 _DEFAULT_QML_PATH = Path(__file__).with_name("qml") / "Main.qml"
 _DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+_REGISTERED_DISPLAY_FONT_IDS: list[int] = []
+_SYSTEM_DISPLAY_FONTS_CHECKED = False
 
 
 def _startup_message(message: str) -> None:
@@ -42,6 +54,32 @@ def _use_customizable_quick_style() -> None:
     """Select a non-native Controls style before loading customized controls."""
 
     QQuickStyle.setStyle("Basic")
+
+
+def _register_optional_system_display_fonts() -> None:
+    """Expose installed display faces to Qt when Windows does not enumerate them."""
+
+    global _SYSTEM_DISPLAY_FONTS_CHECKED
+    if _SYSTEM_DISPLAY_FONTS_CHECKED or sys.platform != "win32":
+        return
+    _SYSTEM_DISPLAY_FONTS_CHECKED = True
+    font_directory = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    for filename in (
+        "ARIALN.TTF",
+        "ARIALNB.TTF",
+        "ARIALNI.TTF",
+        "ARIALNBI.TTF",
+        "ARIBLK.TTF",
+    ):
+        font_path = font_directory / filename
+        if not font_path.is_file():
+            continue
+        try:
+            font_id = QFontDatabase.addApplicationFont(str(font_path))
+        except (OSError, RuntimeError):
+            continue
+        if font_id >= 0:
+            _REGISTERED_DISPLAY_FONT_IDS.append(font_id)
 
 
 def _use_smooth_quick_rendering() -> None:
@@ -265,6 +303,7 @@ class QmlWorkbenchHost(QObject):
         if app is None:
             raise RuntimeError("QmlWorkbenchHost 需要已经创建的 QApplication")
 
+        _register_optional_system_display_fonts()
         _use_customizable_quick_style()
         _use_smooth_quick_rendering()
 

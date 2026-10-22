@@ -10,12 +10,34 @@ Item {
     required property var workbench
     property int transitionSerial: 0
     property bool pageMotionEnabled: false
+    property bool startPreludePending: false
     readonly property bool compactOverview: height < 580
     readonly property var themeValues: ["system", "dark", "light"]
     readonly property var skinValues: ["prism", "dohna"]
     readonly property var hotkeyBehaviorValues: ["start_only", "toggle", "toggle_show"]
     readonly property var hotkeyBehaviorLabels: ["仅启动", "启动 / 停止翻译", "启动 / 停止并打开 GUI"]
+    readonly property var p3PageOrder: ["HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS"]
     property bool hotkeyRecording: false
+    signal liveToggleRequested()
+    signal saveRequested()
+
+    function p3MenuTitle(page) {
+        const titles = {
+            "HOME": "HOME", "CAPTURE": "CAPTURE", "OCR": "OCR",
+            "TRANSLATION": "TRANSLATE", "OVERLAY": "OVERLAY",
+            "CACHE": "CACHE", "SETTINGS": "SETTINGS"
+        }
+        return titles[page] || page
+    }
+
+    function p3MenuSubtitle(page) {
+        const labels = {
+            "HOME": "总览", "CAPTURE": "捕获", "OCR": "文字识别",
+            "TRANSLATION": "翻译", "OVERLAY": "覆盖层",
+            "CACHE": "缓存", "SETTINGS": "设置"
+        }
+        return labels[page] || page
+    }
 
     function hotkeyKeyName(key) {
         if (key >= Qt.Key_A && key <= Qt.Key_Z)
@@ -155,8 +177,656 @@ Item {
         onAccepted: root.workbench.deleteProfile(profileId)
     }
 
+    PrismDialog {
+        id: refraPreferencesDialog
+        objectName: "refraPreferencesDialog"
+        surfaceName: "refraPreferencesDialog"
+        theme: root.theme
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        title: "工作台偏好"
+        acceptText: "完成"
+        showRejectButton: false
+        width: Math.min(650, root.width - 54)
+
+        ScrollView {
+            objectName: "refraPreferencesScroll"
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(470, root.height - 280)
+            clip: true
+            ScrollBar.vertical: PrismScrollBar { theme: root.theme }
+
+            ColumnLayout {
+                width: parent.width
+                spacing: 12
+
+                SectionHeader {
+                    theme: root.theme
+                    title: "外观"
+                    meta: "APPEARANCE"
+                    Layout.fillWidth: true
+                }
+                PrismComboBox {
+                    objectName: "refraHomeSkinSelector"
+                    theme: root.theme
+                    accessibleName: "界面皮肤"
+                    settingDescription: "选择工作台的视觉皮肤；Dohna 使用固定的明亮配色。"
+                    settingKey: "home-skin"
+                    model: ["Prism", "Dohna"]
+                    currentIndex: root.workbench.skinPreference === "dohna" ? 1 : 0
+                    Layout.fillWidth: true
+                    onActivated: index => {
+                        root.workbench.setSkin(index === 1 ? "dohna" : "prism")
+                        refraPreferencesDialog.close()
+                    }
+                }
+                PrismComboBox {
+                    objectName: "refraHomeThemeSelector"
+                    theme: root.theme
+                    accessibleName: "界面主题"
+                    settingDescription: "选择工作台使用的颜色主题。"
+                    settingKey: "home-theme"
+                    model: ["跟随系统", "深色", "浅色"]
+                    currentIndex: Math.max(0, root.themeValues.indexOf(root.workbench.themePreference))
+                    enabled: root.workbench.skinPreference !== "dohna"
+                    Layout.fillWidth: true
+                    onActivated: index => {
+                        if (index >= 0 && index < root.themeValues.length)
+                            root.workbench.setTheme(root.themeValues[index])
+                        refraPreferencesDialog.close()
+                    }
+                }
+                PrismToggle {
+                    objectName: "refraHomeReducedMotionToggle"
+                    theme: root.theme
+                    text: "减少界面动效"
+                    settingDescription: "减少页面切换和反馈动画。"
+                    settingKey: "home-motion"
+                    checked: root.workbench.reducedMotion
+                    Layout.fillWidth: true
+                    onToggled: root.workbench.setReducedMotion(checked)
+                }
+                PrismToggle {
+                    objectName: "refraHomeStartupToggle"
+                    theme: root.theme
+                    text: "开机自启动"
+                    settingDescription: "Windows 登录后静默启动 RefraTranslator，并在系统托盘驻留。"
+                    settingKey: "home-startup"
+                    checked: root.workbench.startWithWindows
+                    Layout.fillWidth: true
+                    onToggled: root.workbench.setStartWithWindows(checked)
+                }
+
+                SectionHeader {
+                    theme: root.theme
+                    title: "全局快捷键"
+                    meta: "HOTKEY"
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                }
+                Item {
+                    id: refraHotkeyField
+                    objectName: "refraHotkeyField"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 42
+                    focus: root.hotkeyRecording
+                    activeFocusOnTab: true
+                    Accessible.name: "全局翻译快捷键"
+                    Keys.onPressed: event => root.recordHotkey(event)
+                    Rectangle {
+                        anchors.fill: parent
+                        color: root.theme.inputSurface
+                        border.color: refraHotkeyField.activeFocus ? root.theme.selectionEdge : root.theme.lineStrong
+                        border.width: refraHotkeyField.activeFocus ? 2 : 1
+                        Text {
+                            objectName: "refraHotkeyDisplay"
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            text: root.workbench.hotkeyPreference
+                            color: root.theme.text
+                            font.family: root.theme.uiFontFor(text)
+                            font.pixelSize: 15
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                    SettingHint {
+                        theme: root.theme
+                        target: refraHotkeyField
+                        description: "按住 Ctrl、Alt、Shift 或 Win 中的至少一个，再按另一个键，例如 Ctrl+Alt+T。"
+                        settingKey: "home-hotkey"
+                    }
+                }
+                PrismComboBox {
+                    objectName: "refraHotkeyBehaviorSelector"
+                    theme: root.theme
+                    accessibleName: "快捷键行为"
+                    settingDescription: "选择翻译已经运行时再次按下全局快捷键的处理方式。"
+                    settingKey: "home-hotkey-behavior"
+                    model: root.hotkeyBehaviorLabels
+                    currentIndex: Math.max(0, root.hotkeyBehaviorValues.indexOf(root.workbench.hotkeyBehaviorPreference))
+                    Layout.fillWidth: true
+                    onActivated: index => {
+                        if (index >= 0 && index < root.hotkeyBehaviorValues.length)
+                            root.workbench.setHotkeyBehavior(root.hotkeyBehaviorValues[index])
+                    }
+                }
+                Text {
+                    objectName: "refraHotkeyRecordingHint"
+                    visible: root.hotkeyRecording
+                    text: "正在录制：按住 Ctrl、Alt、Shift 或 Win，再按另一个键；Esc 取消"
+                    color: root.theme.amber
+                    font.family: root.theme.uiFontFor(text)
+                    font.pixelSize: 13
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    PrismButton {
+                        objectName: "refraHotkeyRecordButton"
+                        theme: root.theme
+                        primary: root.hotkeyRecording
+                        text: root.hotkeyRecording ? "按下组合键…" : "录制快捷键"
+                        Layout.fillWidth: true
+                        onClicked: {
+                            root.hotkeyRecording = true
+                            refraHotkeyField.forceActiveFocus()
+                        }
+                    }
+                    PrismButton {
+                        objectName: "refraHotkeyDefaultButton"
+                        theme: root.theme
+                        text: "恢复默认"
+                        Layout.fillWidth: true
+                        onClicked: {
+                            root.hotkeyRecording = false
+                            root.workbench.setHotkey("Ctrl+Alt+T")
+                        }
+                    }
+                }
+            }
+        }
+        onClosed: root.hotkeyRecording = false
+    }
+
+    Item {
+        id: refraDarkHome
+        objectName: "refraDarkHome"
+        anchors.fill: parent
+        visible: root.theme.refraDark
+        enabled: root.theme.refraDark
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
+
+            Item {
+                objectName: "refraDarkHomeStage"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: 390
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: root.width < 1100 ? 24 : 42
+                    anchors.rightMargin: root.width < 1100 ? 18 : 34
+                    anchors.topMargin: root.height < 760 ? 16 : 24
+                    anchors.bottomMargin: 8
+                    spacing: 14
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.preferredWidth: parent.width * 0.55
+                        Layout.minimumWidth: 420
+                        Layout.maximumWidth: 570
+                        spacing: 0
+
+                        RowLayout {
+                            spacing: 8
+                            Text {
+                                text: "REFRA"
+                                color: root.theme.accent
+                                font.family: "Arial Narrow"
+                                font.pixelSize: 22
+                                font.weight: Font.Bold
+                                font.letterSpacing: 0.8
+                            }
+                            Text {
+                                text: "TRANSLATOR"
+                                color: root.theme.text
+                                font.family: root.theme.monoFontFor(text)
+                                font.pixelSize: 12
+                                font.letterSpacing: 1.4
+                            }
+                        }
+                        ColumnLayout {
+                            objectName: "refraDarkNavigationMenu"
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.topMargin: 7
+                            spacing: 0
+
+                            Repeater {
+                                model: root.p3PageOrder
+                                PrismButton {
+                                    objectName: "refraDarkNavigationButton" + index
+                                    required property int index
+                                    required property var modelData
+                                    theme: root.theme
+                                    navigation: true
+                                    navigationHero: true
+                                    navigationNumber: String(index + 1).padStart(2, "0")
+                                    navigationSubtitle: root.p3MenuSubtitle(String(modelData))
+                                    navigationCool: index % 2 === 1
+                                    navigationTilt: index % 2 === 0 ? -3.8 : -5.7
+                                    text: root.p3MenuTitle(String(modelData))
+                                    primary: root.workbench.currentPage === modelData
+                                    quiet: !primary
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: Math.max(44, Math.min(54, root.height * 0.066))
+                                    Layout.minimumHeight: 44
+                                    Layout.leftMargin: index % 3 === 1 ? 14 : index % 3 === 2 ? 6 : 0
+                                    Layout.rightMargin: index % 3 === 0 ? 18 : 4
+                                    onClicked: root.workbench.setPage(String(modelData))
+                                }
+                            }
+                        }
+                    }
+
+                    Item {
+                        objectName: "refraDarkHeroStage"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.preferredWidth: parent.width * 0.45
+                        Layout.minimumWidth: 280
+
+                        Rectangle {
+                            x: parent.width * 0.08
+                            y: parent.height * 0.48
+                            width: parent.width * 0.92
+                            height: 1
+                            color: root.theme.accent
+                            opacity: 0.24
+                            rotation: -12
+                        }
+                        Rectangle {
+                            x: parent.width * 0.17
+                            y: parent.height * 0.60
+                            width: parent.width * 0.78
+                            height: 1
+                            color: root.theme.spectrum
+                            opacity: 0.22
+                            rotation: -12
+                        }
+                        Image {
+                            objectName: "refraDarkHeroImage"
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width * 0.82
+                            height: parent.height * 0.65
+                            source: "../assets/refra-hero-dark.png"
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                        }
+                        ColumnLayout {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 12
+                            spacing: 4
+                            Text {
+                                text: root.workbench.currentProfileName
+                                color: root.theme.text
+                                font.family: root.theme.uiFontFor(text)
+                                font.pixelSize: 18
+                                font.weight: Font.DemiBold
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                            Text {
+                                text: root.workbench.running ? "● 正在翻译" : "● 未启动"
+                                color: root.workbench.running ? root.theme.accent : root.theme.textSoft
+                                font.family: root.theme.uiFontFor(text)
+                                font.pixelSize: 13
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                objectName: "refraDarkHomeRule"
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: root.theme.lineStrong
+                opacity: 0.76
+            }
+
+            RowLayout {
+                objectName: "refraDarkHomeStatusBand"
+                Layout.fillWidth: true
+                Layout.preferredHeight: root.height < 760 ? 136 : 160
+                Layout.minimumHeight: 126
+                Layout.leftMargin: root.width < 1100 ? 22 : 42
+                Layout.rightMargin: root.width < 1100 ? 20 : 36
+                Layout.topMargin: 5
+                Layout.bottomMargin: 2
+                spacing: 0
+
+                ColumnLayout {
+                    objectName: "refraDarkProfileSummary"
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    Layout.minimumWidth: 210
+                    Layout.preferredWidth: 270
+                    Layout.rightMargin: 18
+                    spacing: 4
+                    Text {
+                        text: "系统状态"
+                        color: root.theme.text
+                        font.family: root.theme.uiFontFor(text)
+                        font.pixelSize: 14
+                        font.weight: Font.Bold
+                    }
+                    RowLayout {
+                        spacing: 7
+                        Rectangle {
+                            Layout.preferredWidth: 7
+                            Layout.preferredHeight: 7
+                            radius: 4
+                            color: root.workbench.runTone === "error" ? root.theme.danger
+                                 : root.workbench.runTone === "warning" ? root.theme.amber
+                                 : root.workbench.running ? root.theme.accent : root.theme.textDim
+                        }
+                        Text {
+                            objectName: "refraDarkRunState"
+                            text: root.workbench.runState
+                            color: root.workbench.runTone === "error" ? root.theme.danger
+                                 : root.workbench.runTone === "warning" ? root.theme.amber
+                                 : root.workbench.running ? root.theme.accent : root.theme.text
+                            font.family: root.theme.uiFontFor(text)
+                            font.pixelSize: 18
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                    }
+                    PrismComboBox {
+                        objectName: "refraDarkProfileSelector"
+                        theme: root.theme
+                        accessibleName: "当前配置"
+                        settingDescription: "选择当前游戏的配置。"
+                        settingKey: "home-profile"
+                        model: root.workbench.profileNames
+                        currentIndex: root.workbench.currentProfileIndex
+                        enabled: model.length > 0
+                        Layout.fillWidth: true
+                        onActivated: index => root.workbench.selectProfile(index)
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 5
+                        PrismButton {
+                            objectName: "refraDarkRefreshProfiles"
+                            theme: root.theme
+                            text: "刷新"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 45
+                            onClicked: root.workbench.refreshProfiles()
+                        }
+                        PrismButton {
+                            objectName: "refraDarkCreateProfile"
+                            theme: root.theme
+                            text: "新建"
+                            primary: true
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 45
+                            onClicked: createProfileDialog.open()
+                        }
+                        PrismButton {
+                            objectName: "refraDarkDeleteProfile"
+                            theme: root.theme
+                            text: "删除"
+                            tone: "danger"
+                            enabled: root.workbench.hasProfile && !root.workbench.running
+                                     && root.workbench.runPhase !== "stopping"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 45
+                            onClicked: {
+                                deleteProfileDialog.profileId = root.workbench.profileIds[root.workbench.currentProfileIndex]
+                                deleteProfileDialog.profileName = root.workbench.currentProfileName
+                                deleteProfileDialog.open()
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: root.theme.lineStrong; opacity: 0.75 }
+
+                ColumnLayout {
+                    objectName: "refraDarkOcrSummary"
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    Layout.minimumWidth: 170
+                    Layout.leftMargin: 22
+                    Layout.rightMargin: 18
+                    spacing: 5
+                    Text { text: "OCR"; color: root.theme.accent; font.family: root.theme.monoFontFor(text); font.pixelSize: 12; font.letterSpacing: 1 }
+                    Text {
+                        objectName: "refraDarkOcrStatus"
+                        text: root.workbench.ocrStatus
+                        color: root.theme.text
+                        font.family: root.theme.uiFontFor(text)
+                        font.pixelSize: 17
+                        font.weight: Font.Medium
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        text: root.workbench.detectionQualitySummary
+                        color: root.theme.textSoft
+                        font.family: root.theme.monoFontFor(text)
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                        maximumLineCount: 2
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                }
+
+                Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: root.theme.lineStrong; opacity: 0.75 }
+
+                ColumnLayout {
+                    objectName: "refraDarkTranslationSummary"
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    Layout.minimumWidth: 175
+                    Layout.leftMargin: 22
+                    Layout.rightMargin: 18
+                    spacing: 5
+                    Text { text: "TRANSLATION"; color: root.theme.textSoft; font.family: root.theme.monoFontFor(text); font.pixelSize: 12; font.letterSpacing: 0.7 }
+                    Text {
+                        text: root.workbench.backend === "builtin" ? "内置本地模型" : "外部 API"
+                        color: root.theme.text
+                        font.family: root.theme.uiFontFor(text)
+                        font.pixelSize: 17
+                        font.weight: Font.Medium
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Flickable {
+                        objectName: "refraDarkModelScroll"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.minimumHeight: 20
+                        contentWidth: width
+                        contentHeight: modelName.implicitHeight
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.vertical: PrismScrollBar { theme: root.theme }
+                        Text {
+                            id: modelName
+                            objectName: "refraDarkModelName"
+                            width: parent.width
+                            text: root.workbench.backend === "builtin" ? root.workbench.builtinModel : root.workbench.model
+                            color: root.theme.textSoft
+                            font.family: root.theme.monoFontFor(text)
+                            font.pixelSize: 11
+                            wrapMode: Text.WrapAnywhere
+                        }
+                    }
+                }
+
+                Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: root.theme.lineStrong; opacity: 0.75 }
+
+                ColumnLayout {
+                    objectName: "refraDarkLastRunSummary"
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    Layout.minimumWidth: 190
+                    Layout.leftMargin: 22
+                    spacing: 5
+                    Text { text: "上次运行"; color: root.theme.text; font.family: root.theme.uiFontFor(text); font.pixelSize: 14; font.weight: Font.Bold }
+                    Text {
+                        objectName: "refraDarkLastRunStatus"
+                        text: root.workbench.lastRunAvailable ? root.workbench.lastRunStatus
+                              : "尚无上次正常且有效的运行结果"
+                        color: root.workbench.lastRunAvailable ? root.theme.textSoft : root.theme.textDim
+                        font.family: root.theme.uiFontFor(text)
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                        maximumLineCount: 2
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        text: root.workbench.lastRunAvailable
+                              ? "OCR " + root.workbench.lastRunOcrPeakText + "  ·  LLM " + root.workbench.lastRunLlmPeakText
+                              : "快捷键  " + root.workbench.hotkeyPreference
+                        color: root.theme.accent
+                        font.family: root.theme.monoFontFor(text)
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        visible: root.workbench.lastRunAvailable
+                        text: "快捷键  " + root.workbench.hotkeyPreference
+                        color: root.theme.textDim
+                        font.family: root.theme.monoFontFor(text)
+                        font.pixelSize: 10
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                Layout.leftMargin: root.width < 1100 ? 22 : 42
+                Layout.rightMargin: root.width < 1100 ? 20 : 36
+                color: root.theme.line
+            }
+
+            RowLayout {
+                objectName: "refraDarkHomeActions"
+                Layout.fillWidth: true
+                Layout.preferredHeight: root.height < 760 ? 56 : 64
+                Layout.leftMargin: root.width < 1100 ? 22 : 42
+                Layout.rightMargin: root.width < 1100 ? 20 : 36
+                Layout.bottomMargin: 4
+                spacing: 12
+                PrismButton {
+                    objectName: "refraDarkPreferencesButton"
+                    theme: root.theme
+                    text: "工作台偏好"
+                    onClicked: refraPreferencesDialog.open()
+                }
+                ColumnLayout {
+                    objectName: "refraDarkHomeActionFeedback"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 110
+                    spacing: 2
+                    Text {
+                        text: "皮肤 · 主题 · 动效 · 自启动"
+                        color: root.theme.textDim
+                        font.family: root.theme.uiFontFor(text)
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    RowLayout {
+                        objectName: "refraDarkHomeFeedbackRow"
+                        Layout.fillWidth: true
+                        spacing: 5
+                        Rectangle {
+                            objectName: "refraDarkHomeStatusDot"
+                            Layout.preferredWidth: 6
+                            Layout.preferredHeight: 6
+                            radius: 3
+                            color: root.workbench.settingsDirty ? root.theme.amber
+                                 : root.workbench.statusTone === "error" ? root.theme.danger
+                                 : root.workbench.statusTone === "warning" ? root.theme.amber
+                                 : root.workbench.statusTone === "success" ? root.theme.accent
+                                 : root.theme.textDim
+                        }
+                        Text {
+                            objectName: "refraDarkHomeStatusText"
+                            visible: !root.workbench.settingsDirty
+                            text: root.workbench.statusText
+                            color: root.workbench.statusTone === "error" ? root.theme.danger
+                                 : root.workbench.statusTone === "warning" ? root.theme.amber
+                                 : root.workbench.statusTone === "success" ? root.theme.accent
+                                 : root.theme.textSoft
+                            font.family: root.theme.uiFontFor(text)
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            objectName: "refraDarkHomeUnsavedStatus"
+                            visible: root.workbench.settingsDirty
+                            text: "有未应用更改"
+                            color: root.theme.amber
+                            font.family: root.theme.uiFontFor(text)
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+                PrismButton {
+                    objectName: "refraDarkApplyButton"
+                    theme: root.theme
+                    text: "应用更改"
+                    enabled: root.workbench.hasProfile
+                    onClicked: root.saveRequested()
+                }
+                PrismButton {
+                    objectName: "refraDarkStartButton"
+                    theme: root.theme
+                    primary: true
+                    text: root.startPreludePending ? "正在启动…" : root.workbench.startButtonText
+                    enabled: root.workbench.runPhase !== "stopping"
+                             && !root.startPreludePending
+                             && (root.workbench.canStart || root.workbench.running)
+                    onClicked: root.liveToggleRequested()
+                }
+            }
+        }
+    }
+
     RowLayout {
         anchors.fill: parent
+        visible: !root.theme.refraDark
+        enabled: !root.theme.refraDark
         spacing: 16
 
         PrismPanel {

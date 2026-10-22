@@ -13,6 +13,10 @@ Button {
     property bool navigation: false
     property string navigationNumber: ""
     property string navigationCode: ""
+    property string navigationSubtitle: ""
+    property bool navigationCool: false
+    property real navigationTilt: 0
+    property bool navigationHero: false
     property string tone: "neutral"
     property real dohnaImpact: 0
     // NumberStepper embeds its two actions in one shared Dohna surface.  The
@@ -31,12 +35,13 @@ Button {
     implicitWidth: Math.max(112, contentItem.implicitWidth + 30)
     implicitHeight: root.theme.dohna && root.navigation
                     ? Math.ceil(navigationTextMetrics.tightBoundingRect.height / 0.85)
-                    : root.navigation ? 52 : 42
+                    : root.navigation ? (root.theme.refraDark ? (root.navigationHero ? 60 : 66) : 52) : 42
     verticalPadding: root.theme.dohna && root.navigation ? 0 : padding
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
     // Rotate the menu control itself so its label and hit target follow the bar.
-    rotation: root.theme.dohna && root.navigation ? 12 : 0
+    rotation: root.theme.dohna && root.navigation ? 12
+              : root.theme.refraDark && root.navigation ? root.navigationTilt : 0
     scale: root.theme.dohna ? 1 : (root.down ? 0.994 : root.hovered && root.enabled ? 1.004 : 1)
 
     Behavior on scale {
@@ -78,8 +83,10 @@ Button {
     }
 
     contentItem: Item {
-        implicitWidth: root.navigation && !root.theme.dohna ? 150 : buttonLabel.implicitWidth
-        implicitHeight: root.navigation && !root.theme.dohna ? 42 : buttonLabel.implicitHeight
+        implicitWidth: root.navigation && !root.theme.dohna
+                       ? (root.theme.refraDark ? (root.navigationHero ? 520 : 160) : 150)
+                       : buttonLabel.implicitWidth
+        implicitHeight: root.navigation && !root.theme.dohna ? (root.theme.refraDark ? (root.navigationHero ? 58 : 64) : 42) : buttonLabel.implicitHeight
 
         Text {
             id: buttonLabel
@@ -119,7 +126,8 @@ Button {
             width: 24
             height: 18
             text: root.navigationNumber
-            color: root.primary ? root.theme.accent : root.theme.textDim
+            color: root.theme.refraDark && root.primary ? root.theme.ink
+                  : root.primary ? root.theme.accent : root.theme.textDim
             font.family: root.theme.monoFontFor(text)
             font.pixelSize: 12
             font.weight: Font.DemiBold
@@ -127,24 +135,67 @@ Button {
         }
 
         Text {
+            id: navigationTitleLabel
             objectName: "navigationTitleLabel"
             visible: root.navigation && !root.theme.dohna
             x: 37
-            y: 3
-            width: Math.max(0, parent.width - x - 5)
-            height: 24
+            y: root.theme.refraDark && !root.navigationHero ? 1 : (root.theme.refraDark ? 0 : 3)
+            width: root.theme.refraDark && root.navigationHero
+                   ? Math.min(parent.width - x - 10, implicitWidth)
+                   : Math.max(0, parent.width - x - (root.theme.refraDark ? 10 : 5))
+            height: root.theme.refraDark ? (root.navigationHero ? 52 : 36) : 24
             text: root.text
-            color: !root.enabled ? root.theme.textDim : root.theme.text
-            font.family: root.theme.displayFontFor(text)
-            font.pixelSize: 15
-            font.weight: root.primary ? Font.Bold : Font.DemiBold
+            color: root.theme.refraDark && root.primary ? root.theme.ink
+                  : !root.enabled ? root.theme.textDim
+                  : root.theme.refraDark && root.navigationCool ? root.theme.electric
+                  : root.theme.text
+            font.family: root.theme.refraDark && !root.theme.containsCjk(text)
+                         ? "Arial Black" : root.theme.displayFontFor(text)
+            font.pixelSize: root.theme.refraDark
+                            ? (root.navigationHero
+                               ? Math.max(32, Math.min(48, root.width * 0.092))
+                               : Math.max(15, Math.min(24, (root.width - 56)
+                                                       / Math.max(5, String(text).length * 0.58)))
+                              )
+                            : 15
+            font.weight: root.theme.refraDark
+                         ? Font.Black : root.primary ? Font.Bold : Font.DemiBold
+            font.italic: root.theme.refraDark
+            font.letterSpacing: root.theme.refraDark ? -1.4 : 0
+            verticalAlignment: Text.AlignVCenter
+            elide: root.theme.refraDark ? Text.ElideNone : Text.ElideRight
+            transform: Scale {
+                xScale: root.theme.refraDark ? 0.78 : 1
+                origin.x: 0
+                origin.y: navigationTitleLabel.height / 2
+            }
+        }
+
+        Text {
+            id: navigationSubtitleLabel
+            objectName: "navigationSubtitleLabel"
+            visible: root.navigation && !root.theme.dohna && root.theme.refraDark
+            x: root.navigationHero
+               ? Math.min(parent.width - implicitWidth - 5,
+                          navigationTitleLabel.x + navigationTitleLabel.width + 16)
+               : 37
+            y: root.navigationHero ? 0 : 35
+            width: Math.max(0, Math.min(root.navigationHero ? 100 : parent.width - x - 5,
+                                        implicitWidth))
+            height: root.navigationHero ? 52 : 25
+            text: root.navigationSubtitle
+            color: root.primary ? root.theme.ink
+                  : root.navigationCool ? root.theme.electric : root.theme.text
+            font.family: root.theme.uiFontFor(text)
+            font.pixelSize: root.navigationHero ? 18 : 14
+            font.weight: Font.Bold
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
         }
 
         Text {
             objectName: "navigationCodeLabel"
-            visible: root.navigation && !root.theme.dohna
+            visible: root.navigation && !root.theme.dohna && !root.theme.refraDark
             x: 37
             y: 26
             width: Math.max(0, parent.width - x - 5)
@@ -189,7 +240,7 @@ Button {
 
         Rectangle {
             objectName: "prismButtonLightEdge"
-            visible: !root.theme.dohna
+            visible: !root.theme.dohna && !root.theme.refraDark
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
@@ -198,6 +249,35 @@ Button {
                  : root.primary ? root.theme.accent : root.theme.lineStrong
             opacity: root.enabled ? (root.primary || root.hovered || root.activeFocus ? 0.9 : 0.24) : 0.15
             Behavior on opacity { NumberAnimation { duration: root.theme.ui } }
+        }
+
+        Rectangle {
+            objectName: "prismNavigationMagentaOffset"
+            visible: root.theme.refraDark && root.navigation && root.primary && root.enabled
+            x: 10
+            y: 7
+            width: root.navigationHero
+                   ? Math.max(360, Math.min(parent.width - 26,
+                                            navigationTitleLabel.x + navigationTitleLabel.implicitWidth
+                                            + 16 + navigationSubtitleLabel.implicitWidth + 14))
+                   : Math.max(0, parent.width - 27)
+            height: parent.height - 11
+            color: root.theme.spectrum
+            rotation: -1.4
+        }
+        Rectangle {
+            objectName: "prismNavigationActivePlate"
+            visible: root.theme.refraDark && root.navigation && root.primary && root.enabled
+            x: 4
+            y: 4
+            width: root.navigationHero
+                   ? Math.max(360, Math.min(parent.width - 26,
+                                            navigationTitleLabel.x + navigationTitleLabel.implicitWidth
+                                            + 16 + navigationSubtitleLabel.implicitWidth + 14))
+                   : Math.max(0, parent.width - 26)
+            height: parent.height - 6
+            color: root.theme.accent
+            rotation: -1.4
         }
 
         Shape {
