@@ -547,8 +547,9 @@ Item {
                     visible: !root.fullCanvasHome
                     Layout.preferredHeight: Math.max(
                         root.fullCanvasHome ? 0
-                        : (root.height <= 820 ? 148 : 164)
-                        ,
+                        : root.boundWorkbench.currentPage === "CACHE"
+                          ? (root.height <= 820 ? 112 : 120)
+                          : (root.height <= 820 ? 148 : 164),
                         pageHeaderTextColumn.implicitHeight + 16
                     )
                     color: prism.headerSurface
@@ -622,7 +623,7 @@ Item {
                                     text: root.pageTitleLight(root.boundWorkbench.currentPage)
                                     color: prism.text
                                     font.family: "Arial Black"
-                                    font.pixelSize: Math.min(76, Math.max(48, root.width * 0.058))
+                                    font.pixelSize: root.boundWorkbench.currentPage === "CACHE" ? Math.min(64, Math.max(48, root.width * 0.052)) : Math.min(76, Math.max(48, root.width * 0.058))
                                     font.weight: Font.Black
                                     font.italic: true
                                     font.letterSpacing: -3.2

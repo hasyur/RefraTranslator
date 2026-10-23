@@ -4,6 +4,7 @@ import ctypes
 import math
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -5554,16 +5555,15 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     assert qml_warnings == []
     controller.setPage("CACHE")
     app.processEvents()
-    cache_hits = window.findChild(QObject, "cacheLastRunHits")
-    cache_summary = _find_quick_item(window, "cacheSummaryMetrics")
-    cache_hint = _find_quick_item(window, "cacheSummarySourceHint")
+    cache_hits = _find_quick_item(window, "cacheLastRunList")
+    cache_summary = _find_quick_item(window, "cacheSummaryStrip")
+    cache_note = _find_quick_item(window, "cacheRunScopeNote")
     assert cache_hits is not None
     assert cache_summary is not None
-    assert cache_hint is not None
+    assert cache_note is not None
     assert cache_hits.property("visible") is True
-    assert cache_hint.property("text") == (
-        "上方为 Profile SQLite 累计统计；上次运行命中列表仅代表最近一次运行。"
-    )
+    _wait_for_page_layout(window, cache_hits, app)
+    assert cache_note.property("text") == "仅代表最近一次运行，不含 Profile 累计统计。"
     assert cache_summary.mapToItem(cache_hits, QPointF(0, 0)).y() < 0
     unavailable_titles = _find_quick_items(window, "unavailableStateTitle")
     assert not any(
@@ -5571,7 +5571,8 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
         for title in unavailable_titles
     )
     corrections = _find_quick_item(window, "correctionsEditor")
-    assert corrections is not None and corrections.isVisible()
+    assert corrections is not None and corrections.isVisible() is False
+    assert _find_quick_item(window, "cacheCorrectionsExpandButton") is not None
 
     window.resize(1280, 820)
     controller.setPage("HOME")
@@ -6394,7 +6395,7 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
             ("OCR", "ocrSecondaryPanel"),
             ("TRANSLATION", "translationSecondaryPanel"),
             ("OVERLAY", "overlaySecondaryPanel"),
-            ("CACHE", "cacheSecondaryPanel"),
+            ("CACHE", "cachePageScroll" if prism_style else "cacheSecondaryPanel"),
             ("SETTINGS", "settingsPrimaryPanel"),
         )
         # Shrink an already laid out wide window, then grow and shrink again.
@@ -6520,6 +6521,33 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                         _find_quick_item(window, page.lower() + role + "Panel")
                         for role in ("Primary", "Secondary")
                     ]
+                if prism_style and page == "CACHE":
+                    cache_scroll = _find_quick_item(window, "cachePageScroll")
+                    assert cache_scroll is not None and cache_scroll.isVisible()
+                    scroll_origin = cache_scroll.mapToItem(page_item, QPointF(0, 0))
+                    assert scroll_origin.x() >= -0.5
+                    assert scroll_origin.x() + cache_scroll.width() <= page_item.width() + 0.5
+                    scroll_scene_origin = cache_scroll.mapToScene(QPointF(0, 0))
+                    assert scroll_scene_origin.x() + cache_scroll.width() <= window.width() + 0.5
+                    for text_item in window.findChildren(QQuickItem):
+                        if not text_item.isVisible() or not text_item.inherits("QQuickText"):
+                            continue
+                        ancestor = text_item.parentItem()
+                        while ancestor is not None and ancestor is not cache_scroll:
+                            ancestor = ancestor.parentItem()
+                        if ancestor is None:
+                            continue
+                        origin = text_item.mapToItem(cache_scroll, QPointF(0, 0))
+                        if origin.y() + text_item.height() <= 0 or origin.y() >= cache_scroll.height():
+                            continue
+                        assert origin.x() >= -0.5, (
+                            page, text_item.property("text"), origin.x(), text_item.width(),
+                        )
+                        assert origin.x() + text_item.width() <= cache_scroll.width() + 0.5, (
+                            page, text_item.property("text"), origin.x(), text_item.width(),
+                            cache_scroll.width(),
+                        )
+                    page_panels = []
                 if page_panels:
                     for page_panel in page_panels:
                         assert page_panel is not None, page
@@ -6557,7 +6585,19 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                                 "GAME SCREEN TRANSLATOR", "FPS", "50—1000 MS", "100—5000 MS",
                         }
                         else 11
-                        if prism_style and (page == "HOME" or text == "当前配置")
+                        if prism_style and (
+                            page == "HOME"
+                            or text == "当前配置"
+                            or page == "CACHE" and (
+                                text == "PROFILE  /  累计统计"
+                                or text == "TOP 5"
+                                or text in {
+                                    "LAST RUN CACHE · EMPTY",
+                                    "LAST RUN CACHE · UNAVAILABLE",
+                                }
+                                or text.endswith(" 条已保存")
+                            )
+                        )
                         else 12
                     )
                     assert font_size >= minimum_font_size, (page, text, font_size)
@@ -6670,7 +6710,7 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
         ("OCR", "文字识别", "OCR", "文字识别", "ocrSecondaryPanel"),
         ("TRANSLATION", "翻译", "TRANSLATION", "翻译", "translationSecondaryPanel"),
         ("OVERLAY", "覆盖层", "OVERLAY", "覆盖层", "overlaySecondaryPanel"),
-        ("CACHE", "缓存", "CACHE", "缓存", "cacheSecondaryPanel"),
+        ("CACHE", "缓存", "CACHE", "缓存", "cachePageScroll"),
         ("SETTINGS", "设置", "SETTINGS", "设置", "settingsSecondaryPanel"),
     )
     assert feedback_layer.property("visible") is False
@@ -6789,7 +6829,7 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
                     line for line in window.findChildren(QObject, "prismDividerLine")
                     if line.property("visible")
                 ]
-                assert len(visible_dividers) >= 3
+                assert len(visible_dividers) >= (2 if prism_style and page == "CACHE" else 3)
                 for line in visible_dividers:
                     assert line.property("height") == 1
                     assert line.property("width") == line.parentItem().width()
@@ -6823,16 +6863,24 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
                 assert nav_code_label.property("text") == code
                 assert nav_code_label.property("font").pixelSize() >= 12
 
-            if not (prism_style and page == "HOME"):
+            if prism_style and page == "CACHE":
+                primary_panel = _find_quick_item(window, panel_name)
+                assert primary_panel is not None and primary_panel.isVisible()
+                assert primary_panel.property("clip") is True
+            elif not (prism_style and page == "HOME"):
                 primary_panel = _find_quick_item(window, panel_name)
                 assert primary_panel is not None
-                panel_surface = primary_panel.findChild(QObject, "prismPanelSurface")
-                grid_rule = primary_panel.findChild(QObject, "prismPanelGridRule")
-                assert panel_surface is not None
-                assert grid_rule is not None
-                assert panel_surface.property("color").alpha() == 0
-                assert QQmlProperty(panel_surface, "border.width").read() == 0
-                assert grid_rule.property("visible") is True
+                if page == "CACHE":
+                    assert primary_panel.isVisible()
+                    assert primary_panel.property("clip") is True
+                else:
+                    panel_surface = primary_panel.findChild(QObject, "prismPanelSurface")
+                    grid_rule = primary_panel.findChild(QObject, "prismPanelGridRule")
+                    assert panel_surface is not None
+                    assert grid_rule is not None
+                    assert panel_surface.property("color").alpha() == 0
+                    assert QQmlProperty(panel_surface, "border.width").read() == 0
+                    assert grid_rule.property("visible") is True
 
     assert motion_feedback.property("visible") is False
     assert feedback_layer.property("visible") is False
@@ -8820,9 +8868,9 @@ def test_qml_sources_use_explicit_unavailable_states_without_mock_timers() -> No
 
 
 @pytest.mark.parametrize("skin,theme_name", [
-    (SKIN_PRISM, "dark"), (SKIN_PRISM, "light"), (SKIN_DOHNA, "light"),
+    (SKIN_DOHNA, "light"),
 ])
-def test_cache_large_metrics_and_multiline_hits_stay_clear_of_scrollbar(
+def test_dohna_cache_large_metrics_and_multiline_hits_stay_clear_of_scrollbar(
     tmp_path: Path, skin: str, theme_name: str,
 ) -> None:
     app = _application()
@@ -8920,6 +8968,359 @@ def test_cache_large_metrics_and_multiline_hits_stay_clear_of_scrollbar(
         host.shutdown()
 
 
+@pytest.mark.parametrize(("theme_name", "width", "height"), [
+    ("dark", 980, 700), ("light", 980, 700),
+    ("dark", 1280, 820), ("light", 1280, 820),
+])
+def test_prism_cache_full_width_long_hits_and_collapsed_draft(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    theme_name: str,
+    width: int,
+    height: int,
+) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    profile = create_game_profile(
+        config_path, load_config(config_path), "prism-cache-layout",
+        display_name="缓存布局验收",
+    )
+    sources = [
+        f"LONG CACHE SOURCE {index}: " + (
+            "the translated game line remains intact and wraps naturally across the full row; "
+        ) * 9
+        for index in range(1, 6)
+    ]
+    sources[0] = "UNBROKEN_TOKEN_" + ("Z" * 240) + " " + sources[0]
+    hit_counts = (12345678, 49, 48, 47, 46)
+    save_snapshot(profile.directory, new_snapshot(
+        (SnapshotEntry("cache-layout", 0, "布局测试原文", "layout translation",
+                       0.9, (20, 40, 420, 75)),),
+        tuple(CacheHit(source, hit_counts[index]) for index, source in enumerate(sources)),
+        ocr_peak_seconds=None, llm_peak_seconds=None,
+    ))
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(True)
+    controller._set_cache_stats(CacheStats(
+        automatic_entries=4649, automatic_hits=10882,
+        manual_corrections=12345678, manual_hits=0,
+    ))
+    draft = [{"source": "DOOR REMAINS SEALED UNTIL SUNSET",
+              "target": "This door stays closed until sunset."}]
+    controller.setCorrectionsDraft(draft)
+    controller.setPage("CACHE")
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        window = host.window
+        assert window is not None
+        host.show()
+        window.resize(max(width, window.minimumWidth()), height)
+        scroll = _find_quick_item(window, "cachePageScroll")
+        _wait_for_page_layout(window, scroll, app)
+        header = _find_quick_item(window, "pageHeaderBar")
+        title = _find_quick_item(window, "refraEnglishPageTitle")
+        cumulative = _find_quick_item(window, "cacheCumulativeLabel")
+        summary = _find_quick_item(window, "cacheSummaryStrip")
+        hit_list = _find_quick_item(window, "cacheLastRunList")
+        correction_panel = _find_quick_item(window, "cacheCorrectionsPanel")
+        editor = _find_quick_item(window, "correctionsEditor")
+        assert all(item is not None for item in (
+            header, title, cumulative, summary, hit_list, correction_panel, editor,
+        ))
+        assert 112 <= header.height() <= 120
+        assert title.property("font").pixelSize() == pytest.approx(
+            min(64, max(48, width * 0.052)), abs=1,
+        )
+        assert summary.isVisible() and hit_list.isVisible()
+        assert correction_panel.height() == pytest.approx(92, abs=1)
+        assert editor.isVisible() is False
+        assert editor.property("entryCount") == 1 and editor.property("dirty") is True
+        assert controller.correctionsDirty is True
+
+        values = [_find_quick_item(window, f"cacheMetricValue-{i}") for i in range(4)]
+        assert [value.property("text") for value in values] == ["4649", "10882", "12345678", "0"]
+        refresh = _find_quick_item(window, "cacheRefreshStatsButton")
+        assert refresh is not None and refresh.isEnabled()
+        refresh_left = refresh.mapToItem(summary, QPointF(0, 0)).x()
+        for value in values:
+            origin = value.mapToItem(summary, QPointF(0, 0))
+            assert origin.x() + value.width() < refresh_left
+            assert value.property("truncated") is False
+        assert QColor(values[0].property("color")).name() == (
+            "#075bff" if theme_name == "light" else "#00d9ff"
+        )
+        screenshot_dir = os.environ.get("REFRA_CACHE_SCREENSHOT_DIR")
+        if screenshot_dir:
+            capture_dir = Path(screenshot_dir) / "stress" / ("minimum" if width == 980 else "normal")
+            capture_dir.mkdir(parents=True, exist_ok=True)
+            screenshot = capture_dir / f"long-content-collapsed-{theme_name}-{width}x{height}.png"
+            assert window.grabWindow().save(str(screenshot))
+
+        observed_lines = []
+        for index, expected in enumerate(sources):
+            source = _find_quick_item(window, f"cacheHitSource-{index}")
+            count = _find_quick_item(window, f"cacheHitCount-{index}")
+            assert source is not None and count is not None
+            assert source.property("text") == expected
+            assert source.property("truncated") is False
+            assert count.property("text") == f"{hit_counts[index]} 次"
+            row = source.parentItem().parentItem()
+            source_x = source.mapToItem(row, QPointF(0, 0)).x()
+            count_x = count.mapToItem(row, QPointF(0, 0)).x()
+            assert source_x + source.width() <= count_x
+            assert count_x + count.width() <= row.width()
+            assert count.property("contentWidth") <= count.width() + 0.5
+            assert float(count.property("paintedWidth")) <= count.width() + 0.5
+            assert count.property("truncated") is False
+            assert row.height() >= source.height() + 14
+            observed_lines.append(int(source.property("lineCount")))
+            if index == 0:
+                assert int(source.property("lineCount")) >= 2
+        assert max(observed_lines) >= 2
+        assert scroll.property("contentHeight") > scroll.height()
+        assert scroll.property("contentY") == pytest.approx(0, abs=1)
+        label_y = cumulative.mapToItem(scroll, QPointF(0, 0)).y()
+        assert label_y >= -0.5 and label_y + cumulative.height() <= scroll.height()
+
+        QMetaObject.invokeMethod(refresh, "click")
+        app.processEvents()
+        assert controller.automaticEntries == 0
+
+        scroll.setProperty("contentY", max(
+            0, float(scroll.property("contentHeight")) - scroll.height(),
+        ))
+        app.processEvents()
+        expand = _find_quick_item(window, "cacheCorrectionsExpandButton")
+        assert expand is not None and expand.isVisible()
+        QMetaObject.invokeMethod(expand, "click")
+        QTest.qWait(120)
+        app.processEvents()
+        scroll.setProperty("contentY", max(
+            0, float(scroll.property("contentHeight")) - scroll.height(),
+        ))
+        app.processEvents()
+        if screenshot_dir:
+            screenshot = capture_dir / f"long-content-expanded-{theme_name}-{width}x{height}.png"
+            assert window.grabWindow().save(str(screenshot))
+        assert editor.isVisible() and editor.property("entryCount") == 1
+        assert _find_quick_item(window, "pairSourceField-0").property("text") == draft[0]["source"]
+        assert _find_quick_item(window, "pairTargetField-0").property("text") == draft[0]["target"]
+        QMetaObject.invokeMethod(expand, "click")
+        app.processEvents()
+        assert not editor.isVisible() and controller.correctionsDirty
+        assert _find_quick_item(window, "cacheCorrectionsCollapsedNote").property("text") == (
+            "有尚未保存的更改。"
+        )
+        QMetaObject.invokeMethod(expand, "click")
+        QTest.qWait(120)
+        app.processEvents()
+        assert editor.property("entryCount") == 1
+
+        scroll.setProperty("contentY", max(
+            0, float(scroll.property("contentHeight")) - scroll.height(),
+        ))
+        app.processEvents()
+        save_button = next(
+            item for item in window.findChildren(QQuickItem)
+            if item.isVisible() and item.property("text") == "保存人工修订"
+        )
+        save_y = save_button.mapToItem(scroll, QPointF(0, 0)).y()
+        assert -0.5 <= save_y <= scroll.height() - save_button.height() + 0.5
+        QMetaObject.invokeMethod(save_button, "click")
+        app.processEvents()
+        assert controller.correctionsDirty is False
+        assert controller.manualCorrections == 1
+    finally:
+        host.shutdown()
+
+
+def test_prism_cache_minimum_window_add_select_delete_and_save_via_real_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    profile = create_game_profile(
+        config_path, load_config(config_path), "prism-cache-real-input",
+        display_name="缓存交互验收",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("dark")
+    controller.setReducedMotion(True)
+    controller.setPage("CACHE")
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        host.show()
+        window = host.window
+        assert window is not None
+        window.resize(max(980, window.minimumWidth()), 700)
+        scroll = _find_quick_item(window, "cachePageScroll")
+        _wait_for_page_layout(window, scroll, app)
+        assert controller.hasProfile
+        editor = _find_quick_item(window, "correctionsEditor")
+        expand = _find_quick_item(window, "cacheCorrectionsExpandButton")
+        assert editor is not None and not editor.isVisible()
+        assert expand is not None and expand.isEnabled()
+
+        def click_in_viewport(item: QQuickItem) -> None:
+            _wait_for_page_layout(window, item, app)
+            origin = item.mapToItem(scroll, QPointF(0, 0))
+            assert item.isVisible() and item.isEnabled()
+            assert origin.y() >= -0.5
+            assert origin.y() + item.height() <= scroll.height() + 0.5
+            center = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
+            assert 0 <= center.x() < window.width()
+            assert 0 <= center.y() < window.height()
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=center.toPoint())
+            app.processEvents()
+
+        _wait_for_page_layout(window, scroll, app)
+        click_in_viewport(expand)
+        QTest.qWait(80)
+        _wait_for_page_layout(window, scroll, app)
+        assert editor.isVisible() and editor.property("entryCount") == 0
+        scroll.setProperty(
+            "contentY",
+            max(0, float(scroll.property("contentHeight")) - scroll.height()),
+        )
+        app.processEvents()
+
+        add_button = _find_quick_item(window, "addPairRowButton")
+        assert add_button is not None
+        click_in_viewport(add_button)
+        assert editor.property("entryCount") == 1
+
+        def enter_field(object_name: str, value: str) -> None:
+            field = _find_quick_item(window, object_name)
+            assert field is not None and field.isVisible() and field.isEnabled()
+            point = field.mapToScene(QPointF(field.width() / 2, field.height() / 2))
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=point.toPoint())
+            QTest.keyClick(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+            _key_clicks(window, value)
+            app.processEvents()
+            assert field.property("text") == value
+
+        enter_field("pairSourceField-0", "KEEP SOURCE")
+        enter_field("pairTargetField-0", "Keep translation")
+        add_button = _find_quick_item(window, "addPairRowButton")
+        assert add_button is not None
+        click_in_viewport(add_button)
+        assert editor.property("entryCount") == 2
+        enter_field("pairSourceField-1", "DELETE SOURCE")
+        enter_field("pairTargetField-1", "Delete translation")
+
+        second_source = _find_quick_item(window, "pairSourceField-1")
+        assert second_source is not None
+        second_row = second_source.parentItem().parentItem()
+        assert second_row is not None
+        selection_point = second_row.mapToScene(QPointF(33, second_row.height() / 2))
+        assert 0 <= selection_point.x() < window.width()
+        assert 0 <= selection_point.y() < window.height()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=selection_point.toPoint())
+        app.processEvents()
+        assert second_row.property("selected") is True
+
+        delete_button = next(
+            item for item in window.findChildren(QQuickItem)
+            if item.isVisible() and item.property("text") == "删除选中行"
+        )
+        click_in_viewport(delete_button)
+        QTest.qWait(30)
+        app.processEvents()
+        assert editor.property("entryCount") == 1
+        assert _find_quick_item(window, "pairSourceField-0").property("text") == "KEEP SOURCE"
+        assert _find_quick_item(window, "pairTargetField-0").property("text") == "Keep translation"
+        assert controller.correctionEntries == [
+            {"source": "KEEP SOURCE", "target": "Keep translation"},
+        ]
+        assert controller.correctionsDirty
+
+        save_button = next(
+            item for item in window.findChildren(QQuickItem)
+            if item.isVisible() and item.property("text") == "保存人工修订"
+        )
+        click_in_viewport(save_button)
+        assert not controller.correctionsDirty
+        assert controller.manualCorrections == 1
+        with sqlite3.connect(profile.database_path) as connection:
+            saved_pairs = connection.execute(
+                "SELECT source_text, translated_text FROM manual_corrections",
+            ).fetchall()
+        assert saved_pairs == [("KEEP SOURCE", "Keep translation")]
+    finally:
+        host.shutdown()
+
+
+def test_prism_cache_without_profile_disables_refresh_and_corrections_actions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
+    controller.setReducedMotion(True)
+    controller.setPage("CACHE")
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        host.show()
+        window = host.window
+        assert window is not None
+        window.resize(max(980, window.minimumWidth()), 700)
+        scroll = _find_quick_item(window, "cachePageScroll")
+        _wait_for_page_layout(window, scroll, app)
+        expand = _find_quick_item(window, "cacheCorrectionsExpandButton")
+        refresh = _find_quick_item(window, "cacheRefreshStatsButton")
+        editor = _find_quick_item(window, "correctionsEditor")
+        assert not controller.hasProfile
+        assert expand is not None and expand.isVisible() and not expand.isEnabled()
+        assert refresh is not None and not refresh.isEnabled()
+        assert editor is not None and not editor.isEnabled()
+        assert _find_quick_item(window, "cacheNoProfileState").isVisible()
+    finally:
+        host.shutdown()
+
+
+def test_prism_cache_empty_last_run_is_compact(tmp_path: Path) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(config_path, load_config(config_path), "prism-cache-empty")
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("light")
+    controller.setReducedMotion(True)
+    controller.setPage("CACHE")
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        host.show()
+        window = host.window
+        assert window is not None
+        empty = _find_quick_item(window, "cacheLastRunEmpty")
+        _wait_for_page_layout(window, empty, app)
+        assert empty is not None and empty.isVisible()
+        assert empty.height() < 150
+        for label in ("LAST RUN CACHE · UNAVAILABLE", "尚无上次运行结果", controller.lastRunStatus):
+            text_item = _visible_text_items(window, label)[0]
+            origin = text_item.mapToItem(empty, QPointF(0, 0))
+            assert origin.x() >= 0 and origin.y() >= 0
+            assert origin.x() + text_item.width() <= empty.width() + 0.5
+            assert origin.y() + text_item.height() <= empty.height() - 11.5
+        assert _visible_text_items(window, "尚无上次运行结果")
+    finally:
+        host.shutdown()
+
+
 def test_cache_page_hides_numeric_metrics_without_a_profile(tmp_path: Path) -> None:
     app = _application()
     config_path = tmp_path / "config.toml"
@@ -8932,7 +9333,7 @@ def test_cache_page_hides_numeric_metrics_without_a_profile(tmp_path: Path) -> N
 
     window = host.window
     assert window is not None
-    metrics = window.findChild(QObject, "cacheSummaryMetrics")
+    metrics = _find_quick_item(window, "cacheSummaryStrip")
     assert metrics is not None
     assert metrics.property("visible") is False
     visible_text = {
@@ -8941,6 +9342,14 @@ def test_cache_page_hides_numeric_metrics_without_a_profile(tmp_path: Path) -> N
         if item.property("visible") is True and item.property("text") is not None
     }
     assert "尚未选择 Profile" in visible_text
+    no_profile = _find_quick_item(window, "cacheNoProfileState")
+    assert no_profile is not None and no_profile.isVisible()
+    for label in ("CACHE · UNAVAILABLE", "尚未选择 Profile", "没有真实缓存统计来源；请先在 HOME 创建或选择一个 Profile。"):
+        text_item = _visible_text_items(window, label)[0]
+        origin = text_item.mapToItem(no_profile, QPointF(0, 0))
+        assert origin.x() >= 0 and origin.y() >= 0
+        assert origin.x() + text_item.width() <= no_profile.width() + 0.5
+        assert origin.y() + text_item.height() <= no_profile.height() - 11.5
     assert controller.hasProfile is False
     host.shutdown()
 
@@ -9473,6 +9882,12 @@ def test_skin_activation_refreshes_latest_unsaved_pair_editor_draft(
             app.processEvents()
         editor = window.findChild(QObject, editor_name)
         assert editor is not None
+        if pair_kind == "corrections" and not editor.isVisible():
+            expand_button = _find_quick_item(window, "cacheCorrectionsExpandButton")
+            assert expand_button is not None and expand_button.isVisible()
+            assert QMetaObject.invokeMethod(expand_button, "click") is True
+            app.processEvents()
+            assert editor.isVisible()
         return editor
 
     def field_text(field_name: str) -> str:
