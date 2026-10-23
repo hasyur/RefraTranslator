@@ -1,0 +1,43 @@
+import QtQuick
+import QtQuick.Shapes
+import QtQuick.Controls
+
+TextField {
+    id: root
+
+    required property var theme
+    property string accessibleName: ""
+    property string settingDescription: ""
+    property string settingKey: ""
+
+    Accessible.name: root.accessibleName.length > 0 ? root.accessibleName : root.placeholderText
+
+    implicitHeight: 42
+    leftPadding: 12
+    rightPadding: 12
+    color: root.theme.text
+    placeholderTextColor: root.theme.textDim
+    selectionColor: root.theme.accent
+    selectedTextColor: root.theme.ink
+    font.family: root.theme.uiFontFor(text.length > 0 ? text : placeholderText)
+    font.pixelSize: 15
+
+    background: Rectangle {
+        objectName: root.theme.active ? ("prismTextFieldBackground") : ""
+        clip: !false
+        color: root.theme.inputSurface
+        border.color: root.activeFocus ? root.theme.selectionEdge : root.theme.lineStrong
+        border.width: false || root.activeFocus ? 2 : 1
+
+
+
+
+    }
+
+    SettingHint {
+        theme: root.theme
+        target: root
+        description: root.settingDescription
+        settingKey: root.settingKey
+    }
+}

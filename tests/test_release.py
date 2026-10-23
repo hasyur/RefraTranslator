@@ -128,17 +128,42 @@ def test_release_metadata_bundles_the_native_qml_workbench() -> None:
     gui_data = set(package_data["game_screen_translator.gui"])
     assert {
         "qml/*.qml",
-        "qml/components/*.qml",
-        "qml/pages/*.qml",
-        "qml/assets/*.png",
+        "qml/shared/*.qml",
+        "qml/skins/prism/*.qml",
+        "qml/skins/prism/components/*.qml",
+        "qml/skins/prism/pages/*.qml",
+        "qml/skins/prism/assets/*.png",
+        "qml/skins/dohna/*.qml",
+        "qml/skins/dohna/components/*.qml",
+        "qml/skins/dohna/pages/*.qml",
+        "qml/skins/dohna/assets/*.png",
     } <= gui_data
     manifest = (PROJECT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
     assert "recursive-include src/game_screen_translator/gui/qml *.qml" in manifest
+    assert "recursive-include src/game_screen_translator/gui/qml *.png" in manifest
 
 
 def test_built_archives_contain_the_exact_native_qml_workbench(
     tmp_path: Path,
 ) -> None:
+    build_root = tmp_path / "source"
+    shutil.copytree(
+        PROJECT_ROOT,
+        build_root,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".local-tools",
+            ".cache",
+            ".codex",
+            ".agents",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "*.egg-info",
+            "build",
+            "dist",
+        ),
+    )
     output_dir = tmp_path / "dist"
     completed = subprocess.run(
         [
@@ -149,7 +174,7 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
             "--outdir",
             str(output_dir),
         ],
-        cwd=PROJECT_ROOT,
+        cwd=build_root,
         capture_output=True,
         text=True,
         check=False,

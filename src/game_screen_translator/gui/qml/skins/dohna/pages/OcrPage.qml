@@ -1,0 +1,365 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import "../components"
+import "../../../shared" as Shared
+
+Item {
+    id: root
+
+    required property var theme
+    required property var workbench
+    required property var appShell
+    property int transitionSerial: 0
+    property bool pageMotionEnabled: false
+    signal visualAction(string action)
+    property alias formScroll: ocrFormScroll
+
+    RowLayout {
+        anchors.fill: parent
+        spacing: 16
+
+        PrismPanel {
+            objectName: root.theme.active ? ("ocrPrimaryPanel") : ""
+            theme: root.theme
+            motionRole: "primary"
+            transitionSerial: root.transitionSerial
+            motionEnabled: root.pageMotionEnabled && root.visible
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.minimumWidth: 380
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 16
+
+                SectionHeader {
+                    theme: root.theme
+                    title: "识别输出"
+                    meta: "RUNTIME VIEW"
+                    Layout.fillWidth: true
+                }
+
+                UnavailableState {
+                    objectName: root.theme.active ? ("ocrLastRunUnavailable") : ""
+                    theme: root.theme
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: !root.workbench.lastRunAvailable
+                    eyebrow: "LAST RUN OCR · UNAVAILABLE"
+                    title: "尚无上次运行结果"
+                    detail: root.workbench.lastRunStatus
+                }
+
+                Flickable {
+                    objectName: root.theme.active ? ("ocrLastRunList") : ""
+                    visible: root.workbench.lastRunAvailable
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: width
+                    contentHeight: ocrLastRunColumn.implicitHeight
+                    clip: true
+                    ColumnLayout {
+                        id: ocrLastRunColumn
+                        width: parent.width
+                        spacing: 8
+                        Text {
+                            text: root.workbench.lastRunStatus
+                            color: root.theme.accentText
+                            font.family: root.theme.monoFontFor(text)
+                            font.pixelSize: 12
+                            Layout.fillWidth: true
+                        }
+                        Repeater {
+                            model: root.workbench.lastRunOcrResults
+                            Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                implicitHeight: 68
+                                color: "transparent"
+                                border.color: root.theme.line
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 3
+                                    Text {
+                                        text: modelData.sourceText
+                                        color: root.theme.text
+                                        font.family: root.theme.uiFontFor(text)
+                                        font.pixelSize: 16
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                    Text {
+                                        text: "置信度 " + Number(modelData.confidence).toFixed(2)
+                                              + " · 位置 " + modelData.left + "," + modelData.top
+                                              + " — " + modelData.right + "," + modelData.bottom
+                                        color: root.theme.textDim
+                                        font.family: root.theme.monoFontFor(text)
+                                        font.pixelSize: 12
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: "工作台只呈现控制器提供的状态；不会用示例字幕、置信度或耗时填充这里。"
+                    color: root.theme.textDim
+                    font.family: root.theme.uiFontFor(text)
+                    font.pixelSize: 14
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+        }
+
+        PrismPanel {
+            objectName: root.theme.active ? ("ocrSecondaryPanel") : ""
+            theme: root.theme
+            raised: true
+            motionRole: "secondary"
+            transitionSerial: root.transitionSerial
+            motionEnabled: root.pageMotionEnabled && root.visible
+            Layout.preferredWidth: 354
+            Layout.minimumWidth: 320
+            Layout.fillHeight: true
+
+            Flickable {
+                id: ocrFormScroll
+                onContentYChanged: {
+                    if (ocrScrollSync.active && !ocrScrollSync.restoring
+                            && root.workbench.currentPage === "OCR")
+                        root.appShell.rememberScrollPosition(
+                            "OCR", "ocrSettings", contentY
+                        )
+                }
+                Shared.ScrollPositionSync {
+                    id: ocrScrollSync
+                    appShell: root.appShell
+                    flickable: ocrFormScroll
+                    pageKey: "OCR"
+                    scrollKey: "ocrSettings"
+                    active: root.theme.active && root.visible
+                            && root.workbench.currentPage === "OCR"
+                }
+                objectName: root.theme.active ? ("ocrSettingsScroll") : ""
+                anchors.fill: parent
+                contentWidth: width
+                contentHeight: form.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: PrismScrollBar { id: ocrBar; theme: root.theme }
+
+                FocusScrollGuard { flickable: ocrFormScroll }
+
+                ColumnLayout {
+                    id: form
+                    width: parent.width - ocrBar.contentInset
+                    spacing: 7
+
+                    SectionHeader {
+                        theme: root.theme
+                        title: "OCR 管线"
+                        meta: root.workbench.ocrStatus
+                        Layout.fillWidth: true
+                    }
+
+                    SettingLabel {
+                        theme: root.theme
+                        title: "计算设备"
+                        meta: "ISOLATED PROBE"
+                        description: "选择用于文字识别的计算设备。"
+                        settingKey: "ocr-device"
+                    }
+                    PrismComboBox {
+                        id: deviceSelector
+                        theme: root.theme
+                        accessibleName: "OCR 计算设备"
+                        settingDescription: "选择用于文字识别的计算设备。"
+                        settingKey: "ocr-device"
+                        model: root.workbench.ocrDeviceNames
+                        itemEnabled: root.workbench.ocrDeviceAvailability
+                        currentIndex: Math.max(0, root.workbench.ocrDeviceValues.indexOf(root.workbench.ocrDevice))
+                        enabled: model.length > 0
+                        Layout.fillWidth: true
+                        onActivated: index => {
+                            if (index >= 0 && index < root.workbench.ocrDeviceValues.length) {
+                                root.workbench.setOcrDevice(root.workbench.ocrDeviceValues[index])
+                                root.visualAction("focus")
+                            }
+                        }
+                    }
+                    PrismButton {
+                        objectName: root.theme.active ? ("ocrProbeAction") : ""
+                        theme: root.theme
+                        text: "重新探测设备"
+                        Layout.fillWidth: true
+                        onClicked: {
+                            root.workbench.probeOcrDevices()
+                            root.visualAction("focus")
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.line }
+
+                    SettingLabel {
+                        theme: root.theme
+                        title: "检测质量"
+                        meta: root.workbench.detectionQualitySummary
+                        description: "选择文字检测的质量档位。"
+                        settingKey: "ocr-quality"
+                    }
+                    PrismSlider {
+                        id: ocrQualitySlider
+                        objectName: root.theme.active ? ("ocrQualitySlider") : ""
+                        property bool changedDuringGesture: false
+                        theme: root.theme
+                        accessibleName: "OCR 检测质量"
+                        settingDescription: "选择文字检测的质量档位。"
+                        settingKey: "ocr-quality"
+                        from: 0
+                        to: Math.max(0, root.workbench.detectionQualityNames.length - 1)
+                        stepSize: 1
+                        value: root.workbench.detectionQualityIndex
+                        Layout.fillWidth: true
+                        onMoved: {
+                            root.workbench.setDetectionQualityIndex(Math.round(value))
+                            if (pressed)
+                                changedDuringGesture = true
+                        }
+                        onPressedChanged: {
+                            if (pressed) {
+                                changedDuringGesture = false
+                            } else if (changedDuringGesture) {
+                                changedDuringGesture = false
+                                root.visualAction("focus")
+                            }
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 7
+                        Repeater {
+                            model: root.workbench.detectionQualityNames
+                            Text {
+                                required property int index
+                                required property var modelData
+                                text: String(modelData)
+                                color: index === root.workbench.detectionQualityIndex
+                                       ? root.theme.accentText : root.theme.textDim
+                                font.family: root.theme.uiFontFor(text)
+                                font.pixelSize: 13
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
+
+                    PrismToggle {
+                        theme: root.theme
+                        text: "启用文本过滤"
+                        settingDescription: "启用后按源语言规则跳过纯数字、符号和不符合翻译条件的文字。"
+                        settingKey: "ocr-filter"
+                        checked: root.workbench.ocrFilterEnabled
+                        Layout.fillWidth: true
+                        onToggled: {
+                            root.workbench.setOcrFilterEnabled(checked)
+                            root.visualAction("focus")
+                        }
+                    }
+                    PrismToggle {
+                        objectName: root.theme.active ? ("textMergeToggle") : ""
+                        theme: root.theme
+                        text: root.workbench.textMergeAllowed ? "合并相邻文本块" : "合并文本块（当前质量不可用）"
+                        settingDescription: "启用后合并相邻的识别文字块。"
+                        settingKey: "ocr-merge"
+                        checked: root.workbench.ocrMergeEnabled
+                        enabled: root.workbench.textMergeAllowed
+                        Layout.fillWidth: true
+                        onToggled: {
+                            root.workbench.setOcrMergeEnabled(checked)
+                            root.visualAction("focus")
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.line }
+
+                    SettingLabel {
+                        theme: root.theme
+                        title: "触发方式"
+                        meta: "RUN MODE"
+                        description: "原生沿用整区扫描；动态 ROI 持续按变化更新；鼠标触发按需处理以减少 GPU 运行时间。"
+                        settingKey: "ocr-trigger-method"
+                    }
+                    PrismComboBox {
+                        objectName: root.theme.active ? ("triggerMethodSelector") : ""
+                        theme: root.theme
+                        accessibleName: "触发方式"
+                        settingDescription: "选择原生、动态 ROI 或鼠标触发。停止翻译后可更改。"
+                        settingKey: "ocr-trigger-method"
+                        model: ["原生", "动态 ROI", "鼠标触发"]
+                        currentIndex: root.workbench.triggerMethodIndex
+                        enabled: !root.workbench.running
+                        Layout.fillWidth: true
+                        onActivated: index => {
+                            root.workbench.setTriggerMethodIndex(index)
+                            root.visualAction("focus")
+                        }
+                    }
+                    Text {
+                        objectName: root.theme.active ? ("triggerMethodDescription") : ""
+                        visible: root.workbench.triggerMethodIndex === 2
+                        text: "鼠标移动后停稳时更新所选区域，完成后等待下次触发。轻微移动不重复触发，可能错过短暂字幕。"
+                        color: root.theme.textDim
+                        font.family: root.theme.uiFontFor(text)
+                        font.pixelSize: 13
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    ColumnLayout {
+                        objectName: root.theme.active ? ("mouseDwellSettings") : ""
+                        visible: root.workbench.triggerMethodIndex === 2
+                        spacing: 7
+                        Layout.fillWidth: true
+                        SettingLabel {
+                            theme: root.theme
+                            title: "鼠标停稳等待"
+                            meta: "0—10000 MS"
+                            description: "鼠标移动后保持静止多久才开始识别；0 表示不增加等待。"
+                            settingKey: "ocr-mouse-dwell"
+                        }
+                        NumberStepper {
+                            objectName: root.theme.active ? ("mouseDwellMsStepper") : ""
+                            theme: root.theme
+                            accessibleName: "鼠标停稳等待时间"
+                            settingDescription: "鼠标停稳后再等待指定毫秒数开始识别。"
+                            settingKey: "ocr-mouse-dwell"
+                            minimum: 0
+                            maximum: 10000
+                            stepSize: 50
+                            suffix: "ms"
+                            value: root.workbench.mouseDwellMs
+                            enabled: !root.workbench.running
+                            Layout.fillWidth: true
+                            onEdited: value => root.workbench.setMouseDwellMs(value)
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true; Layout.minimumHeight: 6 }
+
+                    Text {
+                        text: "参数修改后由顶部“应用更改”统一校验并写入运行配置。"
+                        color: root.theme.textDim
+                        font.family: root.theme.uiFontFor(text)
+                        font.pixelSize: 13
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
+            }
+        }
+    }
+}

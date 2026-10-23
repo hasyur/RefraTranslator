@@ -161,6 +161,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1 -WithGui
 
 `bootstrap.ps1` 还支持 `-KeepInstallCache` 保留安装下载缓存。默认安装会保留兼容的现有 CUDA 版本；显式指定 `-GpuCuda` 时，安装程序会检查版本是否匹配，必要时安装指定版本。
 
+### GUI 皮肤维护
+
+`src/game_screen_translator/gui/qml/Main.qml` 是中性工作台宿主，整个窗口只创建一个业务控制器；`qml/skins/prism/` 和 `qml/skins/dohna/` 各自维护皮肤的工作台布局、页面、控件、主题、动效和资源。只改其中一套皮肤时，在对应目录内调整，不从另一套皮肤导入视觉组件。新增图片等资源也放在对应皮肤的 `assets/` 中；`pyproject.toml` 与 `MANIFEST.in` 负责把 QML 和资源纳入安装包。
+
+换肤时由宿主保留业务控制器，并通过 `qml/shared/ScrollPositionSync.qml` 同步跨皮肤需要延续的临时界面状态；页面和操作仍调用同一控制器。相关隔离、换肤状态和 QML 行为检查位于 `tests/test_qml_workbench.py`，发布包内容检查位于 `tests/test_release.py`。运行完整非集成测试可使用上面的 pytest 命令；需要验证 Dohna 菜单斜切命中区域时，须在 Windows 原生窗口平台运行对应 GUI 测试，软件渲染的像素尺寸不作替代。
+
 ### 源码更新
 
 通过 Git 获取项目后，关闭 RefraTranslator，在克隆的项目目录打开 PowerShell 并执行：
