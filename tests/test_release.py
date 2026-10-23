@@ -130,6 +130,7 @@ def test_release_metadata_bundles_the_native_qml_workbench() -> None:
         "qml/*.qml",
         "qml/components/*.qml",
         "qml/pages/*.qml",
+        "qml/assets/*.png",
     } <= gui_data
     manifest = (PROJECT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
     assert "recursive-include src/game_screen_translator/gui/qml *.qml" in manifest
@@ -165,6 +166,10 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
         path.relative_to(qml_root).as_posix()
         for path in qml_root.rglob("*.qml")
     }
+    expected_assets = {
+        path.relative_to(qml_root).as_posix()
+        for path in qml_root.rglob("*.png")
+    }
 
     with zipfile.ZipFile(wheels[0]) as archive:
         wheel_names = set(archive.namelist())
@@ -174,6 +179,15 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
             if "game_screen_translator/gui/qml/" in name
             and name.endswith(".qml")
         }
+        wheel_asset_members = {
+            name.split("game_screen_translator/gui/qml/", 1)[1]: name
+            for name in wheel_names
+            if "game_screen_translator/gui/qml/" in name
+            and name.endswith(".png")
+        }
+        assert set(wheel_asset_members) == expected_assets
+        for relative, member in wheel_asset_members.items():
+            assert archive.read(member) == (qml_root / relative).read_bytes()
     with tarfile.open(source_archives[0], "r:gz") as archive:
         sdist_names = set(archive.getnames())
         sdist_qml = {
@@ -182,6 +196,17 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
             if "game_screen_translator/gui/qml/" in name
             and name.endswith(".qml")
         }
+        sdist_asset_members = {
+            name.split("game_screen_translator/gui/qml/", 1)[1]: name
+            for name in sdist_names
+            if "game_screen_translator/gui/qml/" in name
+            and name.endswith(".png")
+        }
+        assert set(sdist_asset_members) == expected_assets
+        for relative, member in sdist_asset_members.items():
+            archived = archive.extractfile(member)
+            assert archived is not None
+            assert archived.read() == (qml_root / relative).read_bytes()
 
     assert wheel_qml == expected
     assert sdist_qml == expected

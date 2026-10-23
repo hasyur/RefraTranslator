@@ -28,7 +28,7 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetricsF, QWheelEvent
-from PySide6.QtQml import QQmlApplicationEngine, QQmlProperty
+from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, QQmlProperty
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
@@ -5290,6 +5290,12 @@ def test_nearly_fitting_pages_compact_spacing_before_requiring_scroll(
                 assert hero_image.property("source").toString().endswith(
                     "refra-hero-dark.png"
                 )
+                hero_image_ready = QQmlExpression(
+                    host._engine.rootContext(), hero_image, "Number(status) === 1"
+                )
+                ready = hero_image_ready.evaluate()
+                assert not hero_image_ready.hasError()
+                assert ready == (True, False)
                 assert _find_quick_item(window, "refraDarkProfileSummary").isVisible()
                 for index in range(7):
                     button = _find_quick_item(window, f"refraDarkNavigationButton{index}")
