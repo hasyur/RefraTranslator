@@ -345,6 +345,336 @@ def _wait_for_page_layout(
     )
 
 
+def _navigation_motion_rect(
+    motion: QQuickItem,
+    *,
+    target: bool = False,
+) -> tuple[float, float, float, float]:
+    prefix = "target" if target else ""
+    names = ("X", "Y", "Width", "Height") if target else ("x", "y", "width", "height")
+    return tuple(float(motion.property(prefix + name)) for name in names)  # type: ignore[return-value]
+
+
+def _max_geometry_delta(
+    first: tuple[float, float, float, float],
+    second: tuple[float, float, float, float],
+) -> float:
+    return max(abs(left - right) for left, right in zip(first, second, strict=True))
+
+
+def _wait_for_navigation_motion_progress(
+    window: QQuickWindow,
+    motion: QQuickItem,
+    app: QApplication,
+    *,
+    expected_presentation: float,
+    start: tuple[float, float, float, float],
+    toward_latest_target: bool = False,
+    timeout_ms: int = 2500,
+) -> tuple[float, float, float, float]:
+    deadline = time.monotonic() + timeout_ms / 1000
+    current = _navigation_motion_rect(motion)
+    target = _navigation_motion_rect(motion, target=True)
+    while time.monotonic() < deadline:
+        app.processEvents()
+        current = _navigation_motion_rect(motion)
+        target = _navigation_motion_rect(motion, target=True)
+        target_presentation = float(motion.property("targetPresentation"))
+        running = bool(motion.property("positionAnimationRunning"))
+        moved = _max_geometry_delta(start, current) > 1.0
+        away_from_target = _max_geometry_delta(current, target) > 1.0
+        toward_target = (
+            _max_geometry_delta(start, target)
+            - _max_geometry_delta(current, target)
+            > 1.0
+        )
+        if (
+            math.isclose(target_presentation, expected_presentation, abs_tol=0.01)
+            and running
+            and moved
+            and away_from_target
+            and (not toward_latest_target or toward_target)
+        ):
+            return current
+        QTest.qWait(20)
+
+    raise AssertionError(
+        "Prism navigation motion did not show an intermediate position: "
+        f"presentation={motion.property('presentation')}, "
+        f"target_presentation={motion.property('targetPresentation')}, "
+        f"current={current}, target={target}, "
+        f"position_running={motion.property('positionAnimationRunning')}, "
+        f"window_transitioning={window.property('pageTransitioning')}"
+    )
+
+
+def _wait_for_navigation_subtitle_fade(
+    window: QQuickWindow,
+    motion: QQuickItem,
+    subtitle: QQuickItem,
+    app: QApplication,
+    *,
+    timeout_ms: int = 1500,
+) -> None:
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        app.processEvents()
+        presentation = float(motion.property("presentation"))
+        opacity = float(subtitle.property("opacity"))
+        if (
+            0.2 <= presentation <= 0.8
+            and subtitle.isVisible()
+            and bool(subtitle.property("text"))
+            and opacity <= 0.02
+        ):
+            return
+        QTest.qWait(10)
+
+    raise AssertionError(
+        "Prism navigation subtitle did not fade while its visible label crossed "
+        f"the middle presentation range: presentation={motion.property('presentation')}, "
+        f"opacity={subtitle.property('opacity')}, text={subtitle.property('text')!r}, "
+        f"visible={subtitle.isVisible()}, window_visible={window.isVisible()}"
+    )
+
+
+def _wait_for_navigation_motion_settled(
+    window: QQuickWindow,
+    motion: QQuickItem,
+    app: QApplication,
+    *,
+    expected_presentation: float,
+    motion_enabled: bool,
+    timeout_ms: int = 3000,
+) -> None:
+    deadline = time.monotonic() + timeout_ms / 1000
+    previous: tuple[float, float, float, float, float, float] | None = None
+    stable_frames = 0
+    current = _navigation_motion_rect(motion)
+    target = _navigation_motion_rect(motion, target=True)
+    while time.monotonic() < deadline:
+        app.processEvents()
+        current = _navigation_motion_rect(motion)
+        target = _navigation_motion_rect(motion, target=True)
+        presentation = float(motion.property("presentation"))
+        target_presentation = float(motion.property("targetPresentation"))
+        tilt = float(motion.property("tilt"))
+        target_tilt = float(motion.property("targetTilt"))
+        state = (*current, presentation, tilt)
+        settled = (
+            bool(motion.property("positionMotionEnabled")) is motion_enabled
+            and math.isclose(target_presentation, expected_presentation, abs_tol=0.01)
+            and math.isclose(presentation, expected_presentation, abs_tol=0.02)
+            and math.isclose(tilt, target_tilt, abs_tol=0.1)
+            and _max_geometry_delta(current, target) <= 0.75
+            and not bool(motion.property("positionAnimationRunning"))
+            and not bool(motion.property("presentationAnimationRunning"))
+            and window.property("navigationResizeActive") is False
+            and window.property("pageTransitioning") is False
+            and window.property("pageContentReady") is True
+        )
+        if settled and previous is not None and _max_geometry_delta(current, previous[:4]) <= 0.1:
+            stable_frames += 1
+            if stable_frames >= 3:
+                return
+        else:
+            stable_frames = 0
+        previous = state
+        QTest.qWait(20)
+
+    raise AssertionError(
+        "Prism navigation motion did not converge: "
+        f"current={current}, target={target}, "
+        f"presentation={motion.property('presentation')}, "
+        f"target_presentation={motion.property('targetPresentation')}, "
+        f"enabled={motion.property('positionMotionEnabled')}, "
+        f"position_running={motion.property('positionAnimationRunning')}, "
+        f"presentation_running={motion.property('presentationAnimationRunning')}, "
+        f"resize_active={window.property('navigationResizeActive')}, "
+        f"page_transitioning={window.property('pageTransitioning')}"
+    )
+
+
+def _wait_for_action_motion_progress(
+    window: QQuickWindow,
+    motion: QQuickItem,
+    app: QApplication,
+    *,
+    start: tuple[float, float, float, float],
+    toward_latest_target: bool = False,
+    timeout_ms: int = 2500,
+) -> tuple[float, float, float, float]:
+    deadline = time.monotonic() + timeout_ms / 1000
+    current = _navigation_motion_rect(motion)
+    target = _navigation_motion_rect(motion, target=True)
+    while time.monotonic() < deadline:
+        app.processEvents()
+        current = _navigation_motion_rect(motion)
+        target = _navigation_motion_rect(motion, target=True)
+        moved = _max_geometry_delta(start, current) > 1.0
+        away_from_target = _max_geometry_delta(current, target) > 1.0
+        toward_target = (
+            _max_geometry_delta(start, target)
+            - _max_geometry_delta(current, target)
+            > 1.0
+        )
+        if (
+            bool(motion.property("positionMotionEnabled"))
+            and moved
+            and away_from_target
+            and (not toward_latest_target or toward_target)
+        ):
+            return current
+        QTest.qWait(20)
+
+    raise AssertionError(
+        "Prism CTA motion did not show an intermediate position: "
+        f"current={current}, target={target}, "
+        f"enabled={motion.property('positionMotionEnabled')}, "
+        f"page_transitioning={window.property('pageTransitioning')}"
+    )
+
+
+def _wait_for_action_motion_settled(
+    window: QQuickWindow,
+    motion: QQuickItem,
+    app: QApplication,
+    *,
+    motion_enabled: bool,
+    timeout_ms: int = 3000,
+) -> None:
+    deadline = time.monotonic() + timeout_ms / 1000
+    previous: tuple[float, float, float, float] | None = None
+    stable_frames = 0
+    current = _navigation_motion_rect(motion)
+    target = _navigation_motion_rect(motion, target=True)
+    while time.monotonic() < deadline:
+        app.processEvents()
+        current = _navigation_motion_rect(motion)
+        target = _navigation_motion_rect(motion, target=True)
+        settled = (
+            bool(motion.property("positionMotionEnabled")) is motion_enabled
+            and _max_geometry_delta(current, target) <= 0.75
+            and window.property("navigationResizeActive") is False
+            and window.property("pageTransitioning") is False
+            and window.property("pageContentReady") is True
+        )
+        if settled and previous is not None and _max_geometry_delta(current, previous) <= 0.1:
+            stable_frames += 1
+            if stable_frames >= 3:
+                return
+        else:
+            stable_frames = 0
+        previous = current
+        QTest.qWait(20)
+
+    raise AssertionError(
+        "Prism CTA motion did not converge: "
+        f"current={current}, target={target}, "
+        f"enabled={motion.property('positionMotionEnabled')}, "
+        f"page_transitioning={window.property('pageTransitioning')}"
+    )
+
+
+def _assert_item_inside_window_viewport(
+    window: QQuickWindow,
+    item: QQuickItem,
+) -> None:
+    origin = item.mapToItem(window.contentItem(), QPointF(0, 0))
+    viewport_width = float(window.contentItem().width())
+    viewport_height = float(window.contentItem().height())
+    bounds = (
+        float(origin.x()),
+        float(origin.y()),
+        float(item.width()),
+        float(item.height()),
+    )
+    assert item.isVisible() and item.isEnabled()
+    assert bounds[0] >= -0.5 and bounds[1] >= -0.5, (
+        item.objectName(),
+        bounds,
+        viewport_width,
+        viewport_height,
+    )
+    assert bounds[0] + bounds[2] <= viewport_width + 0.5, (
+        item.objectName(),
+        bounds,
+        viewport_width,
+        viewport_height,
+    )
+    assert bounds[1] + bounds[3] <= viewport_height + 0.5, (
+        item.objectName(),
+        bounds,
+        viewport_width,
+        viewport_height,
+    )
+
+
+def _assert_item_center_inside_window_viewport(
+    window: QQuickWindow,
+    item: QQuickItem,
+) -> None:
+    center = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
+    assert item.isVisible() and item.isEnabled()
+    assert 0 <= center.x() < window.width(), (
+        item.objectName(),
+        center.x(),
+        window.width(),
+        center.y(),
+        window.height(),
+    )
+    assert 0 <= center.y() < window.height(), (
+        item.objectName(),
+        center.x(),
+        window.width(),
+        center.y(),
+        window.height(),
+    )
+
+
+def _assert_zero_progress_retarget_stops_old_animation(
+    motion: QQuickItem,
+    app: QApplication,
+) -> None:
+    assert QMetaObject.invokeMethod(motion, "settle") is True
+    app.processEvents()
+    start = _navigation_motion_rect(motion)
+    animation_children = [
+        child
+        for child in motion.children()
+        if child.metaObject().indexOfProperty("running") >= 0
+        and child.metaObject().indexOfProperty("duration") >= 0
+    ]
+    assert animation_children, motion.objectName()
+
+    def animation_running() -> bool:
+        aggregate = motion.property("positionAnimationRunning")
+        if aggregate is not None:
+            return bool(aggregate)
+        return any(bool(animation.property("running")) for animation in animation_children)
+
+    assert animation_running() is False
+    stale_target_x = start[0] + 100.0
+    motion.setProperty("targetX", stale_target_x)
+    assert float(motion.property("targetX")) == pytest.approx(stale_target_x)
+    assert animation_running() is True
+    assert _max_geometry_delta(_navigation_motion_rect(motion), start) <= 0.05
+
+    # Return to the current x before delivering another event. The target is
+    # now within the component's near-equality threshold, so it must stop the
+    # old animation instead of returning while that stale target keeps moving.
+    motion.setProperty("targetX", start[0])
+    app.processEvents()
+    assert float(motion.property("targetX")) == pytest.approx(start[0])
+    assert _max_geometry_delta(_navigation_motion_rect(motion), start) <= 0.05
+    assert animation_running() is False
+
+    QTest.qWait(280)
+    app.processEvents()
+    assert _max_geometry_delta(_navigation_motion_rect(motion), start) <= 0.75
+    assert animation_running() is False
+
+
 def _scroll_control_into_view(
     window: QQuickWindow,
     scroll: QQuickItem,
@@ -3257,7 +3587,9 @@ def test_pair_editor_existing_rows_show_one_adjacent_hint_and_remain_editable(
 
 def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
     app = _application()
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
@@ -3302,9 +3634,7 @@ def test_real_dohna_skin_switches_from_home_and_keeps_prism_theme_preference(
         navigation_button = _find_quick_item(window, f"refraDarkNavigationButton{index}")
         assert navigation_button is not None
         assert navigation_button.property("visible") is True
-        legacy_navigation_button = _find_quick_item(window, f"navigationButton{index}")
-        assert legacy_navigation_button is not None
-        assert legacy_navigation_button.property("visible") is False
+        assert not _find_quick_items(window, f"navigationButton{index}")
 
     preferences = window.findChild(QObject, "refraDarkPreferencesButton")
     assert preferences is not None
@@ -3588,7 +3918,9 @@ def test_native_dohna_toggle_smooths_edges_without_shrinking_or_clipping(
 
 def test_real_dohna_uses_local_control_feedback_and_settles_on_switch_or_hide(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
     app = _application()
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
@@ -4240,8 +4572,9 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
 
 @pytest.mark.parametrize("window_size", [(980, 700), (1280, 820)])
 def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
-    tmp_path: Path, window_size: tuple[int, int],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, window_size: tuple[int, int],
 ) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
     app = _application()
     config_path = tmp_path / "config.toml"
     _write_config(config_path)
@@ -4285,7 +4618,7 @@ def test_real_dohna_slanted_menu_and_parallel_buttons_keep_hit_targets(
             label_left = label.mapToScene(QPointF(0, 0))
             label_right = label.mapToScene(QPointF(label.width(), 0))
             assert label_right.y() > label_left.y() + 10
-            rail = button.parentItem().parentItem()
+            rail = button.parentItem().parentItem().parentItem()
             assert rail.property("clip") is True
             rail_left = rail.mapToScene(QPointF(0, 0)).x()
             rail_right = rail_left + rail.width()
@@ -5876,18 +6209,13 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
     title_light = window.findChild(QObject, "pageDisplayTitleLight")
     title_dark = window.findChild(QObject, "refraEnglishPageTitle")
     title_dark_chinese = window.findChild(QObject, "refraChinesePageTitle")
-    save_button = window.findChild(QObject, "saveAllButton")
-    start_button = window.findChild(QObject, "startLiveButton")
-    dark_save_button = window.findChild(QObject, "darkSaveAllButton")
-    dark_start_button = window.findChild(QObject, "darkStartLiveButton")
     motion_feedback = window.findChild(QObject, "prismMotionFeedback")
     feedback_layer = window.findChild(QObject, "prismFeedbackLayer")
     divider_line = window.findChild(QObject, "prismDividerLine")
     assert all(
         item is not None
         for item in (
-            theme, title_light, title_dark, title_dark_chinese, save_button,
-            start_button, dark_save_button, dark_start_button,
+            theme, title_light, title_dark, title_dark_chinese,
             motion_feedback, feedback_layer, divider_line,
         )
     )
@@ -5965,8 +6293,10 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
             QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=point)
             app.processEvents()
         else:
-            assert save_button.property("visible") is True
-            assert start_button.property("visible") is True
+            save_button = _find_quick_item(window, _workbench_save_button_name(window))
+            start_button = _find_quick_item(window, _workbench_start_button_name(window))
+            assert save_button is not None and save_button.property("visible") is True
+            assert start_button is not None and start_button.property("visible") is True
 
         for index, (page, page_title, code, nav_title, panel_name) in enumerate(pages):
             controller.setPage(page)
@@ -6005,9 +6335,15 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
                 nav_button = _find_quick_item(window, f"navigationButton{index}")
                 assert nav_button is not None and nav_button.property("visible") is True
                 if prism_style:
-                    assert dark_save_button.property("visible") is True
-                    assert dark_start_button.property("visible") is True
+                    save_button = _find_quick_item(window, _workbench_save_button_name(window))
+                    start_button = _find_quick_item(window, _workbench_start_button_name(window))
+                    assert save_button is not None and save_button.property("visible") is True
+                    assert start_button is not None and start_button.property("visible") is True
                 else:
+                    save_button = _find_quick_item(window, _workbench_save_button_name(window))
+                    start_button = _find_quick_item(window, _workbench_start_button_name(window))
+                    assert save_button is not None
+                    assert start_button is not None
                     assert save_button.property("visible") is True
                     assert start_button.property("visible") is True
             nav_title_label = nav_button.findChild(QObject, "navigationTitleLabel")
@@ -7151,6 +7487,484 @@ def test_refra_dark_home_keeps_one_enabled_navigation_tree_and_shared_preference
         app.processEvents()
         assert theme.property("refraDark") is True
         assert item("refraDarkHome").isVisible()
+    finally:
+        host.shutdown()
+
+
+@pytest.mark.parametrize("theme_name", ("dark", "light"))
+def test_prism_navigation_motion_retargets_and_settles_across_lifecycle_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    theme_name: str,
+) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(False)
+    controller.setPage("HOME")
+    host = QmlWorkbenchHost(controller, application=app)
+
+    try:
+        host.show()
+        window = host.window
+        assert window is not None
+        window.resize(1280, 820)
+        app.processEvents()
+        motion = _find_quick_item(window, "prismNavigationMotion0")
+        overlay = _find_quick_item(window, "sharedNavigationOverlay")
+        theme = window.findChild(QObject, "prismTheme")
+        assert motion is not None
+        assert overlay is not None
+        assert theme is not None and theme.property("refraStyle") is True
+
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=1.0,
+            motion_enabled=True,
+        )
+        home_buttons = []
+        for index in range(7):
+            visible = [
+                item
+                for item in _find_quick_items(
+                    window,
+                    f"refraDarkNavigationButton{index}",
+                )
+                if item.isVisible()
+            ]
+            assert len(visible) == 1, (index, len(visible))
+            _assert_item_center_inside_window_viewport(window, visible[0])
+            home_buttons.append(visible[0])
+        home_subtitle = home_buttons[0].findChild(QQuickItem, "navigationSubtitleLabel")
+        assert home_subtitle is not None and home_subtitle.isVisible()
+        assert home_subtitle.property("text") == "总览"
+        assert home_subtitle.property("opacity") == pytest.approx(1.0)
+        home_start = _navigation_motion_rect(motion)
+        hero_button = home_buttons[2]
+        assert len(_find_quick_items(window, "refraDarkNavigationButton2")) == 1
+        click_point = hero_button.mapToScene(
+            QPointF(hero_button.width() / 2, hero_button.height() / 2),
+        ).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=click_point)
+        app.processEvents()
+        assert controller.currentPage == "OCR"
+        first_midpoint = _wait_for_navigation_motion_progress(
+            window,
+            motion,
+            app,
+            expected_presentation=0.0,
+            start=home_start,
+        )
+        assert _max_geometry_delta(home_start, first_midpoint) > 1
+        assert _max_geometry_delta(
+            first_midpoint,
+            _navigation_motion_rect(motion, target=True),
+        ) > 1
+        _wait_for_navigation_subtitle_fade(window, motion, home_subtitle, app)
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=0.0,
+            motion_enabled=True,
+        )
+        rail_buttons = []
+        for index in range(7):
+            visible = [
+                item
+                for item in _find_quick_items(window, f"navigationButton{index}")
+                if item.isVisible()
+            ]
+            assert len(visible) == 1, (index, len(visible))
+            _assert_item_center_inside_window_viewport(window, visible[0])
+            rail_buttons.append(visible[0])
+        rail_subtitle = rail_buttons[0].findChild(QQuickItem, "navigationSubtitleLabel")
+        assert rail_subtitle is not None and rail_subtitle.isVisible()
+        assert rail_subtitle.property("text") == "总览"
+        assert rail_subtitle.property("opacity") == pytest.approx(1.0)
+
+        rail_start = _navigation_motion_rect(motion)
+        rail_button = rail_buttons[0]
+        assert len(_find_quick_items(window, "navigationButton0")) == 1
+        click_point = rail_button.mapToScene(
+            QPointF(rail_button.width() / 2, rail_button.height() / 2),
+        ).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=click_point)
+        app.processEvents()
+        assert controller.currentPage == "HOME"
+        rail_to_home_midpoint = _wait_for_navigation_motion_progress(
+            window,
+            motion,
+            app,
+            expected_presentation=1.0,
+            start=rail_start,
+        )
+        assert _max_geometry_delta(rail_start, rail_to_home_midpoint) > 1
+        assert _max_geometry_delta(
+            rail_to_home_midpoint,
+            _navigation_motion_rect(motion, target=True),
+        ) > 1
+        _wait_for_navigation_subtitle_fade(window, motion, rail_subtitle, app)
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=1.0,
+            motion_enabled=True,
+        )
+        assert home_subtitle.property("opacity") == pytest.approx(1.0)
+
+        reversal_start = _navigation_motion_rect(motion)
+        next_hero_button = home_buttons[1]
+        click_point = next_hero_button.mapToScene(
+            QPointF(next_hero_button.width() / 2, next_hero_button.height() / 2),
+        ).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=click_point)
+        app.processEvents()
+        assert controller.currentPage == "CAPTURE"
+        _wait_for_navigation_motion_progress(
+            window,
+            motion,
+            app,
+            expected_presentation=0.0,
+            start=reversal_start,
+        )
+        reversal_start = _navigation_motion_rect(motion)
+        controller.setPage("HOME")
+        app.processEvents()
+        assert controller.currentPage == "HOME"
+        reverse_midpoint = _wait_for_navigation_motion_progress(
+            window,
+            motion,
+            app,
+            expected_presentation=1.0,
+            start=reversal_start,
+            toward_latest_target=True,
+        )
+        assert _max_geometry_delta(reverse_midpoint, reversal_start) > 1
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=1.0,
+            motion_enabled=True,
+        )
+
+        window.resize(1100, 760)
+        app.processEvents()
+        assert window.property("navigationResizeActive") is True
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=1.0,
+            motion_enabled=True,
+        )
+
+        window.hide()
+        app.processEvents()
+        assert window.isVisible() is False
+        controller.setPage("OVERLAY")
+        app.processEvents()
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=0.0,
+            motion_enabled=False,
+        )
+        host.show()
+        app.processEvents()
+        assert window.isVisible() is True
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=0.0,
+            motion_enabled=True,
+        )
+
+        controller.setReducedMotion(True)
+        controller.setPage("HOME")
+        app.processEvents()
+        assert window.property("navigationMotionEnabled") is False
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=1.0,
+            motion_enabled=False,
+        )
+        controller.setPage("SETTINGS")
+        app.processEvents()
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=0.0,
+            motion_enabled=False,
+        )
+
+        controller.setSkin(SKIN_DOHNA)
+        app.processEvents()
+        assert theme.property("refraStyle") is False
+        assert overlay.property("visible") is False
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=0.0,
+            motion_enabled=False,
+        )
+        visible_dohna_buttons = [
+            item
+            for item in _find_quick_items(window, "navigationButton0")
+            if item.isVisible()
+        ]
+        assert len(visible_dohna_buttons) == 1
+
+        controller.setSkin(SKIN_PRISM)
+        app.processEvents()
+        assert theme.property("refraStyle") is True
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=0.0,
+            motion_enabled=False,
+        )
+        assert overlay.property("visible") is True
+        assert window.property("navigationMotionEnabled") is False
+
+        controller.setReducedMotion(False)
+        controller.setPage("HOME")
+        app.processEvents()
+        _wait_for_navigation_motion_settled(
+            window,
+            motion,
+            app,
+            expected_presentation=1.0,
+            motion_enabled=True,
+        )
+        _assert_zero_progress_retarget_stops_old_animation(motion, app)
+    finally:
+        host.shutdown()
+
+
+@pytest.mark.parametrize("theme_name", ("dark", "light"))
+def test_prism_action_motion_preserves_start_and_apply_handlers_on_both_pages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    theme_name: str,
+) -> None:
+    class RecordingController(WorkbenchController):
+        def __init__(self, config_path: Path) -> None:
+            super().__init__(config_path, probe_ocr_devices=False)
+            self.toggle_calls = 0
+
+        @Slot()
+        def toggleLive(self) -> None:  # noqa: N802
+            self.toggle_calls += 1
+
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = RecordingController(config_path)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(False)
+    controller.setPage("HOME")
+    host = QmlWorkbenchHost(controller, application=app)
+
+    try:
+        host.show()
+        window = host.window
+        assert window is not None
+        app.processEvents()
+        start_motion = _find_quick_item(window, "prismActionMotion0")
+        apply_motion = _find_quick_item(window, "prismActionMotion1")
+        assert start_motion is not None and apply_motion is not None
+        _wait_for_action_motion_settled(
+            window,
+            start_motion,
+            app,
+            motion_enabled=True,
+        )
+        _wait_for_action_motion_settled(
+            window,
+            apply_motion,
+            app,
+            motion_enabled=True,
+        )
+        _assert_item_inside_window_viewport(
+            window,
+            _find_quick_item(window, "refraDarkStartButton"),
+        )
+        _assert_item_inside_window_viewport(
+            window,
+            _find_quick_item(window, "refraDarkApplyButton"),
+        )
+
+        def visible_button(object_name: str) -> QQuickItem:
+            matches = [
+                item
+                for item in _find_quick_items(window, object_name)
+                if item.isVisible()
+            ]
+            assert len(matches) == 1, (object_name, len(matches))
+            assert matches[0].isEnabled(), object_name
+            return matches[0]
+
+        def click(target: QQuickItem) -> None:
+            assert target.isVisible() and target.isEnabled()
+            position = target.mapToScene(
+                QPointF(target.width() / 2, target.height() / 2),
+            ).toPoint()
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=position)
+            app.processEvents()
+
+        def wait_for_toggle_calls(expected: int) -> None:
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                app.processEvents()
+                if controller.toggle_calls == expected:
+                    return
+                QTest.qWait(20)
+            assert controller.toggle_calls == expected
+
+        home_start_rect = _navigation_motion_rect(start_motion)
+        home_apply_rect = _navigation_motion_rect(apply_motion)
+        click(visible_button("refraDarkNavigationButton1"))
+        assert controller.currentPage == "CAPTURE"
+        _wait_for_action_motion_progress(
+            window,
+            start_motion,
+            app,
+            start=home_start_rect,
+        )
+        _wait_for_action_motion_progress(
+            window,
+            apply_motion,
+            app,
+            start=home_apply_rect,
+        )
+        _wait_for_action_motion_settled(
+            window,
+            start_motion,
+            app,
+            motion_enabled=True,
+        )
+        _wait_for_action_motion_settled(
+            window,
+            apply_motion,
+            app,
+            motion_enabled=True,
+        )
+
+        _assert_item_inside_window_viewport(
+            window,
+            visible_button("darkStartLiveButton"),
+        )
+        _assert_item_inside_window_viewport(
+            window,
+            visible_button("darkSaveAllButton"),
+        )
+        assert len(_find_quick_items(window, "darkStartLiveButton")) == 1
+        assert len(_find_quick_items(window, "darkSaveAllButton")) == 1
+        previous_debug = controller.debugEnabled
+        controller.setDebugEnabled(not previous_debug)
+        assert controller.settingsDirty is True
+        click(visible_button("darkSaveAllButton"))
+        assert controller.settingsDirty is False
+        saved_profile = load_game_profile(
+            config_path,
+            load_config(config_path),
+            "game",
+        )
+        assert saved_profile.runtime_settings.live.debug_border is not previous_debug
+
+        click(visible_button("darkStartLiveButton"))
+        assert window.property("startPreludePending") is True
+        wait_for_toggle_calls(1)
+        assert controller._live_process is None
+        assert window.property("startPreludePending") is False
+
+        rail_start_rect = _navigation_motion_rect(start_motion)
+        rail_apply_rect = _navigation_motion_rect(apply_motion)
+        click(visible_button("navigationButton0"))
+        assert controller.currentPage == "HOME"
+        _wait_for_action_motion_progress(
+            window,
+            start_motion,
+            app,
+            start=rail_start_rect,
+        )
+        _wait_for_action_motion_progress(
+            window,
+            apply_motion,
+            app,
+            start=rail_apply_rect,
+        )
+        _wait_for_action_motion_settled(
+            window,
+            start_motion,
+            app,
+            motion_enabled=True,
+        )
+        _wait_for_action_motion_settled(
+            window,
+            apply_motion,
+            app,
+            motion_enabled=True,
+        )
+
+        _assert_item_inside_window_viewport(
+            window,
+            visible_button("refraDarkStartButton"),
+        )
+        _assert_item_inside_window_viewport(
+            window,
+            visible_button("refraDarkApplyButton"),
+        )
+        assert len(_find_quick_items(window, "refraDarkStartButton")) == 1
+        assert len(_find_quick_items(window, "refraDarkApplyButton")) == 1
+        controller.setDebugEnabled(previous_debug)
+        assert controller.settingsDirty is True
+        click(visible_button("refraDarkApplyButton"))
+        assert controller.settingsDirty is False
+        saved_profile = load_game_profile(
+            config_path,
+            load_config(config_path),
+            "game",
+        )
+        assert saved_profile.runtime_settings.live.debug_border is previous_debug
+
+        click(visible_button("refraDarkStartButton"))
+        assert window.property("startPreludePending") is True
+        wait_for_toggle_calls(2)
+        assert controller._live_process is None
+        assert window.property("startPreludePending") is False
+        _assert_zero_progress_retarget_stops_old_animation(start_motion, app)
+        _assert_zero_progress_retarget_stops_old_animation(apply_motion, app)
     finally:
         host.shutdown()
 

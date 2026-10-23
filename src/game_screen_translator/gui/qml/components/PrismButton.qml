@@ -18,6 +18,19 @@ Button {
     property bool navigationCool: false
     property real navigationTilt: 0
     property bool navigationHero: false
+    // P3 navigation can move continuously between its compact rail and large
+    // Home presentation; legacy Prism and Dohna callers keep the bool fallback.
+    property real navigationPresentationProgress: navigationHero ? 1 : 0
+    readonly property real navigationHeroProgress: navigationPresentationProgress
+    function navigationTextCoolColor() {
+        const progress = Math.max(0, Math.min(1, root.navigationHeroProgress))
+        const base = root.theme.text
+        const cool = root.theme.electric
+        return Qt.rgba(base.r * (1 - progress) + cool.r * progress,
+                       base.g * (1 - progress) + cool.g * progress,
+                       base.b * (1 - progress) + cool.b * progress,
+                       base.a * (1 - progress) + cool.a * progress)
+    }
     property real navigationHeroFontSize: 0
     property bool navigationSlashVisible: false
     property bool p3Action: false
@@ -39,7 +52,9 @@ Button {
     implicitWidth: Math.max(112, contentItem.implicitWidth + 30)
     implicitHeight: root.theme.dohna && root.navigation
                     ? Math.ceil(navigationTextMetrics.tightBoundingRect.height / 0.85)
-                    : root.navigation ? (root.theme.refraStyle ? (root.navigationHero ? 60 : 66) : 52) : 42
+                    : root.navigation ? (root.theme.refraStyle
+                                         ? (60 * root.navigationHeroProgress + 66 * (1 - root.navigationHeroProgress))
+                                         : 52) : 42
     verticalPadding: root.theme.dohna && root.navigation ? 0 : padding
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
@@ -88,9 +103,15 @@ Button {
 
     contentItem: Item {
         implicitWidth: root.navigation && !root.theme.dohna
-                       ? (root.theme.refraStyle ? (root.navigationHero ? 520 : 160) : 150)
+                       ? (root.theme.refraStyle
+                          ? (520 * root.navigationHeroProgress + 160 * (1 - root.navigationHeroProgress))
+                          : 150)
                        : buttonLabel.implicitWidth
-        implicitHeight: root.navigation && !root.theme.dohna ? (root.theme.refraStyle ? (root.navigationHero ? 58 : 64) : 42) : buttonLabel.implicitHeight
+        implicitHeight: root.navigation && !root.theme.dohna
+                        ? (root.theme.refraStyle
+                           ? (58 * root.navigationHeroProgress + 64 * (1 - root.navigationHeroProgress))
+                           : 42)
+                        : buttonLabel.implicitHeight
 
         TextMetrics {
             id: navigationHeroTitleMetrics
@@ -135,15 +156,16 @@ Button {
         Text {
             objectName: "navigationNumberLabel"
             visible: root.navigation && !root.theme.dohna
-            x: root.navigationHero ? 10 : 7
-            y: root.navigationHero ? Math.max(0, (parent.height - height) / 2) : 8
-            width: root.navigationHero ? 34 : 24
-            height: root.navigationHero ? 28 : 18
+            x: 10 * root.navigationHeroProgress + 7 * (1 - root.navigationHeroProgress)
+            y: Math.max(0, (parent.height - height) / 2) * root.navigationHeroProgress
+               + 8 * (1 - root.navigationHeroProgress)
+            width: 34 * root.navigationHeroProgress + 24 * (1 - root.navigationHeroProgress)
+            height: 28 * root.navigationHeroProgress + 18 * (1 - root.navigationHeroProgress)
             text: root.navigationNumber
             color: root.theme.refraStyle && root.primary ? root.theme.ink
                   : root.primary ? root.theme.accent : root.theme.textDim
             font.family: root.theme.monoFontFor(text)
-            font.pixelSize: root.navigationHero ? 16 : 12
+            font.pixelSize: 16 * root.navigationHeroProgress + 12 * (1 - root.navigationHeroProgress)
             font.weight: Font.DemiBold
             verticalAlignment: Text.AlignVCenter
         }
@@ -152,36 +174,48 @@ Button {
             id: navigationTitleLabel
             objectName: "navigationTitleLabel"
             visible: root.navigation && !root.theme.dohna
-            x: root.navigationHero ? 54 : 37
-            y: root.theme.refraStyle && !root.navigationHero ? 1 : (root.theme.refraStyle ? 0 : 3)
-            width: root.theme.refraStyle && root.navigationHero
+            x: root.theme.refraStyle
+               ? 54 * root.navigationHeroProgress + 37 * (1 - root.navigationHeroProgress)
+               : (root.navigationHero ? 54 : 37)
+            y: root.theme.refraStyle
+               ? (1 - root.navigationHeroProgress)
+               : (root.navigationHero ? 0 : 3)
+            width: root.theme.refraStyle
                    ? Math.min(parent.width - x - 8,
                               navigationHeroTitleMetrics.tightBoundingRect.width + 6)
-                   : Math.max(0, parent.width - x - (root.theme.refraStyle ? 10 : 5))
-            height: root.theme.refraStyle ? (root.navigationHero ? parent.height : 36) : 24
+                     * root.navigationHeroProgress
+                     + Math.max(0, parent.width - x - 10) * (1 - root.navigationHeroProgress)
+                   : Math.max(0, parent.width - x - 5)
+            height: root.theme.refraStyle
+                    ? parent.height * root.navigationHeroProgress + 36 * (1 - root.navigationHeroProgress)
+                    : 24
             text: root.text
             color: root.theme.refraStyle && root.primary ? root.theme.ink
                   : !root.enabled ? root.theme.textDim
-                  : root.theme.refraStyle && root.navigationCool ? root.theme.electric
+                  : root.theme.refraStyle && root.navigationCool ? root.navigationTextCoolColor()
                   : root.theme.text
             font.family: root.theme.refraStyle && !root.theme.containsCjk(text)
                          ? "Arial Black" : root.theme.displayFontFor(text)
             font.pixelSize: root.theme.refraStyle
-                            ? (root.navigationHero
-                               ? (root.navigationHeroFontSize > 0
-                                  ? root.navigationHeroFontSize
-                                  : Math.max(64, Math.min(96, (root.width - 126) / 5.5)))
-                               : Math.max(16, Math.min(28, (root.width - 52)
-                                                       / Math.max(5, String(text).length * 0.67)))
-                              )
+                            ? (root.navigationHeroFontSize > 0
+                               ? root.navigationHeroFontSize
+                               : Math.max(64, Math.min(96, (root.width - 126) / 5.5)))
+                              * root.navigationHeroProgress
+                              + Math.max(16, Math.min(28, (root.width - 52)
+                                                      / Math.max(5, String(text).length * 0.67)))
+                                * (1 - root.navigationHeroProgress)
                             : 15
             font.weight: root.theme.refraStyle
                          ? Font.Black : root.primary ? Font.Bold : Font.DemiBold
             font.italic: root.theme.refraStyle
-            font.letterSpacing: root.theme.refraStyle ? (root.navigationHero ? -2.8 : -1.4) : 0
-            fontSizeMode: root.theme.refraStyle && root.navigation && !root.navigationHero
+            font.letterSpacing: root.theme.refraStyle
+                                ? (-2.8 * root.navigationHeroProgress
+                                   -1.4 * (1 - root.navigationHeroProgress)) : 0
+            fontSizeMode: root.theme.refraStyle && root.navigation
+                          && root.navigationHeroProgress < 0.001
                           ? Text.HorizontalFit : Text.FixedSize
-            minimumPixelSize: root.theme.refraStyle && root.navigation && !root.navigationHero ? 16 : 1
+            minimumPixelSize: root.theme.refraStyle && root.navigation
+                              && root.navigationHeroProgress < 0.001 ? 16 : 1
             verticalAlignment: Text.AlignVCenter
             elide: root.theme.refraStyle ? Text.ElideNone : Text.ElideRight
         }
@@ -190,31 +224,48 @@ Button {
             id: navigationSubtitleLabel
             objectName: "navigationSubtitleLabel"
             visible: root.navigation && !root.theme.dohna && root.theme.refraStyle
-            x: root.navigationHero
-               ? Math.min(parent.width - implicitWidth - 5,
-                          navigationTitleLabel.x
-                          + navigationHeroTitleMetrics.tightBoundingRect.width + 12)
-               : 37
-            y: root.navigationHero ? 0 : 35
-            width: root.navigationHero
-                   ? Math.max(0, Math.min(parent.width - x - 5, implicitWidth))
-                   : Math.max(0, Math.min(parent.width - x - 5, implicitWidth))
-            height: root.navigationHero ? parent.height : 25
+            opacity: {
+                const progress = Math.max(0, Math.min(1, root.navigationHeroProgress))
+                const railFadeEnd = 0.12
+                const heroFadeStart = 0.88
+                if (progress <= railFadeEnd)
+                    return 1 - progress / railFadeEnd
+                if (progress >= heroFadeStart)
+                    return (progress - heroFadeStart) / (1 - heroFadeStart)
+                return 0
+            }
+            x: {
+                const heroX = Math.min(parent.width - implicitWidth - 5,
+                                       navigationTitleLabel.x
+                                       + navigationHeroTitleMetrics.tightBoundingRect.width + 12)
+                return 37 * (1 - root.navigationHeroProgress) + heroX * root.navigationHeroProgress
+            }
+            y: 35 * (1 - root.navigationHeroProgress)
+            width: {
+                const railWidth = Math.max(0, Math.min(parent.width - 37 - 5, implicitWidth))
+                const heroWidth = Math.max(0, Math.min(parent.width - x - 5, implicitWidth))
+                return railWidth * (1 - root.navigationHeroProgress)
+                       + heroWidth * root.navigationHeroProgress
+            }
+            height: 25 * (1 - root.navigationHeroProgress)
+                    + parent.height * root.navigationHeroProgress
             text: root.navigationSubtitle
             color: root.primary ? root.theme.ink
-                  : root.navigationCool ? root.theme.electric : root.theme.text
+                  : root.navigationCool ? root.navigationTextCoolColor() : root.theme.text
             font.family: root.theme.uiFontFor(text)
-            font.pixelSize: root.navigationHero ? 24 : 14
+            font.pixelSize: 24 * root.navigationHeroProgress
+                            + 14 * (1 - root.navigationHeroProgress)
             font.weight: Font.Bold
             verticalAlignment: Text.AlignVCenter
-            elide: root.navigationHero ? Text.ElideNone : Text.ElideRight
+            elide: root.navigationHeroProgress > 0.5 ? Text.ElideNone : Text.ElideRight
         }
 
         Shape {
             id: navigationHeroSlash
             objectName: "navigationHeroSlash"
-            visible: root.theme.refraStyle && root.navigation && root.navigationHero
+            visible: root.theme.refraStyle && root.navigation
                      && root.navigationSlashVisible
+                     && (root.navigationHero || root.navigationHeroProgress > 0)
             readonly property real edgePadding: 2
             readonly property real visualX: navigationSubtitleLabel.x + navigationSubtitleLabel.width + 10
             readonly property real visualY: parent.height * 0.80
@@ -222,7 +273,8 @@ Button {
             y: visualY - edgePadding
             width: Math.max(0, parent.width - visualX - 5) + edgePadding * 2
             height: 6 + edgePadding * 2
-            opacity: root.primary ? 0.88 : 0.66
+            opacity: (root.primary ? 0.88 : 0.66)
+                     * (root.navigationHero ? 1 : root.navigationHeroProgress)
             preferredRendererType: Shape.CurveRenderer
             layer.enabled: true
             layer.smooth: true
@@ -334,7 +386,8 @@ Button {
             id: prismNavigationSidebarMagenta
             objectName: "prismNavigationMagentaOffset"
             visible: root.theme.refraStyle && root.navigation && root.primary && root.enabled
-                     && !root.navigationHero
+                     && root.navigationHeroProgress < 1
+            opacity: 1 - root.navigationHeroProgress
             readonly property real edgePadding: 3
             x: 10 - edgePadding
             y: 8 - edgePadding
@@ -374,7 +427,8 @@ Button {
             id: prismNavigationSidebarActive
             objectName: "prismNavigationActivePlate"
             visible: root.theme.refraStyle && root.navigation && root.primary && root.enabled
-                     && !root.navigationHero
+                     && root.navigationHeroProgress < 1
+            opacity: 1 - root.navigationHeroProgress
             readonly property real edgePadding: 3
             x: -edgePadding
             y: 4 - edgePadding
@@ -414,8 +468,10 @@ Button {
         Shape {
             id: navigationHeroMagentaShape
             objectName: "prismNavigationHeroMagentaWedge"
-            visible: root.theme.refraStyle && root.navigation && root.navigationHero
+            visible: root.theme.refraStyle && root.navigation
+                     && root.navigationHeroProgress > 0
                      && root.primary && root.enabled
+            opacity: root.navigationHeroProgress
             readonly property real edgePadding: 4
             x: 13 - edgePadding
             y: 10 - edgePadding
@@ -456,8 +512,10 @@ Button {
         Shape {
             id: navigationHeroActiveShape
             objectName: "prismNavigationHeroActiveWedge"
-            visible: root.theme.refraStyle && root.navigation && root.navigationHero
+            visible: root.theme.refraStyle && root.navigation
+                     && root.navigationHeroProgress > 0
                      && root.primary && root.enabled
+            opacity: root.navigationHeroProgress
             readonly property real edgePadding: 4
             x: 3 - edgePadding
             y: 3 - edgePadding

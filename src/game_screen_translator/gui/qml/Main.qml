@@ -31,12 +31,113 @@ ApplicationWindow {
     readonly property string visualPage: boundWorkbench.currentPage
     readonly property bool reduceMotion: boundWorkbench.reducedMotion
     readonly property bool fullCanvasHome: prism.refraStyle && boundWorkbench.currentPage === "HOME"
+    property bool navigationMotionArmed: false
+    property bool navigationResizeActive: false
+    property bool navigationTargetIsHero: false
+    property int navigationGeometryRevision: 0
+    readonly property bool navigationMotionEnabled: visible && prism.refraStyle
+                                                   && navigationMotionArmed
+                                                   && !navigationResizeActive
+                                                   && !reduceMotion
     property string lastAnimatedPage: ""
     readonly property bool pageTransitioning: animationsRunning
                                               && (pageTransitionAnimation.running
                                                   || dohnaPageTransitionAnimation.running)
     property int pageTransitionSequence: 0
     property bool startPreludePending: false
+
+    function navigationTargetSlot(index) {
+        if (!prism.refraStyle)
+            return null
+        if (navigationTargetIsHero)
+            return homePage.p3NavigationSlots.itemAt(index)
+        const delegate = navigationRepeater.itemAt(index)
+        return delegate ? delegate.p3Slot : null
+    }
+
+    function navigationTargetBounds(index, geometryRevision) {
+        // The caller passes navigationGeometryRevision directly in its
+        // binding. QML cannot infer Layout dependencies hidden inside
+        // mapToItem(), so this invalidates the mapped target after layout.
+        const slot = navigationTargetSlot(index)
+        if (!slot)
+            return { x: 0, y: 0, width: 0, height: 0 }
+        let point
+        if (navigationTargetIsHero) {
+            // Map through the untransformed page-content parent so the slot
+            // stays at its final layout position while the page itself enters.
+            const slotLocal = slot.mapToItem(pageContentMotion, Qt.point(0, 0))
+            const contentOrigin = pageContentMotion.parent.mapToItem(
+                root.contentItem,
+                Qt.point(pageContentMotion.x, pageContentMotion.y)
+            )
+            point = Qt.point(contentOrigin.x + slotLocal.x, contentOrigin.y + slotLocal.y)
+        } else {
+            point = slot.mapToItem(root.contentItem, Qt.point(0, 0))
+        }
+        return {
+            x: point.x,
+            y: point.y,
+            width: slot.width,
+            height: slot.height
+        }
+    }
+
+    function actionTargetSlot(index) {
+        if (!prism.refraStyle)
+            return null
+        if (navigationTargetIsHero)
+            return index === 0 ? homePage.p3StartActionSlot : homePage.p3ApplyActionSlot
+        return index === 0 ? innerStartActionSlot : innerApplyActionSlot
+    }
+
+    function actionTargetBounds(index, geometryRevision) {
+        // mapToItem() returns geometry through a JS call, so QML cannot infer
+        // the Layout ancestors it depends on. The caller passes the settled
+        // geometry revision directly to invalidate this binding after layout.
+        const slot = actionTargetSlot(index)
+        if (!slot)
+            return { x: 0, y: 0, width: 0, height: 0 }
+        let point
+        if (navigationTargetIsHero) {
+            const slotLocal = slot.mapToItem(pageContentMotion, Qt.point(0, 0))
+            const contentOrigin = pageContentMotion.parent.mapToItem(
+                root.contentItem,
+                Qt.point(pageContentMotion.x, pageContentMotion.y)
+            )
+            point = Qt.point(contentOrigin.x + slotLocal.x, contentOrigin.y + slotLocal.y)
+        } else {
+            point = slot.mapToItem(root.contentItem, Qt.point(0, 0))
+        }
+        return { x: point.x, y: point.y, width: slot.width, height: slot.height }
+    }
+
+    function scheduleNavigationTargetRefresh() {
+        if (!prism.refraStyle) {
+            navigationMotionArmed = false
+            navigationTargetRefresh.restart()
+            return
+        }
+        navigationTargetRefresh.restart()
+    }
+
+    function refreshNavigationTargets() {
+        navigationTargetIsHero = fullCanvasHome
+        navigationGeometryRevision += 1
+        if (visible)
+            navigationMotionArmed = true
+    }
+
+    function markWindowResize() {
+        if (!visible || !prism.refraStyle)
+            return
+        navigationResizeActive = true
+        navigationResizeSettle.restart()
+        navigationTargetRefresh.restart()
+    }
+
+    onWidthChanged: markWindowResize()
+    onHeightChanged: markWindowResize()
 
     onClosing: function(close) {
         if (boundWorkbench.running) {
@@ -263,7 +364,10 @@ ApplicationWindow {
             completeStartPrelude()
     }
 
-    onVisualPageChanged: beginPageTransition()
+    onVisualPageChanged: {
+        beginPageTransition()
+        scheduleNavigationTargetRefresh()
+    }
     onReduceMotionChanged: {
         if (reduceMotion)
             settleReducedMotion()
@@ -272,7 +376,11 @@ ApplicationWindow {
         if (visible) {
             lastAnimatedPage = ""
             beginPageTransition()
+            navigationMotionArmed = false
+            scheduleNavigationTargetRefresh()
         } else {
+            navigationMotionArmed = false
+            navigationResizeActive = false
             if (startPreludePending) {
                 startPreludeTimer.stop()
                 startPreludePending = false
@@ -294,6 +402,20 @@ ApplicationWindow {
         onTriggered: root.completeStartPrelude()
     }
 
+    Timer {
+        id: navigationTargetRefresh
+        interval: 0
+        repeat: false
+        onTriggered: root.refreshNavigationTargets()
+    }
+
+    Timer {
+        id: navigationResizeSettle
+        interval: 130
+        repeat: false
+        onTriggered: root.navigationResizeActive = false
+    }
+
     PrismTheme {
         id: prism
         objectName: "prismTheme"
@@ -307,6 +429,8 @@ ApplicationWindow {
         function onDohnaChanged() {
             pageTransitionAnimation.stop()
             dohnaPageTransitionAnimation.stop()
+            root.navigationMotionArmed = false
+            root.scheduleNavigationTargetRefresh()
             root.pageContentReady = true
             root.settlePageTransition()
             dohnaFeedback.settle()
@@ -491,27 +615,20 @@ ApplicationWindow {
                 }
 
                 Repeater {
+                    id: navigationRepeater
                     model: root.pageOrder
-                    PrismButton {
-                        objectName: "navigationButton" + index
+                    Item {
+                        objectName: "navigationSlot" + index
+                        readonly property Item p3Slot: p3NavigationSlot
                         required property int index
                         required property var modelData
-                        theme: prism
-                        navigation: true
-                        text: prism.dohna
-                              ? String(modelData) + "  " + root.navigationLabel(String(modelData))
-                              : prism.refraStyle ? root.navigationMenuTitle(String(modelData))
-                              : root.navigationLabel(String(modelData))
-                        navigationNumber: String(index + 1).padStart(2, "0")
-                        navigationCode: root.pageCode(String(modelData))
-                        navigationSubtitle: prism.refraStyle ? root.navigationLabel(String(modelData)) : ""
-                        navigationTilt: prism.refraStyle ? (index % 2 === 0 ? -4 : -6.2) : 0
-                        navigationHero: root.fullCanvasHome
-                        primary: root.boundWorkbench.currentPage === modelData
-                        quiet: root.boundWorkbench.currentPage !== modelData
                         implicitWidth: 150
+                        implicitHeight: prism.dohna
+                                        ? Math.ceil(dohnaNavigationText.tightBoundingRect.height / 0.85)
+                                        : prism.refraStyle ? 66 : 52
                         Layout.fillWidth: true
                         Layout.minimumWidth: prism.dohna ? 0 : -1
+                        Layout.preferredHeight: implicitHeight
                         // Overscan the rotated bar; the sidebar clips both ends
                         // flush, while the enlarged control remains clickable.
                         Layout.leftMargin: prism.dohna ? -navigationLayout.anchors.margins - 16 : 0
@@ -520,8 +637,32 @@ ApplicationWindow {
                         // Preserve the visible gap of the original 50 px strips
                         // when their thickness changes under the same rotation.
                         Layout.bottomMargin: prism.dohna
-                                             ? Math.round((implicitHeight - 50) * (1 / Math.cos(rotation * Math.PI / 180) - 1)) : 0
-                        onClicked: root.boundWorkbench.setPage(String(modelData))
+                                             ? Math.round((implicitHeight - 50) * (1 / Math.cos(12 * Math.PI / 180) - 1)) : 0
+
+                        Item {
+                            id: p3NavigationSlot
+                            objectName: "navigationSlotGeometry" + index
+                            anchors.fill: parent
+                            visible: prism.refraStyle
+                        }
+
+                        PrismButton {
+                            objectName: prism.refraStyle ? "" : "navigationButton" + index
+                            anchors.fill: parent
+                            theme: prism
+                            navigation: true
+                            text: prism.dohna
+                                  ? String(modelData) + "  " + root.navigationLabel(String(modelData))
+                                  : root.navigationLabel(String(modelData))
+                            navigationNumber: String(index + 1).padStart(2, "0")
+                            navigationCode: root.pageCode(String(modelData))
+                            navigationSubtitle: ""
+                            navigationTilt: 0
+                            primary: root.boundWorkbench.currentPage === modelData
+                            quiet: root.boundWorkbench.currentPage !== modelData
+                            visible: !prism.refraStyle
+                            onClicked: root.boundWorkbench.setPage(String(modelData))
+                        }
                     }
                 }
 
@@ -838,6 +979,7 @@ ApplicationWindow {
                 }
 
                 Item {
+                    id: pageContentHost
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
@@ -859,6 +1001,7 @@ ApplicationWindow {
                             currentIndex: root.pageIndex(root.boundWorkbench.currentPage)
 
                             HomePage {
+                                id: homePage
                                 objectName: "homePage"
                                 theme: prism
                                 workbench: root.boundWorkbench
@@ -979,34 +1122,19 @@ ApplicationWindow {
                             font.pixelSize: 12
                         }
                         Item { visible: prism.refraStyle; Layout.fillWidth: true }
-                        PrismButton {
-                            objectName: "darkStartLiveButton"
+                        Item {
+                            id: innerStartActionSlot
+                            objectName: "darkStartActionSlot"
                             visible: prism.refraStyle
-                            theme: prism
-                            p3Action: true
-                            primary: true
                             Layout.preferredWidth: 194
                             Layout.preferredHeight: 48
-                            text: root.startPreludePending ? "正在启动…" : root.boundWorkbench.startButtonText
-                            enabled: root.boundWorkbench.runPhase !== "stopping"
-                                     && !root.startPreludePending
-                                     && (root.boundWorkbench.canStart || root.boundWorkbench.running)
-                            onClicked: root.requestLiveToggle()
                         }
-                        PrismButton {
-                            objectName: "darkSaveAllButton"
+                        Item {
+                            id: innerApplyActionSlot
+                            objectName: "darkApplyActionSlot"
                             visible: prism.refraStyle
-                            theme: prism
-                            p3Action: true
                             Layout.preferredWidth: 128
                             Layout.preferredHeight: 48
-                            text: "应用更改"
-                            enabled: root.boundWorkbench.hasProfile
-                            onClicked: {
-                                root.boundWorkbench.saveAll()
-                                if (root.boundWorkbench.currentPage === "SETTINGS")
-                                    root.pulseVisualAction("calibrate")
-                            }
                         }
                     }
                 }
@@ -1035,6 +1163,143 @@ ApplicationWindow {
                 motionEnabled: root.animationsRunning
             }
         }
+    }
+
+    Item {
+        id: sharedNavigationOverlay
+        objectName: "sharedNavigationOverlay"
+        anchors.fill: parent
+        visible: prism.refraStyle
+        z: 20
+
+        Repeater {
+            id: sharedNavigationRepeater
+            model: root.pageOrder
+
+            PrismNavigationMotion {
+                required property int index
+                required property var modelData
+                motionObjectName: "prismNavigationMotion" + index
+                // Keep the hidden Prism overlay out of Dohna's object-name
+                // namespace. Dohna's visible legacy buttons retain their
+                // original navigationButtonN names and remain the sole
+                // controls returned by QML lookup.
+                buttonObjectName: !prism.refraStyle ? ""
+                                  : root.fullCanvasHome
+                                    ? "refraDarkNavigationButton" + index
+                                    : "navigationButton" + index
+                theme: prism
+                positionMotionEnabled: root.navigationMotionEnabled
+                targetX: root.navigationTargetBounds(index, root.navigationGeometryRevision).x
+                targetY: root.navigationTargetBounds(index, root.navigationGeometryRevision).y
+                targetWidth: root.navigationTargetBounds(index, root.navigationGeometryRevision).width
+                targetHeight: root.navigationTargetBounds(index, root.navigationGeometryRevision).height
+                targetPresentation: root.navigationTargetIsHero ? 1 : 0
+                targetTilt: root.navigationTargetIsHero
+                             ? (index % 2 === 0 ? -3.8 : -5.7)
+                             : (index % 2 === 0 ? -4 : -6.2)
+                slashVisible: [0, 1, 3, 5].indexOf(index) >= 0
+                number: String(index + 1).padStart(2, "0")
+                code: root.pageCode(String(modelData))
+                subtitle: root.navigationLabel(String(modelData))
+                cool: index % 2 === 1
+                heroFontSize: Math.max(
+                    58,
+                    Math.min(70, (root.width * 0.55 - 122) / 8.2)
+                )
+                text: root.navigationMenuTitle(String(modelData))
+                selected: root.boundWorkbench.currentPage === modelData
+                z: selected ? 2 : 1
+                onClicked: root.boundWorkbench.setPage(String(modelData))
+            }
+        }
+    }
+
+    Item {
+        id: sharedActionOverlay
+        objectName: "sharedActionOverlay"
+        anchors.fill: parent
+        visible: prism.refraStyle
+        z: 21
+
+        Repeater {
+            model: [0, 1]
+
+            PrismP3ActionMotion {
+                required property int index
+                actionObjectName: "prismActionMotion" + index
+                buttonObjectName: !prism.refraStyle ? ""
+                                  : root.fullCanvasHome
+                                    ? (index === 0 ? "refraDarkStartButton" : "refraDarkApplyButton")
+                                    : (index === 0 ? "darkStartLiveButton" : "darkSaveAllButton")
+                theme: prism
+                positionMotionEnabled: root.navigationMotionEnabled
+                targetX: root.actionTargetBounds(index, root.navigationGeometryRevision).x
+                targetY: root.actionTargetBounds(index, root.navigationGeometryRevision).y
+                targetWidth: root.actionTargetBounds(index, root.navigationGeometryRevision).width
+                targetHeight: root.actionTargetBounds(index, root.navigationGeometryRevision).height
+                primary: index === 0
+                text: index === 0
+                      ? (root.startPreludePending ? "正在启动…" : root.boundWorkbench.startButtonText)
+                      : "应用更改"
+                enabled: index === 0
+                         ? (root.boundWorkbench.runPhase !== "stopping"
+                            && !root.startPreludePending
+                            && (root.boundWorkbench.canStart || root.boundWorkbench.running))
+                         : root.boundWorkbench.hasProfile
+                z: index
+                onClicked: {
+                    if (index === 0) {
+                        root.requestLiveToggle()
+                    } else {
+                        root.boundWorkbench.saveAll()
+                        if (root.boundWorkbench.currentPage === "HOME"
+                                || root.boundWorkbench.currentPage === "SETTINGS")
+                            root.pulseVisualAction("calibrate")
+                    }
+                }
+            }
+        }
+    }
+
+    // mapToItem() inside the target helpers is not a declarative dependency on
+    // Layout geometry. Refresh once per event-loop turn when either real slot
+    // or the page-content host is repolished, so initial and resized endpoints
+    // use their final coordinates without polling or an arbitrary delay.
+    Connections {
+        target: pageContentHost
+        function onXChanged() { root.scheduleNavigationTargetRefresh() }
+        function onYChanged() { root.scheduleNavigationTargetRefresh() }
+        function onWidthChanged() { root.scheduleNavigationTargetRefresh() }
+        function onHeightChanged() { root.scheduleNavigationTargetRefresh() }
+    }
+    Connections {
+        target: homePage.p3StartActionSlot
+        function onXChanged() { root.scheduleNavigationTargetRefresh() }
+        function onYChanged() { root.scheduleNavigationTargetRefresh() }
+        function onWidthChanged() { root.scheduleNavigationTargetRefresh() }
+        function onHeightChanged() { root.scheduleNavigationTargetRefresh() }
+    }
+    Connections {
+        target: homePage.p3ApplyActionSlot
+        function onXChanged() { root.scheduleNavigationTargetRefresh() }
+        function onYChanged() { root.scheduleNavigationTargetRefresh() }
+        function onWidthChanged() { root.scheduleNavigationTargetRefresh() }
+        function onHeightChanged() { root.scheduleNavigationTargetRefresh() }
+    }
+    Connections {
+        target: innerStartActionSlot
+        function onXChanged() { root.scheduleNavigationTargetRefresh() }
+        function onYChanged() { root.scheduleNavigationTargetRefresh() }
+        function onWidthChanged() { root.scheduleNavigationTargetRefresh() }
+        function onHeightChanged() { root.scheduleNavigationTargetRefresh() }
+    }
+    Connections {
+        target: innerApplyActionSlot
+        function onXChanged() { root.scheduleNavigationTargetRefresh() }
+        function onYChanged() { root.scheduleNavigationTargetRefresh() }
+        function onWidthChanged() { root.scheduleNavigationTargetRefresh() }
+        function onHeightChanged() { root.scheduleNavigationTargetRefresh() }
     }
 
     SequentialAnimation {

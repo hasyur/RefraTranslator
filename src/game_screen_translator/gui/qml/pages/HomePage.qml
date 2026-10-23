@@ -18,6 +18,9 @@ Item {
     readonly property var hotkeyBehaviorLabels: ["仅启动", "启动 / 停止翻译", "启动 / 停止并打开 GUI"]
     readonly property var p3PageOrder: ["HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS"]
     readonly property var p3MenuOffsetFractions: [0.022, 0.026, 0.043, 0.028, 0.049, 0.045, 0.074]
+    readonly property alias p3NavigationSlots: p3NavigationSlotsRepeater
+    readonly property alias p3StartActionSlot: homeStartActionSlot
+    readonly property alias p3ApplyActionSlot: homeApplyActionSlot
     property bool hotkeyRecording: false
     signal liveToggleRequested()
     signal saveRequested()
@@ -488,32 +491,16 @@ Item {
                     anchors.fill: parent
 
                     Repeater {
+                        id: p3NavigationSlotsRepeater
                         model: root.p3PageOrder
-                        PrismButton {
-                            objectName: "refraDarkNavigationButton" + index
+                        Item {
+                            objectName: "refraDarkNavigationSlot" + index
                             required property int index
                             required property var modelData
-                            theme: root.theme
-                            navigation: true
-                            navigationHero: true
-                            navigationSlashVisible: [0, 1, 3, 5].indexOf(index) >= 0
-                            navigationNumber: String(index + 1).padStart(2, "0")
-                            navigationSubtitle: root.p3MenuSubtitle(String(modelData))
-                            navigationCool: index % 2 === 1
-                            navigationTilt: index % 2 === 0 ? -3.8 : -5.7
-                            navigationHeroFontSize: Math.max(
-                                58,
-                                Math.min(70, (root.width * 0.55 - 122) / 8.2)
-                            )
-                            text: root.p3MenuTitle(String(modelData))
-                            primary: root.workbench.currentPage === modelData
-                            quiet: !primary
                             x: root.width * root.p3MenuOffsetFractions[index]
                             y: parent.height * (0.105 + index * 0.115)
                             width: root.width * 0.51
                             height: Math.max(70, Math.min(92, parent.height * 0.17))
-                            z: primary ? 2 : 1
-                            onClicked: root.workbench.setPage(String(modelData))
                         }
                     }
                 }
@@ -895,34 +882,23 @@ Item {
                         }
                     }
                 }
-                PrismButton {
-                    objectName: "refraDarkStartButton"
-                    theme: root.theme
-                    p3Action: true
-                    primary: true
-                    text: root.startPreludePending ? "正在启动…" : root.workbench.startButtonText
+                Item {
+                    id: homeStartActionSlot
+                    objectName: "refraDarkStartActionSlot"
                     implicitWidth: root.width * 0.21
                     implicitHeight: root.height * 0.073
-                    Layout.preferredWidth: root.width * 0.21
-                    Layout.preferredHeight: root.height * 0.073
+                    Layout.preferredWidth: implicitWidth
+                    Layout.preferredHeight: implicitHeight
                     Layout.alignment: Qt.AlignVCenter
-                    enabled: root.workbench.runPhase !== "stopping"
-                             && !root.startPreludePending
-                             && (root.workbench.canStart || root.workbench.running)
-                    onClicked: root.liveToggleRequested()
                 }
-                PrismButton {
-                    objectName: "refraDarkApplyButton"
-                    theme: root.theme
-                    p3Action: true
-                    text: "应用更改"
+                Item {
+                    id: homeApplyActionSlot
+                    objectName: "refraDarkApplyActionSlot"
                     implicitWidth: root.width * 0.13
                     implicitHeight: root.height * 0.073
-                    Layout.preferredWidth: root.width * 0.13
-                    Layout.preferredHeight: root.height * 0.073
+                    Layout.preferredWidth: implicitWidth
+                    Layout.preferredHeight: implicitHeight
                     Layout.alignment: Qt.AlignVCenter
-                    enabled: root.workbench.hasProfile
-                    onClicked: root.saveRequested()
                 }
             }
         }
