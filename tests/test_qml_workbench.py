@@ -5878,6 +5878,185 @@ def test_nearly_fitting_pages_compact_spacing_before_requiring_scroll(
         host.shutdown()
 
 
+@pytest.mark.parametrize("theme_name", ("dark", "light"))
+@pytest.mark.parametrize("initial_size", ((980, 700), (1280, 820)))
+def test_prism_profile_actions_remain_inside_status_band_after_dohna_round_trip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    theme_name: str,
+    initial_size: tuple[int, int],
+) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: True)
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    profile = create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="换肤状态带验证",
+    )
+    save_snapshot(
+        profile.directory,
+        new_snapshot(
+            (SnapshotEntry("track", 0, "source", "translation", 0.9, (20, 40, 120, 50)),),
+            (),
+            ocr_peak_seconds=2.23,
+            llm_peak_seconds=45.67,
+            canvas_size=(1280, 720),
+        ),
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(True)
+    controller.setBackend("builtin")
+    controller.setBuiltinModel("Hy-MT2-1.8B-Q8_0.gguf")
+    controller.setHotkey("Shift+S")
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        host.show()
+        window = host.window
+        assert window is not None
+        window.resize(*initial_size)
+        QTest.qWait(50)
+        app.processEvents()
+
+        def geometry() -> dict[str, object]:
+            home = _find_quick_item(window, "refraDarkHome")
+            band = _find_quick_item(window, "refraDarkHomeStatusBand")
+            action_rule = _find_quick_item(window, "refraDarkHomeActionRule")
+            profile_content = _find_quick_item(
+                window,
+                "refraDarkProfileSummaryContent",
+            )
+            assert all(item is not None for item in (home, band, action_rule, profile_content))
+            rule_y = action_rule.mapToItem(home, QPointF(0, 0)).y()
+            buttons = {}
+            for name in (
+                "refraDarkRefreshProfiles",
+                "refraDarkCreateProfile",
+                "refraDarkDeleteProfile",
+            ):
+                button = _find_quick_item(window, name)
+                assert button is not None and button.isVisible()
+                origin = button.mapToItem(home, QPointF(0, 0))
+                buttons[name] = {
+                    "y": origin.y(),
+                    "height": button.height(),
+                    "bottom": origin.y() + button.height(),
+                }
+            return {
+                "window": [window.width(), window.height()],
+                "minimum_width": window.minimumWidth(),
+                "home": [home.width(), home.height()],
+                "band_y": band.mapToItem(home, QPointF(0, 0)).y(),
+                "band_height": band.height(),
+                "profile_content_implicit_height": profile_content.property("implicitHeight"),
+                "profile_content_height": profile_content.height(),
+                "rule_y": rule_y,
+                "profile_action_gap": rule_y - max(
+                    button["bottom"] for button in buttons.values()
+                ),
+                "buttons": buttons,
+            }
+
+        def assert_layout(record: dict[str, object]) -> None:
+            assert record["home"] == pytest.approx(record["window"]), record
+            assert record["profile_content_implicit_height"] <= record["band_height"] + 0.5, record
+            assert record["profile_action_gap"] >= 7.5, record
+            for name, button in record["buttons"].items():
+                assert button["bottom"] <= record["rule_y"] + 0.5, (
+                    f"{name} crosses the profile-strip rule: {record!r}"
+                )
+
+        def choose_skin_through_combo(combo: QQuickItem, key: Qt.Key) -> None:
+            combo.forceActiveFocus()
+            center = combo.mapToScene(
+                QPointF(combo.width() / 2, combo.height() / 2)
+            ).toPoint()
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=center)
+            app.processEvents()
+            QTest.keyClick(window, key)
+            QTest.keyClick(window, Qt.Key.Key_Return)
+            QTest.qWait(50)
+            app.processEvents()
+
+        initial = geometry()
+        assert_layout(initial)
+        for cycle in range(2):
+            preferences = _find_quick_item(window, "refraDarkPreferencesButton")
+            assert preferences is not None and preferences.isVisible()
+            pref_center = preferences.mapToScene(
+                QPointF(preferences.width() / 2, preferences.height() / 2)
+            ).toPoint()
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=pref_center)
+            app.processEvents()
+            prism_selector = _find_quick_item(window, "refraHomeSkinSelector")
+            assert prism_selector is not None and prism_selector.isVisible()
+            choose_skin_through_combo(prism_selector, Qt.Key.Key_Down)
+            assert controller.skinPreference == SKIN_DOHNA
+            assert window.width() >= window.minimumWidth()
+            dohna_selector = _find_quick_item(window, "homeSkinSelector")
+            assert dohna_selector is not None and dohna_selector.isVisible()
+            choose_skin_through_combo(dohna_selector, Qt.Key.Key_Up)
+            assert controller.skinPreference == SKIN_PRISM
+            QTest.qWait(80)
+            app.processEvents()
+
+            returned = geometry()
+            assert_layout(returned)
+
+            if cycle == 0:
+                for width, height in ((980, 700), (1280, 820), (980, 700)):
+                    window.resize(width, height)
+                    QTest.qWait(30)
+                    app.processEvents()
+                    resized = geometry()
+                    assert_layout(resized)
+
+        model = _find_quick_item(window, "refraDarkModelName")
+        model_scroll = _find_quick_item(window, "refraDarkModelScroll")
+        last_run = _find_quick_item(window, "refraDarkLastRunStatus")
+        metrics = _find_quick_item(window, "refraDarkLastRunMetrics")
+        hotkey = _find_quick_item(window, "refraDarkLastRunHotkey")
+        assert model is not None and model.property("text") == "Hy-MT2-1.8B-Q8_0.gguf"
+        assert model_scroll is not None and model_scroll.height() >= 52
+        assert last_run is not None and last_run.isVisible()
+        assert last_run.property("text") == controller.lastRunStatus
+        assert metrics is not None and metrics.property("text") == "OCR 2.23 s\nLLM 45.67 s"
+        assert hotkey is not None and hotkey.property("text") == "快捷键  Shift+S"
+
+        for name in ("refraDarkStartButton", "refraDarkApplyButton"):
+            action = _find_quick_item(window, name)
+            assert action is not None and action.isVisible()
+            action_origin = action.mapToScene(QPointF(0, 0))
+            assert action_origin.x() >= 0 and action_origin.y() >= 0
+            assert action_origin.x() + action.width() <= window.width() + 0.5
+            assert action_origin.y() + action.height() <= window.height() + 0.5
+
+        create_button = _find_quick_item(window, "refraDarkCreateProfile")
+        delete_button = _find_quick_item(window, "refraDarkDeleteProfile")
+        assert create_button is not None and create_button.isEnabled()
+        assert delete_button is not None and delete_button.isEnabled()
+        for button, dialog_name in (
+            (create_button, "createProfileDialog"),
+            (delete_button, "deleteProfileDialog"),
+        ):
+            center = button.mapToScene(
+                QPointF(button.width() / 2, button.height() / 2)
+            ).toPoint()
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=center)
+            app.processEvents()
+            dialog = window.findChild(QObject, dialog_name)
+            assert dialog is not None and dialog.property("visible") is True
+            QTest.keyClick(window, Qt.Key.Key_Escape)
+            app.processEvents()
+            assert dialog.property("visible") is False
+    finally:
+        host.shutdown()
+
+
 def test_real_overlay_snapshot_keeps_portrait_canvas_contain_fit(
     tmp_path: Path,
 ) -> None:

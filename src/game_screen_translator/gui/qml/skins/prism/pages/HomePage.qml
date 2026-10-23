@@ -499,7 +499,13 @@ Item {
                 objectName: root.theme.active ? ("refraDarkHomeStatusBand") : ""
                 Layout.fillWidth: true
                 Layout.preferredHeight: root.height * 0.21
-                Layout.minimumHeight: 126
+                Layout.minimumHeight: Math.max(
+                    126,
+                    profileSummaryContent.implicitHeight + 8,
+                    ocrSummaryContent.implicitHeight + 8,
+                    translationSummaryContent.implicitHeight + 8,
+                    lastRunSummaryContent.implicitHeight + 8
+                )
                 Layout.leftMargin: root.width < 1100 ? root.width * 0.065 : root.width * 0.175
                 Layout.rightMargin: root.width < 1100 ? root.width * 0.04 : root.width * 0.03
                     Layout.topMargin: root.width < 1100 ? 6 : root.height * 0.018
@@ -513,6 +519,8 @@ Item {
                     Layout.preferredWidth: 270
                     Layout.rightMargin: 18
                     ColumnLayout {
+                        id: profileSummaryContent
+                        objectName: root.theme.active ? ("refraDarkProfileSummaryContent") : ""
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
@@ -614,6 +622,7 @@ Item {
                     Layout.leftMargin: 22
                     Layout.rightMargin: 18
                     ColumnLayout {
+                        id: ocrSummaryContent
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
@@ -653,6 +662,7 @@ Item {
                     Layout.leftMargin: 22
                     Layout.rightMargin: 18
                     ColumnLayout {
+                        id: translationSummaryContent
                         anchors.fill: parent
                         spacing: root.width < 1100 ? 3 : 6
                         Text { objectName: "refraDarkTranslationHeading"; text: "翻译引擎"; color: root.theme.text; font.family: root.theme.uiFontFor(text); font.pixelSize: 18; font.weight: Font.Bold }
@@ -698,6 +708,7 @@ Item {
                     Layout.minimumWidth: root.width < 1100 ? 160 : 190
                     Layout.leftMargin: 22
                     ColumnLayout {
+                        id: lastRunSummaryContent
                         anchors.fill: parent
                         spacing: root.width < 1100 ? 3 : 6
                         Text { objectName: "refraDarkLastRunHeading"; text: "上次运行"; color: root.theme.text; font.family: root.theme.uiFontFor(text); font.pixelSize: 18; font.weight: Font.Bold }
