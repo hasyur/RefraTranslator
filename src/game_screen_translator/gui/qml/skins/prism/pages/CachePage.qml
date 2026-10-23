@@ -9,7 +9,6 @@ Item {
     required property var theme
     required property var workbench
     required property var appShell
-    property string mode: "automatic"
     property int transitionSerial: 0
     property bool pageMotionEnabled: false
     signal visualAction(string action)
@@ -235,77 +234,28 @@ Item {
                 anchors.fill: parent
                 spacing: 12
 
-                RowLayout {
+                SectionHeader {
+                    theme: root.theme
+                    title: "人工修订"
                     Layout.fillWidth: true
-                    spacing: 7
-                    PrismButton {
-                        theme: root.theme
-                        text: "自动缓存"
-                        primary: root.mode === "automatic"
-                        Layout.fillWidth: true
-                        onClicked: {
-                            root.mode = "automatic"
-                            root.visualAction("ripple")
-                        }
-                    }
-                    PrismButton {
-                        theme: root.theme
-                        text: "人工修订"
-                        primary: root.mode === "corrections"
-                        Layout.fillWidth: true
-                        onClicked: {
-                            root.mode = "corrections"
-                            root.visualAction("ripple")
-                        }
-                    }
                 }
 
-                StackLayout {
+                PairEditor {
+                    objectName: root.theme.active ? ("correctionsEditor") : ""
+                    theme: root.theme
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    currentIndex: root.mode === "automatic" ? 0 : 1
-
-                    ColumnLayout {
-                        spacing: 12
-                        SectionHeader {
-                            theme: root.theme
-                            title: "自动缓存"
-                            meta: "READ ONLY"
-                            Layout.fillWidth: true
-                        }
-                        UnavailableState {
-                            theme: root.theme
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            eyebrow: "ENTRY LIST · UNAVAILABLE"
-                            title: "暂不支持浏览自动缓存明细"
-                            detail: "自动缓存仍由现有 SQLite 路径管理；本工作台暂不浏览或改写记录。"
-                        }
-                        Text {
-                            text: root.workbench.profileDirectory
-                            color: root.theme.textDim
-                            font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 12
-                            elide: Text.ElideMiddle
-                            Layout.fillWidth: true
-                        }
-                    }
-
-                    PairEditor {
-                        objectName: root.theme.active ? ("correctionsEditor") : ""
-                        theme: root.theme
-                        initialEntries: root.workbench.correctionEntries
-                        initialDirty: root.workbench.correctionsDirty
-                        revisionKey: root.workbench.currentProfileId + ":" + root.workbench.profileRevision
-                        sourceTitle: "识别原文"
-                        targetTitle: "人工译文"
-                        saveText: "保存人工修订"
-                        settingDescription: "编辑当前游戏的识别原文与人工译文对应关系。"
-                        settingKey: "cache-corrections"
-                        enabled: root.workbench.hasProfile
-                        onDraftChanged: entries => root.workbench.setCorrectionsDraft(entries)
-                        onSaveRequested: entries => root.workbench.saveCorrections(entries)
-                    }
+                    initialEntries: root.workbench.correctionEntries
+                    initialDirty: root.workbench.correctionsDirty
+                    revisionKey: root.workbench.currentProfileId + ":" + root.workbench.profileRevision
+                    sourceTitle: "识别原文"
+                    targetTitle: "人工译文"
+                    saveText: "保存人工修订"
+                    settingDescription: "编辑当前游戏的识别原文与人工译文对应关系。"
+                    settingKey: "cache-corrections"
+                    enabled: root.workbench.hasProfile
+                    onDraftChanged: entries => root.workbench.setCorrectionsDraft(entries)
+                    onSaveRequested: entries => root.workbench.saveCorrections(entries)
                 }
             }
         }

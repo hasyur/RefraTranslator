@@ -3491,8 +3491,8 @@ def test_pair_editor_existing_rows_show_one_adjacent_hint_and_remain_editable(
         (
             "CACHE",
             "cachePage",
-            "mode",
-            "corrections",
+            None,
+            None,
             "correctionsEditor",
             "cache-corrections",
         ),
@@ -3503,8 +3503,6 @@ def test_pair_editor_existing_rows_show_one_adjacent_hint_and_remain_editable(
         assert page is not None
         if mode_property == "sideMode":
             window.setProperty("translationSideMode", mode)
-        else:
-            page.setProperty(mode_property, mode)
         app.processEvents()
         window.update()
         QTest.qWait(20)
@@ -5566,10 +5564,12 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     )
     assert cache_summary.mapToItem(cache_hits, QPointF(0, 0)).y() < 0
     unavailable_titles = _find_quick_items(window, "unavailableStateTitle")
-    assert any(
+    assert not any(
         title.property("text") == "暂不支持浏览自动缓存明细"
         for title in unavailable_titles
     )
+    corrections = _find_quick_item(window, "correctionsEditor")
+    assert corrections is not None and corrections.isVisible()
 
     window.resize(1280, 820)
     controller.setPage("HOME")
@@ -8468,6 +8468,19 @@ def test_cache_large_metrics_and_multiline_hits_stay_clear_of_scrollbar(
         for width, height in ((980, 700), (1280, 820), (1600, 900)):
             window.resize(max(width, window.minimumWidth()), height)
             _wait_for_page_layout(window, panel, app)
+            corrections = _find_quick_item(window, "correctionsEditor")
+            secondary = _find_quick_item(window, "cacheSecondaryPanel")
+            assert corrections is not None and corrections.isVisible()
+            assert secondary is not None
+            assert corrections.isEnabled()
+            assert corrections.width() > 0 and corrections.height() > 0
+            origin = corrections.mapToItem(secondary, QPointF(0, 0))
+            assert origin.x() >= 0 and origin.y() >= 0
+            assert origin.x() + corrections.width() <= secondary.width()
+            assert origin.y() + corrections.height() <= secondary.height()
+            assert _visible_text_items(secondary, "人工修订")
+            assert not _visible_text_items(window, "自动缓存")
+            assert not _visible_text_items(window, "暂不支持浏览自动缓存明细")
             grid = _find_quick_item(panel, "cacheSummaryMetrics")
             assert grid is not None
             assert grid.property("columns") == (4 if grid.width() >= 510 else 2)
@@ -9064,14 +9077,14 @@ def test_skin_activation_refreshes_latest_unsaved_pair_editor_draft(
     def open_pair_editor() -> QObject:
         controller.setPage(page)
         app.processEvents()
-        mode_text = "术语表" if pair_kind == "glossary" else "人工修订"
-        mode_button = next(
-            item
-            for item in window.findChildren(QQuickItem)
-            if item.isVisible() and item.property("text") == mode_text
-        )
-        assert QMetaObject.invokeMethod(mode_button, "click") is True
-        app.processEvents()
+        if pair_kind == "glossary":
+            mode_button = next(
+                item
+                for item in window.findChildren(QQuickItem)
+                if item.isVisible() and item.property("text") == "术语表"
+            )
+            assert QMetaObject.invokeMethod(mode_button, "click") is True
+            app.processEvents()
         editor = window.findChild(QObject, editor_name)
         assert editor is not None
         return editor
