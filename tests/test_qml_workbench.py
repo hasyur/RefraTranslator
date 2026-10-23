@@ -6106,7 +6106,49 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                         assert origin.x() >= -0.5 and origin.y() >= -0.5
                         assert origin.x() + content.width() <= panel.width() + 0.5
                         assert origin.y() + content.height() <= panel.height() + 0.5
-                    assert _find_quick_item(window, "refraDarkHeroImage").isVisible()
+                    backdrop = _find_quick_item(window, "prismHomeBackdrop")
+                    stage = _find_quick_item(window, "refraDarkHomeStage")
+                    assert backdrop is not None and backdrop.isVisible()
+                    assert stage is not None and stage.isVisible()
+                    assert backdrop.isEnabled() is False
+                    assert backdrop.width() == pytest.approx(stage.width())
+                    assert backdrop.height() == pytest.approx(stage.height())
+                    assert backdrop.property("dark") is (theme_name == "dark")
+                    expected_edge_top = 0.66 if width < 1100 else 0.73
+                    expected_edge_bottom = 0.50 if width < 1100 else 0.53
+                    assert backdrop.property("edgeTop") == pytest.approx(expected_edge_top)
+                    assert backdrop.property("edgeBottom") == pytest.approx(expected_edge_bottom)
+                    for layer_name in (
+                        "prismHomeBlueField",
+                        "prismHomeEdgeGlow",
+                        "prismHomeBlueFacets",
+                        "prismHomeLowerFacet",
+                        "prismHomeScatteredLight",
+                    ):
+                        layer = _find_quick_item(window, layer_name)
+                        assert layer is not None and layer.isVisible(), layer_name
+                        assert layer.width() == pytest.approx(stage.width()), layer_name
+                        assert layer.height() == pytest.approx(stage.height()), layer_name
+                    hero = _find_quick_item(window, "refraDarkHeroImage")
+                    assert hero is not None and hero.isVisible()
+                    painted_width = float(hero.property("paintedWidth"))
+                    painted_height = float(hero.property("paintedHeight"))
+                    expected_tip_x = (
+                        hero.x()
+                        + (hero.width() - painted_width) * 0.5
+                        + painted_width * float(hero.property("prismTipSourceX"))
+                    )
+                    expected_tip_y = (
+                        hero.y()
+                        + (hero.height() - painted_height) * 0.5
+                        + painted_height * float(hero.property("prismTipSourceY"))
+                    )
+                    assert backdrop.property("prismTipX") == pytest.approx(expected_tip_x)
+                    assert backdrop.property("prismTipY") == pytest.approx(expected_tip_y)
+                    scattered_light = _find_quick_item(window, "prismHomeScatteredLight")
+                    assert scattered_light is not None
+                    assert scattered_light.property("rayOriginX") == pytest.approx(expected_tip_x)
+                    assert scattered_light.property("rayOriginY") == pytest.approx(expected_tip_y)
                     status_band = _find_quick_item(window, "refraDarkHomeStatusBand")
                     assert status_band is not None
                     headings = [
@@ -6383,7 +6425,28 @@ def test_real_workbench_pages_and_themes_are_usable(tmp_path: Path) -> None:
             assert not window.findChildren(QObject, "prismFoldRuleFacet")
             if prism_style and page == "HOME":
                 dark_home = _find_quick_item(window, "refraDarkHome")
+                backdrop = _find_quick_item(window, "prismHomeBackdrop")
+                home_stage = _find_quick_item(window, "refraDarkHomeStage")
                 assert dark_home is not None and dark_home.isVisible()
+                assert backdrop is not None and backdrop.isVisible()
+                assert home_stage is not None and home_stage.isVisible()
+                assert backdrop.isEnabled() is False
+                assert backdrop.property("dark") is (theme_name == "dark")
+                assert backdrop.width() == pytest.approx(home_stage.width())
+                assert backdrop.height() == pytest.approx(home_stage.height())
+                assert backdrop.property("edgeTop") == pytest.approx(0.73)
+                assert backdrop.property("edgeBottom") == pytest.approx(0.53)
+                for layer_name in (
+                    "prismHomeBlueField",
+                    "prismHomeEdgeGlow",
+                    "prismHomeBlueFacets",
+                    "prismHomeLowerFacet",
+                    "prismHomeScatteredLight",
+                ):
+                    layer = _find_quick_item(window, layer_name)
+                    assert layer is not None and layer.isVisible(), layer_name
+                    assert layer.width() == pytest.approx(home_stage.width()), layer_name
+                    assert layer.height() == pytest.approx(home_stage.height()), layer_name
                 nav_button = _find_quick_item(window, f"refraDarkNavigationButton{index}")
                 assert nav_button is not None and nav_button.isVisible()
                 for action_name in ("refraDarkApplyButton", "refraDarkStartButton"):

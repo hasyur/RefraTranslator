@@ -393,97 +393,15 @@ Item {
                 Layout.minimumHeight: 390
                 clip: true
 
-                Rectangle {
-                    objectName: root.theme.active ? ("refraLightHomeBlueStage") : ""
-                    visible: root.theme.refraLight
-                    x: root.width * (root.width < 1100 ? 0.572 : 0.57)
-                    y: -parent.height * 0.12
-                    width: root.width * 0.58
-                    height: parent.height * 1.24
-                    rotation: root.width < 1100 ? 7.5 : 17
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0; color: "#075BFF" }
-                        GradientStop { position: 1; color: "#167BFF" }
-                    }
-                }
-
-                Rectangle {
-                    objectName: root.theme.active ? ("refraDarkHomeBlueLight") : ""
-                    visible: root.theme.refraDark
-                    x: root.width * 0.57
-                    y: -parent.height * 0.14
-                    width: root.width * 0.55
-                    height: parent.height * 1.28
-                    rotation: 17
-                    opacity: 0.40
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0; color: "#09275a" }
-                        GradientStop { position: 0.42; color: "#0c367e" }
-                        GradientStop { position: 1; color: "#1649b0" }
-                    }
-                }
-                Rectangle {
-                    visible: root.theme.refraDark
-                    x: root.width * 0.72
-                    y: -parent.height * 0.18
-                    width: root.width * 0.15
-                    height: parent.height * 1.34
-                    rotation: 17
-                    color: "#1767ff"
-                    opacity: 0.11
-                }
-                Rectangle {
-                    objectName: root.theme.active ? ("refraDarkHeroDownRayOuter") : ""
-                    x: root.width * 0.68
-                    y: parent.height * 0.62 - height / 2
-                    width: root.width * 0.45
-                    height: 54
-                    rotation: 17
-                    transformOrigin: Item.Left
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0; color: Qt.rgba(0, 0.76, 1, 0) }
-                        GradientStop { position: 0.045; color: Qt.rgba(0, 0.76, 1, 0.075) }
-                        GradientStop { position: 0.24; color: Qt.rgba(0.03, 0.34, 1, 0.045) }
-                        GradientStop { position: 0.68; color: Qt.rgba(0.03, 0.12, 0.42, 0) }
-                        GradientStop { position: 1; color: Qt.rgba(0.03, 0.12, 0.42, 0) }
-                    }
-                }
-                Rectangle {
-                    objectName: root.theme.active ? ("refraDarkHeroDownRayMid") : ""
-                    x: root.width * 0.68
-                    y: parent.height * 0.62 - height / 2
-                    width: root.width * 0.45
-                    height: 24
-                    rotation: 17
-                    transformOrigin: Item.Left
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0; color: Qt.rgba(0, 0.82, 1, 0) }
-                        GradientStop { position: 0.045; color: Qt.rgba(0, 0.82, 1, 0.15) }
-                        GradientStop { position: 0.24; color: Qt.rgba(0.03, 0.38, 1, 0.085) }
-                        GradientStop { position: 0.68; color: Qt.rgba(0.03, 0.14, 0.46, 0) }
-                        GradientStop { position: 1; color: Qt.rgba(0.03, 0.14, 0.46, 0) }
-                    }
-                }
-                Rectangle {
-                    objectName: root.theme.active ? ("refraDarkHeroDownRayCore") : ""
-                    x: root.width * 0.68
-                    y: parent.height * 0.62 - height / 2
-                    width: root.width * 0.45
-                    height: 5
-                    rotation: 17
-                    transformOrigin: Item.Left
-                    gradient: Gradient {
-                        orientation: Gradient.Horizontal
-                        GradientStop { position: 0; color: Qt.rgba(0, 0.88, 1, 0) }
-                        GradientStop { position: 0.045; color: Qt.rgba(0, 0.88, 1, 0.24) }
-                        GradientStop { position: 0.24; color: Qt.rgba(0.03, 0.42, 1, 0.13) }
-                        GradientStop { position: 0.68; color: Qt.rgba(0.03, 0.15, 0.48, 0) }
-                        GradientStop { position: 1; color: Qt.rgba(0.03, 0.15, 0.48, 0) }
-                    }
+                PrismHomeBackdrop {
+                    anchors.fill: parent
+                    dark: root.theme.refraDark
+                    prismTipX: refraHeroArt.x
+                               + (refraHeroArt.width - refraHeroArt.paintedWidth) * 0.5
+                               + refraHeroArt.paintedWidth * refraHeroArt.prismTipSourceX
+                    prismTipY: refraHeroArt.y
+                               + (refraHeroArt.height - refraHeroArt.paintedHeight) * 0.5
+                               + refraHeroArt.paintedHeight * refraHeroArt.prismTipSourceY
                 }
 
                 Text {
@@ -526,7 +444,11 @@ Item {
                 }
 
                 Image {
+                    id: refraHeroArt
                     objectName: root.theme.active ? ("refraDarkHeroImage") : ""
+                    // Optical prism tip in refra-hero-dark.png (1846 × 852).
+                    readonly property real prismTipSourceX: 0.32
+                    readonly property real prismTipSourceY: 0.991
                     x: root.width * (root.theme.refraLight && root.width < 1100 ? 0.56 : 0.52)
                     y: parent.height * 0.12
                     width: root.width * (root.theme.refraLight && root.width < 1100 ? 0.44 : 0.48)
