@@ -41,11 +41,13 @@ from game_screen_translator.gui import runtime as runtime_module
 from game_screen_translator.gui import workbench_controller as controller_module
 from game_screen_translator.gui.qml_workbench import QmlWorkbenchHost
 from game_screen_translator.gui.theme import (
+    GuiPreferences,
     HOTKEY_BEHAVIOR_TOGGLE,
     HOTKEY_BEHAVIOR_TOGGLE_SHOW,
     SKIN_DOHNA,
     SKIN_PRISM,
     load_gui_preferences,
+    save_gui_preferences,
 )
 from game_screen_translator.gui.workbench_controller import WorkbenchController
 from game_screen_translator.live.latency import LiveLatencyStats
@@ -5461,7 +5463,7 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
         for item in home_summary.findChildren(QQuickItem)
         if item.isVisible() and item.property("text") is not None
     }
-    assert "OCR 400 ms  ·  LLM 2.50 s" in visible_summary_lines
+    assert "OCR 400 ms\nLLM 2.50 s" in visible_summary_lines
     controller._live_process = SimpleNamespace(poll=lambda: None)
     controller._set_run_state("正在翻译", "success", True)
     app.processEvents()
@@ -5577,6 +5579,139 @@ def test_real_last_run_snapshot_renders_all_output_pages_in_minimum_window(
     home = _find_quick_item(window, "refraDarkHome")
     assert home is not None and home.isVisible()
     host.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("theme_name", "width", "height"),
+    [
+        ("dark", 980, 700),
+        ("light", 980, 700),
+        ("dark", 1280, 820),
+        ("light", 1280, 820),
+    ],
+)
+def test_prism_home_run_summary_wraps_and_model_can_scroll(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    theme_name: str,
+    width: int,
+    height: int,
+) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    profile = create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="首页验收配置",
+    )
+    save_snapshot(
+        profile.directory,
+        new_snapshot(
+            (
+                SnapshotEntry(
+                    "fixture-track",
+                    1,
+                    "fixture source",
+                    "fixture translation",
+                    0.98,
+                    (0, 0, 100, 32),
+                ),
+            ),
+            (),
+            ocr_peak_seconds=2.23,
+            llm_peak_seconds=45.67,
+            canvas_size=(1280, 720),
+        ),
+    )
+    save_gui_preferences(
+        config_path,
+        GuiPreferences(
+            theme=theme_name,
+            skin=SKIN_PRISM,
+            hotkey="Shift+S",
+            last_profile_id="game",
+        ),
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setReducedMotion(True)
+    controller.setBackend("builtin")
+    controller.setBuiltinModel("Hy-MT2-1.8B-Q8_0.gguf")
+    qml_warnings: list[str] = []
+
+    def create_engine(parent: QObject) -> QQmlApplicationEngine:
+        engine = QQmlApplicationEngine(parent)
+        engine.warnings.connect(
+            lambda errors: qml_warnings.extend(error.toString() for error in errors)
+        )
+        return engine
+
+    host = QmlWorkbenchHost(
+        controller,
+        application=app,
+        engine_factory=create_engine,
+    )
+    try:
+        host.show()
+        window = host.window
+        assert window is not None
+        window.resize(max(width, window.minimumWidth()), height)
+        QTest.qWait(30)
+        app.processEvents()
+
+        model_scroll = _find_quick_item(window, "refraDarkModelScroll")
+        model_name = _find_quick_item(window, "refraDarkModelName")
+        translation_summary = _find_quick_item(window, "refraDarkTranslationSummary")
+        status_band = _find_quick_item(window, "refraDarkHomeStatusBand")
+        last_run_status = _find_quick_item(window, "refraDarkLastRunStatus")
+        metrics = _find_quick_item(window, "refraDarkLastRunMetrics")
+        hotkey = _find_quick_item(window, "refraDarkLastRunHotkey")
+        assert translation_summary is not None and translation_summary.isVisible()
+        assert status_band is not None and status_band.isVisible()
+        status_band_height = status_band.height()
+        assert model_scroll is not None and model_scroll.isVisible()
+        assert model_scroll.height() >= 52
+        assert model_name is not None and model_name.isVisible()
+        assert model_name.property("text") == "Hy-MT2-1.8B-Q8_0.gguf"
+        assert float(model_scroll.property("contentHeight")) <= model_scroll.height() + 1
+
+        assert last_run_status is not None and last_run_status.isVisible()
+        assert last_run_status.property("text") == controller.lastRunStatus
+        assert re.fullmatch(
+            r"上次运行：\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}",
+            str(last_run_status.property("text")),
+        )
+        assert metrics is not None and metrics.isVisible()
+        assert metrics.property("text") == "OCR 2.23 s\nLLM 45.67 s"
+        assert int(metrics.property("lineCount")) == 2
+        assert hotkey is not None and hotkey.isVisible()
+        assert hotkey.property("text") == "快捷键  Shift+S"
+        for label in (last_run_status, metrics, hotkey):
+            assert label.height() > 0
+            assert float(label.property("implicitHeight")) <= label.height() + 1
+
+        # Exercise the same Flickable with a deliberately long external model
+        # identifier so the normal built-in name remains intact while overflow
+        # still has a real scroll path.
+        long_model = "provider-region/Hy-MT2-1.8B-Q8_0.gguf/" * 12
+        controller.setBackend("external")
+        controller.setModel(long_model)
+        QTest.qWait(10)
+        app.processEvents()
+        assert model_name.property("text") == long_model
+        assert status_band.height() == pytest.approx(status_band_height)
+        content_height = float(model_scroll.property("contentHeight"))
+        assert content_height > model_scroll.height()
+        scroll_end = content_height - model_scroll.height()
+        model_scroll.setProperty("contentY", scroll_end)
+        app.processEvents()
+        assert float(model_scroll.property("contentY")) == pytest.approx(scroll_end)
+        assert model_name.mapToItem(model_scroll, QPointF(0, 0)).y() < -1
+        assert not qml_warnings
+    finally:
+        host.shutdown()
 
 
 @pytest.mark.parametrize("skin,theme_name", [
@@ -6165,7 +6300,16 @@ def test_workbench_text_is_readable_and_controls_fit_across_pages(
                         heading.mapToItem(status_band, QPointF(0, 0)).y()
                         for heading in headings
                     ]
-                    assert max(heading_y) - min(heading_y) <= 0.5
+                    assert max(heading_y) - min(heading_y) <= 0.5, [
+                        (
+                            heading.objectName(),
+                            heading_y[index],
+                            heading.parentItem().objectName(),
+                            heading.parentItem().y(),
+                            heading.parentItem().height(),
+                        )
+                        for index, heading in enumerate(headings)
+                    ]
 
                     ocr_status = _find_quick_item(window, "refraDarkOcrStatus")
                     assert ocr_status is not None

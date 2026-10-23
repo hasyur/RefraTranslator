@@ -653,10 +653,8 @@ Item {
                     Layout.leftMargin: 22
                     Layout.rightMargin: 18
                     ColumnLayout {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        spacing: 7
+                        anchors.fill: parent
+                        spacing: root.width < 1100 ? 3 : 6
                         Text { objectName: "refraDarkTranslationHeading"; text: "翻译引擎"; color: root.theme.text; font.family: root.theme.uiFontFor(text); font.pixelSize: 18; font.weight: Font.Bold }
                         Text {
                             text: root.workbench.backend === "builtin" ? "内置本地模型" : "外部 API"
@@ -671,7 +669,7 @@ Item {
                             objectName: root.theme.active ? ("refraDarkModelScroll") : ""
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Layout.minimumHeight: 20
+                            Layout.minimumHeight: root.width < 1100 ? 52 : 48
                             contentWidth: width
                             contentHeight: modelName.implicitHeight
                             clip: true
@@ -685,7 +683,7 @@ Item {
                                 color: root.theme.textSoft
                                 font.family: root.theme.monoFontFor(text)
                                 font.pixelSize: 14
-                                wrapMode: Text.WrapAnywhere
+                                wrapMode: Text.Wrap
                             }
                         }
                     }
@@ -700,10 +698,8 @@ Item {
                     Layout.minimumWidth: root.width < 1100 ? 160 : 190
                     Layout.leftMargin: 22
                     ColumnLayout {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        spacing: 6
+                        anchors.fill: parent
+                        spacing: root.width < 1100 ? 3 : 6
                         Text { objectName: "refraDarkLastRunHeading"; text: "上次运行"; color: root.theme.text; font.family: root.theme.uiFontFor(text); font.pixelSize: 18; font.weight: Font.Bold }
                         Text {
                             objectName: root.theme.active ? ("refraDarkLastRunStatus") : ""
@@ -714,27 +710,35 @@ Item {
                             font.pixelSize: 15
                             wrapMode: Text.WordWrap
                             maximumLineCount: 2
-                            elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
                         Text {
+                            objectName: root.theme.active ? ("refraDarkLastRunMetrics") : ""
                             text: root.workbench.lastRunAvailable
-                                  ? "OCR " + root.workbench.lastRunOcrPeakText + "  ·  LLM " + root.workbench.lastRunLlmPeakText
+                                  ? "OCR " + root.workbench.lastRunOcrPeakText + "\nLLM " + root.workbench.lastRunLlmPeakText
                                   : "快捷键  " + root.workbench.hotkeyPreference
                             color: root.theme.accentText
                             font.family: root.theme.monoFontFor(text)
-                            font.pixelSize: 14
-                            elide: Text.ElideRight
+                            font.pixelSize: root.width < 1100 ? 13 : 14
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: 2
                             Layout.fillWidth: true
                         }
                         Text {
+                            objectName: root.theme.active ? ("refraDarkLastRunHotkey") : ""
                             visible: root.workbench.lastRunAvailable
                             text: "快捷键  " + root.workbench.hotkeyPreference
                             color: root.theme.textDim
                             font.family: root.theme.monoFontFor(text)
                             font.pixelSize: 13
-                            elide: Text.ElideRight
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: 2
                             Layout.fillWidth: true
+                        }
+                        Item {
+                            objectName: root.theme.active ? ("refraDarkLastRunBottomSpacer") : ""
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
                         }
                     }
                 }
