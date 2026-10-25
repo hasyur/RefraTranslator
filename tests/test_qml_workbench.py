@@ -3514,6 +3514,19 @@ def test_pair_editor_existing_rows_show_one_adjacent_hint_and_remain_editable(
         editor = window.findChild(QObject, editor_name)
         assert isinstance(editor, QQuickItem)
         assert editor.property("entryCount") == 1
+        if page_name == "CACHE":
+            # Prism keeps cache corrections collapsed until the user opens
+            # the editor. Exercise the supported edit path before checking
+            # field hints and hit targets.
+            assert editor.isVisible() is False
+            expand_button = _find_quick_item(window, "cacheCorrectionsExpandButton")
+            assert expand_button is not None and expand_button.isVisible()
+            _click_quick_item(window, "cacheCorrectionsExpandButton")
+            QTest.qWait(40)
+            app.processEvents()
+            assert editor.isVisible() is True
+            scroll = _find_quick_item(window, "cachePageScroll")
+            assert scroll is not None
         assert editor.findChild(
             QObject,
             "settingHint-" + setting_key + "-editor",
@@ -3525,6 +3538,29 @@ def test_pair_editor_existing_rows_show_one_adjacent_hint_and_remain_editable(
         ):
             field = _find_quick_item(editor, field_name)
             assert isinstance(field, QQuickItem)
+            if page_name == "CACHE":
+                origin = field.mapToItem(scroll, QPointF(0, 0))
+                top = float(origin.y())
+                bottom = top + float(field.height())
+                if top < 0:
+                    delta = top
+                elif bottom > float(scroll.height()):
+                    delta = bottom - float(scroll.height())
+                else:
+                    delta = 0
+                if delta:
+                    maximum = max(
+                        0.0,
+                        float(scroll.property("contentHeight")) - float(scroll.height()),
+                    )
+                    scroll.setProperty(
+                        "contentY",
+                        min(maximum, max(0.0, float(scroll.property("contentY")) + delta)),
+                    )
+                    QTest.qWait(30)
+                    app.processEvents()
+                    field = _find_quick_item(editor, field_name)
+                    assert isinstance(field, QQuickItem)
             hint = field.findChild(
                 QObject,
                 "settingHint-" + setting_key + "-" + part + "-0-control",
@@ -7114,7 +7150,7 @@ def test_real_page_operations_show_local_feedback_and_settle(tmp_path: Path) -> 
     operations = (
         ("OCR", "ocrProbeAction", "focus"),
         ("TRANSLATION", "translationTraceAction", "trace"),
-        ("CACHE", "cacheRippleAction", "ripple"),
+        ("CACHE", "cacheRefreshStatsButton", "ripple"),
         ("SETTINGS", None, "calibrate"),
     )
     for page, button_name, action_kind in operations:
@@ -9197,9 +9233,19 @@ def test_prism_cache_minimum_window_add_select_delete_and_save_via_real_input(
         click_in_viewport(add_button)
         assert editor.property("entryCount") == 1
 
+        def wait_for_field(object_name: str) -> QQuickItem:
+            deadline = time.monotonic() + 2.5
+            while time.monotonic() < deadline:
+                app.processEvents()
+                field = _find_quick_item(window, object_name)
+                if (field is not None and field.isVisible() and field.isEnabled()
+                        and field.width() > 0 and field.height() > 0):
+                    return field
+                QTest.qWait(10)
+            pytest.fail(f"pair editor delegate did not become ready: {object_name}")
+
         def enter_field(object_name: str, value: str) -> None:
-            field = _find_quick_item(window, object_name)
-            assert field is not None and field.isVisible() and field.isEnabled()
+            field = wait_for_field(object_name)
             point = field.mapToScene(QPointF(field.width() / 2, field.height() / 2))
             QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=point.toPoint())
             QTest.keyClick(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
