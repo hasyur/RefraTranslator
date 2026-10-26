@@ -46,6 +46,7 @@ PACKAGING_RELEASE_FILES = (
     "packaging/ocr_wheel_manifest.json",
     "packaging/verify_windows_install.py",
     "packaging/releases/v0.1.0-alpha.4.md",
+    "packaging/releases/v0.1.0-alpha.5.md",
 )
 PUBLIC_TEST_MANIFEST_ENTRIES = (
     "include tests/test_*.py",
@@ -554,16 +555,23 @@ def test_readme_keeps_the_exe_user_journey_before_source_development() -> None:
 
 
 def test_archived_release_notes_keep_user_instructions_without_validation_logs() -> None:
-    notes = (PROJECT_ROOT / "packaging/releases/v0.1.0-alpha.4.md").read_text(encoding="utf-8")
+    for tag in ("v0.1.0-alpha.4", "v0.1.0-alpha.5"):
+        notes = (PROJECT_ROOT / f"packaging/releases/{tag}.md").read_text(encoding="utf-8")
 
-    assert "## 本版改动" in notes
-    assert "## 安装与升级" in notes
-    assert "选择原安装目录" in notes
-    assert "SHA256SUMS.txt" in notes
-    assert re.search(r"发布源码提交：`[0-9a-f]{40}`", notes)
-    assert "## 验证" not in notes
-    assert "Windows CI" not in notes
-    assert "项通过" not in notes
+        assert "## 本版改动" in notes
+        assert "## 安装与升级" in notes
+        assert "选择原安装目录" in notes
+        assert "SHA256SUMS.txt" in notes
+        assert "## 验证" not in notes
+        assert "Windows CI" not in notes
+        assert "项通过" not in notes
+
+    alpha4 = (PROJECT_ROOT / "packaging/releases/v0.1.0-alpha.4.md").read_text(encoding="utf-8")
+    alpha5 = (PROJECT_ROOT / "packaging/releases/v0.1.0-alpha.5.md").read_text(encoding="utf-8")
+    assert re.search(r"发布源码提交：`[0-9a-f]{40}`", alpha4)
+    assert re.search(
+        r"应用代码基线：`cba105cfb57a29c2b56258f335b2375d18566862`", alpha5
+    )
 
 
 def test_readme_explains_exe_first_run_and_in_place_updates() -> None:
