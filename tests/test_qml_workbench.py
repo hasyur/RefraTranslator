@@ -4546,29 +4546,87 @@ def test_real_number_steppers_stay_compact_in_wide_panels(tmp_path: Path) -> Non
             ancestor = ancestor.parentItem()
         if flickable is None:
             return
-        stepper_in_view = stepper.mapToItem(flickable, QPointF(0, 0))
-        target_content_y = float(flickable.property("contentY"))
-        if stepper_in_view.y() < 0:
-            target_content_y += stepper_in_view.y()
-        elif (
-            stepper_in_view.y() + float(stepper.property("height"))
-            > flickable.property("height")
-        ):
-            target_content_y += (
-                stepper_in_view.y()
-                + float(stepper.property("height"))
-                - float(flickable.property("height"))
+        scroll_syncs = [
+            item
+            for item in panel.findChildren(QObject)
+            if item.metaObject().indexOfProperty("restoring") >= 0
+            and item.metaObject().indexOfProperty("active") >= 0
+            and item.property("flickable") == flickable
+        ]
+        deadline = time.monotonic() + 2.5
+        previous_geometry: tuple[float, ...] | None = None
+        stable_frames = 0
+        while time.monotonic() < deadline:
+            app.processEvents()
+            panel_origin = panel.mapToScene(QPointF(0, 0))
+            flickable_origin = flickable.mapToScene(QPointF(0, 0))
+            stepper_origin = stepper.mapToScene(QPointF(0, 0))
+            panel_bottom = panel_origin.y() + float(panel.property("height"))
+            flickable_bottom = flickable_origin.y() + float(flickable.property("height"))
+            stepper_bottom = stepper_origin.y() + float(stepper.property("height"))
+            visible = (
+                stepper_origin.y() >= panel_origin.y() - 0.5
+                and stepper_bottom <= panel_bottom + 0.5
+                and stepper_origin.y() >= flickable_origin.y() - 0.5
+                and stepper_bottom <= flickable_bottom + 0.5
             )
-        maximum_content_y = max(
-            0.0,
-            float(flickable.property("contentHeight"))
-            - float(flickable.property("height")),
+            restoring = any(
+                sync.property("active") is True
+                and sync.property("restoring") is True
+                for sync in scroll_syncs
+            )
+            geometry = (
+                float(flickable.property("height")),
+                float(flickable.property("contentHeight")),
+                float(flickable.property("contentY")),
+                float(flickable_origin.y()),
+                float(flickable.property("height")),
+                float(panel_origin.y()),
+                float(panel.property("height")),
+                float(stepper_origin.y()),
+                float(stepper.property("height")),
+            )
+            if visible and not restoring and geometry == previous_geometry:
+                stable_frames += 1
+                if stable_frames >= 2:
+                    return
+            else:
+                stable_frames = 0
+
+            if not visible:
+                stepper_in_view = stepper.mapToItem(flickable, QPointF(0, 0))
+                target_content_y = float(flickable.property("contentY"))
+                if stepper_in_view.y() < 0:
+                    target_content_y += stepper_in_view.y()
+                elif (
+                    stepper_in_view.y() + float(stepper.property("height"))
+                    > flickable.property("height")
+                ):
+                    target_content_y += (
+                        stepper_in_view.y()
+                        + float(stepper.property("height"))
+                        - float(flickable.property("height"))
+                    )
+                maximum_content_y = max(
+                    0.0,
+                    float(flickable.property("contentHeight"))
+                    - float(flickable.property("height")),
+                )
+                flickable.setProperty(
+                    "contentY",
+                    max(0.0, min(maximum_content_y, target_content_y)),
+                )
+            previous_geometry = geometry
+            QTest.qWait(20)
+
+        raise AssertionError(
+            "number stepper did not settle inside its panel after scrolling: "
+            f"panel={panel_origin.y():.1f}..{panel_bottom:.1f}, "
+            f"stepper={stepper_origin.y():.1f}..{stepper_bottom:.1f}, "
+            f"flickable_height={flickable.property('height')}, "
+            f"content_height={flickable.property('contentHeight')}, "
+            f"content_y={flickable.property('contentY')}"
         )
-        flickable.setProperty(
-            "contentY",
-            max(0.0, min(maximum_content_y, target_content_y)),
-        )
-        app.processEvents()
 
     def assert_stepper_geometry(panel: QQuickItem, stepper: QQuickItem) -> None:
         scroll_stepper_into_view(panel, stepper)
