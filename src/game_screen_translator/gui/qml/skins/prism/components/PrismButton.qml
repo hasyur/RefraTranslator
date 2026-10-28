@@ -23,6 +23,12 @@ Button {
     // P3 navigation moves continuously between the compact rail and Home hero.
     property real navigationPresentationProgress: navigationHero ? 1 : 0
     readonly property real navigationHeroProgress: navigationPresentationProgress
+    // Measure rendered labels, including the Chinese subtitle, not the hit target.
+    readonly property real navigationTextRight: contentItem.x + Math.max(
+        navigationTitleLabel.x + Math.min(navigationTitleLabel.width, navigationTitleLabel.contentWidth),
+        navigationSubtitleLabel.x + Math.min(navigationSubtitleLabel.width, navigationSubtitleLabel.contentWidth)
+    )
+    readonly property real navigationHighlightWidth: navigationTextRight + 24 + 12 * navigationHeroProgress
     function navigationTextCoolColor() {
         const progress = Math.max(0, Math.min(1, root.navigationHeroProgress))
         const base = root.theme.text
@@ -299,7 +305,7 @@ Button {
             readonly property real edgePadding: 3
             x: 10 - edgePadding
             y: 8 - edgePadding
-            width: Math.max(0, parent.width - 16) + edgePadding * 2
+            width: root.navigationHighlightWidth + 2 + edgePadding * 2
             height: Math.max(0, parent.height - 13) + edgePadding * 2
             preferredRendererType: Shape.CurveRenderer
             layer.enabled: true
@@ -340,7 +346,7 @@ Button {
             readonly property real edgePadding: 3
             x: -edgePadding
             y: 4 - edgePadding
-            width: Math.max(0, parent.width - 18) + edgePadding * 2
+            width: root.navigationHighlightWidth + edgePadding * 2
             height: Math.max(0, parent.height - 10) + edgePadding * 2
             preferredRendererType: Shape.CurveRenderer
             layer.enabled: true
@@ -383,7 +389,7 @@ Button {
             readonly property real edgePadding: 4
             x: 13 - edgePadding
             y: 10 - edgePadding
-            width: parent.width * 0.85 + edgePadding * 2
+            width: root.navigationHighlightWidth + edgePadding * 2
             height: parent.height - 20 + edgePadding * 2
             rotation: -2.2
             preferredRendererType: Shape.CurveRenderer
@@ -399,11 +405,11 @@ Button {
                 startX: 18 + navigationHeroMagentaShape.edgePadding
                 startY: navigationHeroMagentaShape.edgePadding
                 PathLine {
-                    x: navigationHeroMagentaShape.width * 0.96 - navigationHeroMagentaShape.edgePadding * 0.92
+                    x: navigationHeroMagentaShape.width - navigationHeroMagentaShape.edgePadding
                     y: navigationHeroMagentaShape.edgePadding
                 }
                 PathLine {
-                    x: navigationHeroMagentaShape.width * 0.88 - navigationHeroMagentaShape.edgePadding * 0.76
+                    x: navigationHeroMagentaShape.width - navigationHeroMagentaShape.edgePadding - 32
                     y: navigationHeroMagentaShape.height - navigationHeroMagentaShape.edgePadding
                 }
                 PathLine {
@@ -427,7 +433,7 @@ Button {
             readonly property real edgePadding: 4
             x: 3 - edgePadding
             y: 3 - edgePadding
-            width: parent.width * 0.85 + edgePadding * 2
+            width: root.navigationHighlightWidth + edgePadding * 2
             height: parent.height - 16 + edgePadding * 2
             rotation: -2.2
             preferredRendererType: Shape.CurveRenderer
@@ -443,11 +449,11 @@ Button {
                 startX: 18 + navigationHeroActiveShape.edgePadding
                 startY: navigationHeroActiveShape.edgePadding
                 PathLine {
-                    x: navigationHeroActiveShape.width * 0.96 - navigationHeroActiveShape.edgePadding * 0.92
+                    x: navigationHeroActiveShape.width - navigationHeroActiveShape.edgePadding
                     y: navigationHeroActiveShape.edgePadding
                 }
                 PathLine {
-                    x: navigationHeroActiveShape.width * 0.88 - navigationHeroActiveShape.edgePadding * 0.76
+                    x: navigationHeroActiveShape.width - navigationHeroActiveShape.edgePadding - 32
                     y: navigationHeroActiveShape.height - navigationHeroActiveShape.edgePadding
                 }
                 PathLine {

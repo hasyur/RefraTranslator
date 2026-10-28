@@ -7977,6 +7977,80 @@ def test_settings_keeps_output_controls_left_and_diagnostics_selectable(
 
 
 @pytest.mark.parametrize("theme_name", ("light", "dark"))
+def test_prism_navigation_highlight_follows_rendered_text_width(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    theme_name: str,
+) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        window = host.window
+        assert window is not None
+        host.show()
+        for width, height in ((980, 700), (1280, 820)):
+            window.resize(width, height)
+            for page in ("HOME", "CAPTURE"):
+                controller.setPage(page)
+                QTest.qWait(50)
+                hero = page == "HOME"
+                prefix = "refraDarkNavigationButton" if hero else "navigationButton"
+                widths = []
+                for index in range(7):
+                    button = _find_quick_item(window, f"{prefix}{index}")
+                    assert button is not None
+                    text_right = max(
+                        label.mapToItem(button, QPointF(0, 0)).x()
+                        + min(label.width(), float(label.property("contentWidth")))
+                        for name in ("navigationTitleLabel", "navigationSubtitleLabel")
+                        if (label := button.findChild(QQuickItem, name)) is not None
+                    )
+                    names = (
+                        ("prismNavigationHeroActiveWedge", "prismNavigationHeroMagentaWedge")
+                        if hero else ("prismNavigationActivePlate", "prismNavigationMagentaOffset")
+                    )
+                    for name in names:
+                        shape = button.findChild(QQuickItem, name)
+                        assert shape is not None
+                        # The plate leaves a small, consistent margin for its
+                        # slanted end rather than filling the whole click target.
+                        margin = shape.width() - text_right
+                        assert 24 <= margin <= 46
+                    widths.append(button.findChild(QQuickItem, names[0]).width())
+                # The rail fits each title to its available width; the hero
+                # uses one font size, so longer titles must have longer plates.
+                if hero:
+                    assert widths[0] < widths[1] < widths[3]
+
+        controller.setPage("HOME")
+        QTest.qWait(50)
+        button = _find_quick_item(window, "refraDarkNavigationButton0")
+        assert button is not None
+        shape = button.findChild(QQuickItem, "prismNavigationHeroActiveWedge")
+        assert shape is not None
+        original_width = shape.width()
+        hit_width = button.width()
+        button.setProperty("navigationSubtitle", "总览与运行状态")
+        app.processEvents()
+        assert shape.width() > original_width
+        longer_width = shape.width()
+        button.setProperty("text", "HI")
+        app.processEvents()
+        assert shape.width() < longer_width
+        assert button.width() == hit_width
+        assert controller.currentPage == "HOME"
+    finally:
+        host.shutdown()
+
+
+@pytest.mark.parametrize("theme_name", ("light", "dark"))
 def test_prism_navigation_hover_previews_selection_until_clicked(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
