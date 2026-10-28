@@ -7976,6 +7976,99 @@ def test_settings_keeps_output_controls_left_and_diagnostics_selectable(
         host.shutdown()
 
 
+@pytest.mark.parametrize("theme_name", ("light", "dark"))
+def test_prism_navigation_hover_previews_selection_until_clicked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    theme_name: str,
+) -> None:
+    monkeypatch.setattr(host_module.WindowsGlobalHotkey, "register", lambda *_args: None)
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme(theme_name)
+    controller.setReducedMotion(True)
+    host = QmlWorkbenchHost(controller, application=app)
+    try:
+        window = host.window
+        assert window is not None
+        host.show()
+        window.resize(1280, 820)
+        app.processEvents()
+        theme = window.findChild(QObject, "prismTheme")
+        assert theme is not None
+
+        def assert_appearance(button: QQuickItem, highlighted: bool, hero: bool) -> None:
+            names = (
+                ("prismNavigationHeroActiveWedge", "prismNavigationHeroMagentaWedge")
+                if hero else ("prismNavigationActivePlate", "prismNavigationMagentaOffset")
+            )
+            for name in names:
+                shape = button.findChild(QQuickItem, name)
+                assert shape is not None
+                assert shape.isVisible() is highlighted
+            if highlighted:
+                for name in ("navigationNumberLabel", "navigationTitleLabel", "navigationSubtitleLabel"):
+                    label = button.findChild(QObject, name)
+                    assert label is not None
+                    assert label.property("color") == theme.property("ink")
+
+        for index, page in enumerate(
+            ("HOME", "CAPTURE", "OCR", "TRANSLATION", "OVERLAY", "CACHE", "SETTINGS")
+        ):
+            if index == 0:
+                continue
+            controller.setPage("HOME")
+            QTest.mouseMove(window, QPoint(2, 2))
+            QTest.qWait(50)
+            home = _find_quick_item(window, "refraDarkNavigationButton0")
+            button = _find_quick_item(window, f"refraDarkNavigationButton{index}")
+            assert home is not None and button is not None
+            assert_appearance(home, True, True)
+            assert_appearance(button, False, True)
+            title = button.findChild(QObject, "navigationTitleLabel")
+            original_color = title.property("color")
+            point = button.mapToScene(QPointF(button.width() / 2, button.height() / 2)).toPoint()
+            QTest.mouseMove(window, point)
+            app.processEvents()
+            assert button.property("hovered") is True
+            assert button.property("primary") is False
+            assert home.property("primary") is True
+            assert controller.currentPage == "HOME"
+            assert_appearance(home, True, True)
+            assert_appearance(button, True, True)
+
+            QTest.mouseMove(window, QPoint(2, 2))
+            app.processEvents()
+            assert_appearance(button, False, True)
+            assert title.property("color") == original_color
+            assert controller.currentPage == "HOME"
+
+            QTest.mouseMove(window, point)
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=point)
+            QTest.mouseMove(window, QPoint(2, 2))
+            app.processEvents()
+            assert controller.currentPage == page
+            assert button.property("primary") is True
+            assert_appearance(button, True, False)
+            assert_appearance(home, False, False)
+
+            # The same feedback remains available in the compact navigation rail.
+            home_point = home.mapToScene(QPointF(home.width() / 2, home.height() / 2)).toPoint()
+            QTest.mouseMove(window, home_point)
+            app.processEvents()
+            assert_appearance(home, True, False)
+            assert home.property("primary") is False
+            assert controller.currentPage == page
+            QTest.mouseMove(window, QPoint(2, 2))
+            app.processEvents()
+            assert_appearance(home, False, False)
+    finally:
+        host.shutdown()
+
+
 def test_refra_dark_home_keeps_one_enabled_navigation_tree_and_shared_preferences(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

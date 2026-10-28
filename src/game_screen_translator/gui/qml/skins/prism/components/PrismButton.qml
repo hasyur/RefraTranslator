@@ -12,6 +12,8 @@ Button {
     property string settingKey: ""
     property bool quiet: false
     property bool navigation: false
+    // Hover previews the selected appearance without changing the current page.
+    readonly property bool navigationHighlighted: navigation && enabled && (primary || hovered)
     property string navigationNumber: ""
     property string navigationCode: ""
     property string navigationSubtitle: ""
@@ -106,8 +108,7 @@ Button {
             width: 34 * root.navigationHeroProgress + 24 * (1 - root.navigationHeroProgress)
             height: 28 * root.navigationHeroProgress + 18 * (1 - root.navigationHeroProgress)
             text: root.navigationNumber
-            color: true && root.primary ? root.theme.ink
-                  : root.primary ? root.theme.accent : root.theme.textDim
+            color: root.navigationHighlighted ? root.theme.ink : root.theme.textDim
             font.family: root.theme.monoFontFor(text)
             font.pixelSize: 16 * root.navigationHeroProgress + 12 * (1 - root.navigationHeroProgress)
             font.weight: Font.DemiBold
@@ -130,7 +131,7 @@ Button {
             height: parent.height * root.navigationHeroProgress + 36 * (1 - root.navigationHeroProgress)
                     
             text: root.text
-            color: true && root.primary ? root.theme.ink
+            color: root.navigationHighlighted ? root.theme.ink
                   : !root.enabled ? root.theme.textDim
                   : true && root.navigationCool ? root.navigationTextCoolColor()
                   : root.theme.text
@@ -186,7 +187,7 @@ Button {
             height: 25 * (1 - root.navigationHeroProgress)
                     + parent.height * root.navigationHeroProgress
             text: root.navigationSubtitle
-            color: root.primary ? root.theme.ink
+            color: root.navigationHighlighted ? root.theme.ink
                   : root.navigationCool ? root.navigationTextCoolColor() : root.theme.text
             font.family: root.theme.uiFontFor(text)
             font.pixelSize: 24 * root.navigationHeroProgress
@@ -209,7 +210,7 @@ Button {
             y: visualY - edgePadding
             width: Math.max(0, parent.width - visualX - 5) + edgePadding * 2
             height: 6 + edgePadding * 2
-            opacity: (root.primary ? 0.88 : 0.66)
+            opacity: (root.navigationHighlighted ? 0.88 : 0.66)
                      * (root.navigationHero ? 1 : root.navigationHeroProgress)
             preferredRendererType: Shape.CurveRenderer
             layer.enabled: true
@@ -292,7 +293,7 @@ Button {
         Shape {
             id: prismNavigationSidebarMagenta
             objectName: root.theme.active ? ("prismNavigationMagentaOffset") : ""
-            visible: true && root.navigation && root.primary && root.enabled
+            visible: root.navigationHighlighted
                      && root.navigationHeroProgress < 1
             opacity: 1 - root.navigationHeroProgress
             readonly property real edgePadding: 3
@@ -333,7 +334,7 @@ Button {
         Shape {
             id: prismNavigationSidebarActive
             objectName: root.theme.active ? ("prismNavigationActivePlate") : ""
-            visible: true && root.navigation && root.primary && root.enabled
+            visible: root.navigationHighlighted
                      && root.navigationHeroProgress < 1
             opacity: 1 - root.navigationHeroProgress
             readonly property real edgePadding: 3
@@ -377,7 +378,7 @@ Button {
             objectName: root.theme.active ? ("prismNavigationHeroMagentaWedge") : ""
             visible: true && root.navigation
                      && root.navigationHeroProgress > 0
-                     && root.primary && root.enabled
+                     && root.navigationHighlighted
             opacity: root.navigationHeroProgress
             readonly property real edgePadding: 4
             x: 13 - edgePadding
@@ -421,7 +422,7 @@ Button {
             objectName: root.theme.active ? ("prismNavigationHeroActiveWedge") : ""
             visible: true && root.navigation
                      && root.navigationHeroProgress > 0
-                     && root.primary && root.enabled
+                     && root.navigationHighlighted
             opacity: root.navigationHeroProgress
             readonly property real edgePadding: 4
             x: 3 - edgePadding
