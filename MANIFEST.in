@@ -25,6 +25,7 @@ include tests/manual/animated_ocr_scenes.py
 include tests/manual/README.md
 recursive-include src/game_screen_translator/gui/qml *.qml
 recursive-include src/game_screen_translator/gui/qml *.png
+include src/game_screen_translator/gui/assets/*.ico
 prune scripts
 prune .local-tools
 prune .cache

@@ -282,6 +282,10 @@ def _copy_application(
     shutil.copy2(ROOT / "config.example.toml", app_root / "config.example.toml")
     shutil.copy2(ROOT / "LICENSE", app_root / "LICENSE")
     shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", app_root / "THIRD_PARTY_NOTICES.md")
+    shutil.copy2(
+        source_package / "gui" / "assets" / "refra-translator.ico",
+        app_root / "RefraTranslator.ico",
+    )
     manifest_target = app_site_packages / "game_screen_translator" / "ocr_wheel_manifest.json"
     manifest_target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ocr_manifest, manifest_target)
@@ -337,6 +341,9 @@ def _build_launcher(app_root: Path, compiler: Path | None = None) -> Path:
         raise BuildError(f"Windows .NET Framework C# compiler not found: {compiler}; use --csc")
     app_root.mkdir(parents=True, exist_ok=True)
     output = app_root / "RefraTranslator.exe"
+    icon = app_root / "RefraTranslator.ico"
+    if not icon.is_file():
+        raise BuildError(f"Application icon not found: {icon}")
     source_path = app_root.parent / "RefraTranslatorLauncher.versioned.cs"
     try:
         source_path.write_text(_render_launcher_source(), encoding="utf-8", newline="\n")
@@ -349,6 +356,7 @@ def _build_launcher(app_root: Path, compiler: Path | None = None) -> Path:
         "/platform:x64",
         "/optimize+",
         "/codepage:65001",
+        f"/win32icon:{icon}",
         f"/out:{output}",
         str(source_path),
     ]

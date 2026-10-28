@@ -52,6 +52,7 @@ version = {attr = "game_screen_translator._version.__version__"}
 
 [tool.setuptools.package-data]
 "game_screen_translator.gui" = [
+  "assets/*.ico",
   "qml/*.qml",
   "qml/shared/*.qml",
   "qml/skins/prism/*.qml",

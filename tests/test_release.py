@@ -129,6 +129,7 @@ def test_release_metadata_bundles_the_native_qml_workbench() -> None:
     gui_data = set(package_data["game_screen_translator.gui"])
     assert {
         "qml/*.qml",
+        "assets/*.ico",
         "qml/shared/*.qml",
         "qml/skins/prism/*.qml",
         "qml/skins/prism/components/*.qml",
@@ -142,6 +143,7 @@ def test_release_metadata_bundles_the_native_qml_workbench() -> None:
     manifest = (PROJECT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
     assert "recursive-include src/game_screen_translator/gui/qml *.qml" in manifest
     assert "recursive-include src/game_screen_translator/gui/qml *.png" in manifest
+    assert "include src/game_screen_translator/gui/assets/*.ico" in manifest
 
 
 def test_built_archives_contain_the_exact_native_qml_workbench(
@@ -196,9 +198,20 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
         path.relative_to(qml_root).as_posix()
         for path in qml_root.rglob("*.png")
     }
+    icon_path = (
+        PROJECT_ROOT
+        / "src"
+        / "game_screen_translator"
+        / "gui"
+        / "assets"
+        / "refra-translator.ico"
+    )
 
     with zipfile.ZipFile(wheels[0]) as archive:
         wheel_names = set(archive.namelist())
+        wheel_icon = "game_screen_translator/gui/assets/refra-translator.ico"
+        assert wheel_icon in wheel_names
+        assert archive.read(wheel_icon) == icon_path.read_bytes()
         wheel_qml = {
             name.split("game_screen_translator/gui/qml/", 1)[1]
             for name in wheel_names
@@ -216,6 +229,14 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
             assert archive.read(member) == (qml_root / relative).read_bytes()
     with tarfile.open(source_archives[0], "r:gz") as archive:
         sdist_names = set(archive.getnames())
+        sdist_icon = next(
+            name
+            for name in sdist_names
+            if name.endswith("/src/game_screen_translator/gui/assets/refra-translator.ico")
+        )
+        archived_icon = archive.extractfile(sdist_icon)
+        assert archived_icon is not None
+        assert archived_icon.read() == icon_path.read_bytes()
         sdist_qml = {
             name.split("game_screen_translator/gui/qml/", 1)[1]
             for name in sdist_names

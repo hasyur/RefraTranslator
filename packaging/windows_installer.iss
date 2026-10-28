@@ -31,6 +31,8 @@ AppName=RefraTranslator
 AppVersion={#AppVersion}
 VersionInfoVersion={#WindowsVersion}
 AppPublisher=RefraTranslator
+SetupIconFile={#AppSourceDir}\RefraTranslator.ico
+UninstallDisplayIcon={app}\RefraTranslator.exe
 DefaultDirName={localappdata}\Programs\RefraTranslator
 DefaultGroupName=RefraTranslator
 MinVersion=10.0
@@ -58,8 +60,8 @@ Source: "{#AppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加快捷方式："; Flags: unchecked
 
 [Icons]
-Name: "{autoprograms}\RefraTranslator"; Filename: "{app}\RefraTranslator.exe"; WorkingDir: "{app}"
-Name: "{autodesktop}\RefraTranslator"; Filename: "{app}\RefraTranslator.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\RefraTranslator"; Filename: "{app}\RefraTranslator.exe"; WorkingDir: "{app}"; IconFilename: "{app}\RefraTranslator.exe"
+Name: "{autodesktop}\RefraTranslator"; Filename: "{app}\RefraTranslator.exe"; WorkingDir: "{app}"; IconFilename: "{app}\RefraTranslator.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\RefraTranslator.exe"; WorkingDir: "{app}"; Description: "启动 RefraTranslator"; Flags: postinstall nowait skipifsilent

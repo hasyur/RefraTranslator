@@ -6,14 +6,11 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPointF, QRect, Qt, QTimer, QUrl
+from PySide6.QtCore import QObject, QRect, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QColor,
     QFontDatabase,
     QIcon,
-    QPainter,
-    QPen,
-    QPixmap,
     QScreen,
     QWindow,
 )
@@ -42,6 +39,8 @@ from .workbench_controller import WorkbenchController
 _CONTEXT_PROPERTY = "workbench"
 _DEFAULT_QML_PATH = Path(__file__).with_name("qml") / "Main.qml"
 _DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+_DWMWA_CAPTION_COLOR = 35
+_DWMWA_TEXT_COLOR = 36
 _REGISTERED_DISPLAY_FONT_IDS: list[int] = []
 _SYSTEM_DISPLAY_FONTS_CHECKED = False
 
@@ -112,85 +111,49 @@ def _set_windows_immersive_dark_mode(window_id: int, dark: bool) -> None:
     )
 
 
+def _set_windows_caption_color(window_id: int, attribute: int, color: QColor) -> None:
+    """Set a Windows 11 DWM title-bar COLORREF attribute when supported."""
+
+    import ctypes
+
+    colorref = ctypes.c_uint(color.red() | (color.green() << 8) | (color.blue() << 16))
+    setter = ctypes.windll.dwmapi.DwmSetWindowAttribute
+    setter.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_uint,
+        ctypes.c_void_p,
+        ctypes.c_uint,
+    )
+    setter.restype = ctypes.c_long
+    setter(
+        ctypes.c_void_p(window_id),
+        attribute,
+        ctypes.byref(colorref),
+        ctypes.sizeof(colorref),
+    )
+
+
 def _build_refra_icon() -> QIcon:
-    """Recreate the old prototype brand mark for every native icon surface."""
+    """Load the shared multi-size brand icon used by the app and installer."""
 
-    icon = QIcon()
-    for size in (16, 20, 24, 32, 48, 64, 128, 256):
-        scale = size / 64
-        stroke = max(1, round(scale))
-        pixmap = QPixmap(size, size)
-        pixmap.fill(QColor("#080a0e"))
-        painter = QPainter(pixmap)
+    icon_path = Path(__file__).with_name("assets") / "refra-translator.ico"
+    return QIcon(str(icon_path))
 
-        def scaled(value: float) -> float:
-            return value * scale
 
-        # The beam sits behind the clipped instrument frame in the prototype.
-        painter.fillRect(
-            round(scaled(4)),
-            round(scaled(31)),
-            max(1, round(scaled(53))),
-            stroke,
-            QColor("#55d9ff"),
-        )
-        painter.fillRect(
-            round(scaled(33)),
-            round(scaled(36)),
-            max(1, round(scaled(23))),
-            stroke,
-            QColor("#e96ecf"),
-        )
+def _workbench_titlebar_colors(
+    window: QQuickWindow,
+) -> tuple[QColor, QColor] | None:
+    """Read the active skin's title surface and text colors from its QML theme."""
 
-        frame = QColor("#39434c")
-        painter.fillRect(
-            round(scaled(16)),
-            round(scaled(13)),
-            max(1, round(scaled(20))),
-            stroke,
-            frame,
-        )
-        painter.fillRect(
-            round(scaled(16)),
-            round(scaled(13)),
-            stroke,
-            max(1, round(scaled(35))),
-            frame,
-        )
-        painter.fillRect(
-            round(scaled(16)),
-            round(scaled(47)),
-            max(1, round(scaled(30))),
-            stroke,
-            frame,
-        )
-        painter.fillRect(
-            round(scaled(45)),
-            round(scaled(22)),
-            stroke,
-            max(1, round(scaled(26))),
-            frame,
-        )
-
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        frame_pen = QPen(frame, stroke)
-        frame_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
-        painter.setPen(frame_pen)
-        painter.drawLine(
-            QPointF(scaled(36), scaled(13)),
-            QPointF(scaled(45), scaled(22)),
-        )
-
-        slice_pen = QPen(QColor("#55d9ff"), stroke)
-        slice_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
-        painter.setPen(slice_pen)
-        painter.drawLine(
-            QPointF(scaled(38), scaled(8)),
-            QPointF(scaled(24), scaled(56)),
-        )
-        painter.end()
-        icon.addPixmap(pixmap)
-    return icon
+    for object_name in ("prismTheme", "dohnaTheme"):
+        theme = window.findChild(QObject, object_name)
+        if theme is None or not theme.property("active"):
+            continue
+        surface = QColor(theme.property("headerSurface"))
+        text = QColor(theme.property("text"))
+        if surface.isValid() and text.isValid():
+            return surface, text
+    return None
 
 
 def _apply_workbench_window_theme(
@@ -201,6 +164,7 @@ def _apply_workbench_window_theme(
     *,
     platform_name: str | None = None,
     dwm_setter: Callable[[int, bool], None] | None = None,
+    dwm_color_setter: Callable[[int, int, QColor], None] | None = None,
 ) -> None:
     """Synchronize Qt's color hint and the native Windows title bar safely."""
 
@@ -233,6 +197,19 @@ def _apply_workbench_window_theme(
             native_window_id,
             effective_theme == "dark",
         )
+        colors = _workbench_titlebar_colors(window)
+        if colors is not None:
+            surface, text = colors
+            set_color = dwm_color_setter or _set_windows_caption_color
+            for attribute, color in (
+                (_DWMWA_CAPTION_COLOR, surface),
+                (_DWMWA_TEXT_COLOR, text),
+            ):
+                try:
+                    set_color(native_window_id, attribute, color)
+                except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                    # Explicit caption colors are unavailable before Windows 11.
+                    pass
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         pass
 

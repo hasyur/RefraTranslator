@@ -28,7 +28,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetricsF, QWheelEvent
+from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetricsF, QIcon, QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, QQmlProperty
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtTest import QTest
@@ -1684,6 +1684,24 @@ def test_host_tray_recalls_workbench_and_running_close_returns_to_tray() -> None
     host.shutdown()
 
 
+def test_application_brand_icon_loads_all_native_sizes() -> None:
+    _application()
+    icon = host_module._build_refra_icon()
+
+    assert isinstance(icon, QIcon)
+    assert not icon.isNull()
+    assert {(size.width(), size.height()) for size in icon.availableSizes()} == {
+        (16, 16),
+        (20, 20),
+        (24, 24),
+        (32, 32),
+        (48, 48),
+        (64, 64),
+        (128, 128),
+        (256, 256),
+    }
+
+
 def test_login_tray_start_keeps_native_target_for_second_instance_activation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2353,6 +2371,52 @@ def test_window_theme_helper_sets_qt_scheme_and_optional_windows_dwm() -> None:
     assert dwm_calls == [(731, True), (731, False), (731, True)]
 
 
+def test_native_titlebar_colors_follow_prism_and_dohna_qml_themes(tmp_path: Path) -> None:
+    app = _application()
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path)
+    create_game_profile(
+        config_path,
+        load_config(config_path),
+        "game",
+        display_name="测试游戏",
+    )
+    controller = WorkbenchController(config_path, probe_ocr_devices=False)
+    controller.setSkin(SKIN_PRISM)
+    controller.setTheme("dark")
+    calls: list[tuple[int, str]] = []
+
+    def apply_theme(application, window, preference, effective_theme) -> None:
+        host_module._apply_workbench_window_theme(
+            application,
+            window,
+            preference,
+            effective_theme,
+            platform_name="win32",
+            dwm_setter=lambda _window_id, _dark: None,
+            dwm_color_setter=lambda _window_id, attribute, color: calls.append(
+                (attribute, color.name())
+            ),
+        )
+
+    host = QmlWorkbenchHost(controller, application=app, theme_applier=apply_theme)
+    try:
+        window = host.window
+        assert window is not None
+        assert calls[-2:] == [(35, "#05183f"), (36, "#f1f7ff")]
+
+        controller.setTheme("light")
+        assert calls[-2:] == [(35, "#ffffff"), (36, "#101a32")]
+
+        controller.setSkin(SKIN_DOHNA)
+        assert calls[-2:] == [(35, "#f7f3e8"), (36, "#17151e")]
+
+        controller.setSkin(SKIN_PRISM)
+        assert calls[-2:] == [(35, "#ffffff"), (36, "#101a32")]
+    finally:
+        host.shutdown()
+
+
 def test_windows_dwm_adapter_uses_documented_attribute_and_bool_size(
     monkeypatch,
 ) -> None:
@@ -2382,6 +2446,35 @@ def test_windows_dwm_adapter_uses_documented_attribute_and_bool_size(
     assert attribute == 20
     assert ctypes.cast(value_pointer, ctypes.POINTER(ctypes.c_int)).contents.value == 1
     assert value_size == ctypes.sizeof(ctypes.c_int)
+
+
+def test_windows_caption_color_adapter_passes_dwm_colorref(monkeypatch) -> None:
+    calls: list[tuple[object, int, object, int]] = []
+
+    class SetterRecorder:
+        argtypes = None
+        restype = None
+
+        def __call__(self, *args) -> int:
+            calls.append(args)
+            return 0
+
+    setter = SetterRecorder()
+    fake_windll = type(
+        "WindllRecorder",
+        (),
+        {"dwmapi": type("DwmApiRecorder", (), {"DwmSetWindowAttribute": setter})()},
+    )()
+    monkeypatch.setattr(ctypes, "windll", fake_windll, raising=False)
+
+    host_module._set_windows_caption_color(731, 35, QColor("#05183f"))
+
+    assert len(calls) == 1
+    hwnd, attribute, value_pointer, value_size = calls[0]
+    assert hwnd.value == 731
+    assert attribute == 35
+    assert ctypes.cast(value_pointer, ctypes.POINTER(ctypes.c_uint)).contents.value == 0x3F1805
+    assert value_size == ctypes.sizeof(ctypes.c_uint)
 
 
 def test_window_theme_helper_safely_ignores_platform_failures() -> None:

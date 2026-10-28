@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import importlib.util
 import json
@@ -69,6 +70,10 @@ def test_application_staging_uses_embedded_python_zip_and_writes_runtime_path(
     installed_package = runtime / "Lib" / "site-packages" / "game_screen_translator"
     assert (installed_package / "gui_entry.py").is_file()
     assert (installed_package / "ocr_wheel_manifest.json").is_file()
+    assert (installed_package / "gui" / "assets" / "refra-translator.ico").is_file()
+    assert (app_root / "RefraTranslator.ico").read_bytes() == (
+        installed_package / "gui" / "assets" / "refra-translator.ico"
+    ).read_bytes()
     assert not any(installed_package.rglob("__pycache__"))
     assert summary["ocr_wheel_count"] == 1
     assert summary["ocr_installed_bytes"] == 20
@@ -86,6 +91,8 @@ def test_inno_script_preserves_supported_windows_and_portable_smoke_modes() -> N
     assert 'Uninstallable={#InstallUninstaller}' in script
     assert 'AppVersion={#AppVersion}' in script
     assert 'VersionInfoVersion={#WindowsVersion}' in script
+    assert 'SetupIconFile={#AppSourceDir}\\RefraTranslator.ico' in script
+    assert 'UninstallDisplayIcon={app}\\RefraTranslator.exe' in script
     assert '[Languages]' in script
     assert 'Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"' in script
     language_file = (
@@ -146,6 +153,40 @@ def test_launcher_build_reports_a_missing_compiler(tmp_path: Path) -> None:
         builder._build_launcher(tmp_path / "app", tmp_path / "missing-csc.exe")
 
 
+def test_launcher_compilation_embeds_the_staged_brand_icon(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    icon = app_root / "RefraTranslator.ico"
+    shutil.copy2(
+        _BUILDER_PATH.parents[1]
+        / "src"
+        / "game_screen_translator"
+        / "gui"
+        / "assets"
+        / "refra-translator.ico",
+        icon,
+    )
+    compiler = tmp_path / "csc.exe"
+    compiler.write_bytes(b"test compiler")
+    captured: list[str] = []
+
+    def fake_run(command, **_kwargs):
+        captured.extend(command)
+        output = next(argument.split(":", 1)[1] for argument in command if argument.startswith("/out:"))
+        Path(output).write_bytes(b"compiled launcher")
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(builder.subprocess, "run", fake_run)
+
+    launcher = builder._build_launcher(app_root, compiler)
+
+    assert launcher.read_bytes() == b"compiled launcher"
+    assert f"/win32icon:{icon.resolve()}" in captured
+
+
 def test_launcher_source_uses_the_single_project_version(tmp_path: Path) -> None:
     fixture_root = tmp_path / "project"
     packaging_dir = fixture_root / "packaging"
@@ -197,6 +238,16 @@ def compiled_launcher(tmp_path_factory: pytest.TempPathFactory) -> Path:
     if os.name != "nt":
         pytest.skip("The application launcher runs on Windows")
     app_root = tmp_path_factory.mktemp("launcher") / "安装目录 with spaces"
+    app_root.mkdir()
+    shutil.copy2(
+        _BUILDER_PATH.parents[1]
+        / "src"
+        / "game_screen_translator"
+        / "gui"
+        / "assets"
+        / "refra-translator.ico",
+        app_root / "RefraTranslator.ico",
+    )
     launcher = builder._build_launcher(app_root)
     runtime = app_root / "runtime"
     runtime.mkdir()
@@ -294,3 +345,102 @@ def test_compiled_launcher_is_a_gui_executable_and_survives_relocation(
     test_compiled_launcher_uses_its_own_runtime_and_preserves_arguments(
         relocated / "RefraTranslator.exe", tmp_path, [],
     )
+
+
+def test_compiled_launcher_contains_a_windows_icon_resource(compiled_launcher: Path) -> None:
+    extractor = ctypes.windll.shell32.ExtractIconExW
+    extractor.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_uint,
+    )
+    extractor.restype = ctypes.c_uint
+    large = ctypes.c_void_p()
+    small = ctypes.c_void_p()
+
+    count = extractor(str(compiled_launcher), 0, ctypes.byref(large), ctypes.byref(small), 1)
+    try:
+        assert count >= 1
+        assert large.value or small.value
+    finally:
+        if large.value:
+            ctypes.windll.user32.DestroyIcon(large)
+        if small.value:
+            ctypes.windll.user32.DestroyIcon(small)
+
+    kernel32 = ctypes.windll.kernel32
+    load_data = kernel32.LoadLibraryExW
+    load_data.argtypes = (ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint)
+    load_data.restype = ctypes.c_void_p
+    module = load_data(str(compiled_launcher), None, 0x00000002)
+    assert module
+    kernel32.FreeLibrary.argtypes = (ctypes.c_void_p,)
+    kernel32.FreeLibrary.restype = ctypes.c_int
+    try:
+        callback_type = ctypes.WINFUNCTYPE(
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+        )
+        group_names: list[int] = []
+
+        @callback_type
+        def remember_group(_module, _resource_type, name, _parameter):
+            group_names.append(ctypes.cast(name, ctypes.c_void_p).value)
+            return 1
+
+        enumerate_names = kernel32.EnumResourceNamesW
+        enumerate_names.argtypes = (
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            callback_type,
+            ctypes.c_void_p,
+        )
+        enumerate_names.restype = ctypes.c_int
+        assert enumerate_names(module, ctypes.c_void_p(14), remember_group, None)
+        resource_name = ctypes.c_void_p(group_names[0])
+
+        find_resource = kernel32.FindResourceW
+        find_resource.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+        find_resource.restype = ctypes.c_void_p
+        resource = find_resource(module, resource_name, ctypes.c_void_p(14))
+        assert resource
+        size_of_resource = kernel32.SizeofResource
+        size_of_resource.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+        size_of_resource.restype = ctypes.c_uint
+        size = size_of_resource(module, resource)
+        load_resource = kernel32.LoadResource
+        load_resource.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+        load_resource.restype = ctypes.c_void_p
+        lock_resource = kernel32.LockResource
+        lock_resource.argtypes = (ctypes.c_void_p,)
+        lock_resource.restype = ctypes.c_void_p
+        payload = ctypes.string_at(lock_resource(load_resource(module, resource)), size)
+        reserved, resource_type, count = struct.unpack_from("<HHH", payload)
+        assert (reserved, resource_type, count) == (0, 1, 8)
+        sizes = {
+            (
+                width or 256,
+                height or 256,
+            )
+            for width, height in (
+                struct.unpack_from("<BB", payload, 6 + index * 14)
+                for index in range(count)
+            )
+        }
+        assert sizes == {
+            (16, 16),
+            (20, 20),
+            (24, 24),
+            (32, 32),
+            (48, 48),
+            (64, 64),
+            (128, 128),
+            (256, 256),
+        }
+    finally:
+        kernel32.FreeLibrary(module)
