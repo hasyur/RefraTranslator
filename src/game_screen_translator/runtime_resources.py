@@ -29,6 +29,7 @@ from urllib.parse import unquote, urlsplit
 import httpx
 
 from game_screen_translator.config import load_config
+from game_screen_translator.download_tls import create_download_ssl_context
 
 
 MODEL_HOST = (
@@ -824,6 +825,7 @@ def prepare_ocr_resources(
         with httpx.Client(
             follow_redirects=True,
             timeout=timeout,
+            verify=create_download_ssl_context(),
             transport=http_transport,
             headers={
                 "Accept-Encoding": "identity",
@@ -857,6 +859,7 @@ def prepare_ocr_resources(
     with httpx.Client(
         follow_redirects=True,
         timeout=timeout,
+        verify=create_download_ssl_context(),
         transport=http_transport,
         headers={
             "Accept-Encoding": "identity",

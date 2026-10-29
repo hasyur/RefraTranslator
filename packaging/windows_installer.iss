@@ -17,9 +17,11 @@
 #if PortableBuild == "1"
   #define OutputBaseName "RefraTranslator-Portable-Smoke"
   #define InstallUninstaller "no"
+  #define PreviousAppDir "no"
 #else
   #define OutputBaseName "RefraTranslator-Setup"
   #define InstallUninstaller "yes"
+  #define PreviousAppDir "yes"
 #endif
 
 [Languages]
@@ -37,7 +39,7 @@ DefaultDirName={localappdata}\Programs\RefraTranslator
 DefaultGroupName=RefraTranslator
 MinVersion=10.0
 DisableProgramGroupPage=yes
-UsePreviousAppDir=no
+UsePreviousAppDir={#PreviousAppDir}
 UsePreviousGroup=no
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64

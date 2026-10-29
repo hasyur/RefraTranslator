@@ -1,4 +1,5 @@
 import ctypes
+import hashlib
 import os
 import queue
 import sys
@@ -52,6 +53,8 @@ from game_screen_translator.profiles import (
     save_profile_glossary,
     save_profile_runtime_settings,
 )
+from game_screen_translator.translation import local_backend
+from game_screen_translator.translation.local_backend import BuiltinModel, DownloadArtifact
 from game_screen_translator.translation.cache import CacheEnvironment, TranslationCache
 
 
@@ -2161,6 +2164,44 @@ def test_model_capabilities_and_install_lock_follow_real_files(
     assert controller.canDeleteBuiltinModel is False
     assert controller.modelInstallActionText == "取消下载"
     controller._local_install_thread = None
+    controller.shutdown()
+
+
+def test_local_model_status_distinguishes_verified_stale_and_absent_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, config_path = _controller_with_profile(tmp_path)
+    content = b"legacy model content"
+    artifact = DownloadArtifact(
+        label="test model",
+        filename="local-status.gguf",
+        url="https://downloads.test/local-status.gguf",
+        size_bytes=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+    )
+    model = BuiltinModel("local-status.gguf", "Local status", "test", artifact)
+    monkeypatch.setitem(local_backend._MODELS_BY_ID, model.model_id, model)
+    monkeypatch.setattr(controller_module, "runtime_is_ready", lambda _root: False)
+    controller._builtin_model = model.model_id
+    root = controller_module.local_backend_root(config_path)
+    model_file = controller_module.model_path(root, model)
+
+    assert "需下载" in controller.localModelStatus
+
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(content)
+    assert "完整模型文件" in controller.localModelStatus
+
+    local_backend._write_verification_marker(model_file, artifact)
+    assert "模型已校验；仍需下载并安装" in controller.localModelStatus
+
+    stat = model_file.stat()
+    os.utime(
+        model_file,
+        ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000),
+    )
+    assert "完整模型文件" in controller.localModelStatus
     controller.shutdown()
 
 

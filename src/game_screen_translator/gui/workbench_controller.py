@@ -983,6 +983,16 @@ class WorkbenchController(QObject):
             return f"已校验并可用；llama.cpp {LLAMA_CPP_VERSION}（{LLAMA_CPP_STABLE_VERSION}）CUDA 12.4。"
         if model_is_ready(root, model):
             return "模型已校验；仍需下载并安装 CUDA 本地运行时。"
+        model_file = model_path(root, model)
+        try:
+            has_complete_model_file = (
+                model_file.is_file()
+                and model_file.stat().st_size == model.artifact.size_bytes
+            )
+        except OSError:
+            has_complete_model_file = False
+        if has_complete_model_file:
+            return "已找到完整模型文件；点击下载时会先校验 SHA-256，有效文件会直接复用。"
         if runtime_is_ready(root):
             return f"需下载 {model.size_gib:.2f} GiB 模型；支持断点续传。"
         return f"需下载 {model.size_gib:.2f} GiB 模型及 CUDA 本地运行时；支持断点续传。"

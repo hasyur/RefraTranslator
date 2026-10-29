@@ -30,6 +30,7 @@ from game_screen_translator.config import (
     BUILTIN_PARALLEL_MAX,
     TranslationConfig,
 )
+from game_screen_translator.download_tls import create_download_ssl_context
 
 
 LLAMA_CPP_VERSION = "b11146"
@@ -341,6 +342,36 @@ def _verify_downloaded_file(
         )
 
 
+def _verify_existing_artifact(
+    directory: Path,
+    artifact: DownloadArtifact,
+    progress: ProgressCallback,
+    cancel: threading.Event,
+) -> bool:
+    """Verify and mark a complete local artifact without accessing the network."""
+    destination = directory / artifact.filename
+    if _artifact_is_verified(destination, artifact):
+        progress("ready", artifact.label, artifact.size_bytes, artifact.size_bytes)
+        return True
+    try:
+        actual_size = destination.stat().st_size
+    except OSError:
+        return False
+    if actual_size != artifact.size_bytes:
+        return False
+    try:
+        _verify_downloaded_file(destination, artifact, progress, cancel)
+    except LocalBackendDownloadCancelled:
+        raise
+    except LocalBackendError:
+        destination.unlink(missing_ok=True)
+        _verification_path(destination).unlink(missing_ok=True)
+        return False
+    _write_verification_marker(destination, artifact)
+    progress("ready", artifact.label, artifact.size_bytes, artifact.size_bytes)
+    return True
+
+
 def _parse_content_range(value: str) -> tuple[int, int, int] | None:
     # Expected form: bytes START-END/TOTAL
     if not value.startswith("bytes ") or "/" not in value or "-" not in value:
@@ -362,22 +393,8 @@ def _download_artifact(
 ) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / artifact.filename
-    if _artifact_is_verified(destination, artifact):
-        progress("ready", artifact.label, artifact.size_bytes, artifact.size_bytes)
+    if _verify_existing_artifact(directory, artifact, progress, cancel):
         return destination
-
-    if destination.is_file() and destination.stat().st_size == artifact.size_bytes:
-        try:
-            _verify_downloaded_file(destination, artifact, progress, cancel)
-        except LocalBackendDownloadCancelled:
-            raise
-        except LocalBackendError:
-            destination.unlink(missing_ok=True)
-            _verification_path(destination).unlink(missing_ok=True)
-        else:
-            _write_verification_marker(destination, artifact)
-            progress("ready", artifact.label, artifact.size_bytes, artifact.size_bytes)
-            return destination
 
     partial = directory / f"{artifact.filename}.part"
     try:
@@ -547,14 +564,33 @@ def install_local_backend(
     model = get_builtin_model(model_id)
     callback = progress or (lambda _phase, _label, _done, _total: None)
     cancelled = cancel or threading.Event()
-    _check_free_space(root, required_install_space(root, model_id))
     if cancelled.is_set():
         raise LocalBackendDownloadCancelled("下载已取消")
+    if runtime_is_ready(root) and model_is_ready(root, model):
+        callback(
+            "ready",
+            model.artifact.label,
+            model.artifact.size_bytes,
+            model.artifact.size_bytes,
+        )
+        return
+    # Recover complete model files locally before a runtime network request can
+    # fail. A stale marker or changed mtime does not by itself require a re-download.
+    model_ready = _verify_existing_artifact(
+        _models_directory(root),
+        model.artifact,
+        callback,
+        cancelled,
+    )
+    if runtime_is_ready(root) and model_ready:
+        return
+    _check_free_space(root, required_install_space(root, model_id))
 
     timeout = httpx.Timeout(connect=15.0, read=60.0, write=30.0, pool=30.0)
     with httpx.Client(
         follow_redirects=True,
         timeout=timeout,
+        verify=create_download_ssl_context(),
         transport=http_transport,
         headers={
             "Accept-Encoding": "identity",
@@ -581,13 +617,14 @@ def install_local_backend(
                 archive.unlink(missing_ok=True)
                 _verification_path(archive).unlink(missing_ok=True)
 
-        _download_artifact(
-            _models_directory(root),
-            model.artifact,
-            client,
-            callback,
-            cancelled,
-        )
+        if not model_ready:
+            _download_artifact(
+                _models_directory(root),
+                model.artifact,
+                client,
+                callback,
+                cancelled,
+            )
 
 
 def remove_builtin_model(root: Path, model_id: str) -> int:

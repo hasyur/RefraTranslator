@@ -97,6 +97,9 @@ def test_inno_script_preserves_supported_windows_and_portable_smoke_modes() -> N
     assert 'ArchitecturesInstallIn64BitMode=x64' in script
     assert '#define PortableBuild "0"' in script
     assert '#if PortableBuild == "1"' in script
+    assert '#define PreviousAppDir "no"' in script
+    assert '#define PreviousAppDir "yes"' in script
+    assert 'UsePreviousAppDir={#PreviousAppDir}' in script
     assert 'Compression=lzma2/max' in script
     assert 'Uninstallable={#InstallUninstaller}' in script
     assert 'AppVersion={#AppVersion}' in script

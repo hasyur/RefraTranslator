@@ -15,6 +15,7 @@ from game_screen_translator.config import TranslationConfig
 from game_screen_translator.translation import local_backend
 from game_screen_translator.translation.local_backend import (
     BUILTIN_MODELS,
+    BuiltinModel,
     HY_MT2_1_8B_REVISION,
     HY_MT2_7B_REVISION,
     LLAMA_CPP_ARTIFACTS,
@@ -184,6 +185,94 @@ def test_artifact_download_cancellation_keeps_partial_for_resume(
     partial = tmp_path / "fixture.bin.part"
     assert partial.stat().st_size == chunk_size
     assert partial.read_bytes() == content[:chunk_size]
+
+
+@pytest.mark.parametrize("stale_marker", [False, True])
+def test_existing_complete_model_is_verified_before_runtime_network_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stale_marker: bool,
+) -> None:
+    content = b"verified legacy model"
+    model_artifact = _artifact("model", "legacy.gguf", content)
+    model = BuiltinModel("legacy.gguf", "Legacy", "test", model_artifact)
+    runtime_artifact = _artifact("runtime", "runtime.zip", b"runtime")
+    monkeypatch.setitem(local_backend._MODELS_BY_ID, model.model_id, model)
+    monkeypatch.setattr(local_backend, "LLAMA_CPP_ARTIFACTS", (runtime_artifact,))
+    monkeypatch.setattr(local_backend, "assert_supported_platform", lambda: None)
+    monkeypatch.setattr(local_backend, "_check_free_space", lambda *_args: None)
+
+    root = tmp_path / "data"
+    model_file = local_backend.model_path(root, model)
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(content)
+    if stale_marker:
+        local_backend._write_verification_marker(model_file, model_artifact)
+        stat = model_file.stat()
+        os.utime(
+            model_file,
+            ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000),
+        )
+    requests: list[httpx.Request] = []
+
+    def fail_runtime_request(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        raise httpx.ConnectError("fixture network failure", request=request)
+
+    with pytest.raises(LocalBackendError, match="下载 runtime 失败"):
+        local_backend.install_local_backend(
+            root,
+            model.model_id,
+            http_transport=httpx.MockTransport(fail_runtime_request),
+        )
+
+    assert [request.url for request in requests] == [httpx.URL(runtime_artifact.url)]
+    assert model_file.read_bytes() == content
+    assert local_backend._artifact_is_verified(model_file, model_artifact)
+
+
+def test_ready_local_backend_does_not_initialize_download_tls_or_client(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"ready model"
+    model_artifact = _artifact("model", "ready.gguf", content)
+    model = BuiltinModel("ready.gguf", "Ready", "test", model_artifact)
+    runtime_artifact = _artifact("runtime", "runtime.zip", b"runtime")
+    monkeypatch.setitem(local_backend._MODELS_BY_ID, model.model_id, model)
+    monkeypatch.setattr(local_backend, "LLAMA_CPP_ARTIFACTS", (runtime_artifact,))
+    monkeypatch.setattr(local_backend, "assert_supported_platform", lambda: None)
+    monkeypatch.setattr(
+        local_backend,
+        "create_download_ssl_context",
+        lambda: pytest.fail("TLS context initialized without a network request"),
+    )
+    monkeypatch.setattr(
+        local_backend.httpx,
+        "Client",
+        lambda *_args, **_kwargs: pytest.fail("HTTP client created without a request"),
+    )
+
+    root = tmp_path / "data"
+    model_file = local_backend.model_path(root, model)
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(content)
+    local_backend._write_verification_marker(model_file, model_artifact)
+    executable = local_backend._runtime_directory(root) / "bin" / "llama-server.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"runtime")
+    local_backend._runtime_marker(root).write_text(
+        json.dumps(
+            {
+                "version": local_backend.LLAMA_CPP_VERSION,
+                "server_executable": "bin/llama-server.exe",
+                "artifacts": {runtime_artifact.filename: runtime_artifact.sha256},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    local_backend.install_local_backend(root, model.model_id)
 
 
 def test_runtime_extraction_merges_archives_and_rejects_path_traversal(
