@@ -1440,7 +1440,7 @@ def test_missing_profile_monitor_falls_back_without_resaving_stale_index(
     controller.shutdown()
 
 
-def test_model_download_saves_only_runtime_scope(
+def test_model_download_keeps_unsaved_profile_settings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1448,10 +1448,23 @@ def test_model_download_saves_only_runtime_scope(
     controller.setCustomPrompt("尚未保存的提示词")
     controller.setCaptureRegion(30, 40, 700, 260)
     controller.setModel("runtime-model")
+    selected_builtin_model = next(
+        model for model in controller.builtinModelIds
+        if model != controller.builtinModel
+    )
+    controller.setBuiltinModel(selected_builtin_model)
+    # Downloading a machine-level model must remain available even while the
+    # selected OCR device makes the unsaved runtime draft invalid.
+    controller._ocr_device = ""
+    installs: list[tuple[Path, str]] = []
+    errors: list[tuple[str, str]] = []
+    controller.errorRaised.connect(
+        lambda title, detail: errors.append((title, detail))
+    )
     monkeypatch.setattr(
         controller_module,
         "install_local_backend",
-        lambda *_args, **_kwargs: None,
+        lambda root, model_id, **_kwargs: installs.append((root, model_id)),
     )
 
     controller.downloadBuiltinModel()
@@ -1463,11 +1476,53 @@ def test_model_download_saves_only_runtime_scope(
     profile = load_game_profile(config_path, machine, "game")
     effective = apply_profile_runtime_settings(machine, profile)
     assert machine.translation.model == "hy-mt1.5-7b"
-    assert effective.translation.model == "runtime-model"
+    assert effective.translation.model == "hy-mt1.5-7b"
+    assert machine.translation.builtin_model != selected_builtin_model
+    assert effective.translation.builtin_model != selected_builtin_model
+    assert installs == [
+        (controller_module.local_backend_root(config_path), selected_builtin_model)
+    ]
+    assert errors == []
     assert profile.custom_prompt == ""
     assert profile.capture_settings.region_ratio == _region_ratio((1, 2, 3, 4))
     assert controller.settingsDirty is True
+    assert controller.customPrompt == "尚未保存的提示词"
+    assert controller._ocr_device == ""
 
+    controller.shutdown()
+
+
+def test_model_download_does_not_require_a_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, _config_path = _controller_with_profile(tmp_path)
+    controller.deleteProfile("game")
+    selected_model = next(
+        model for model in controller.builtinModelIds
+        if model != controller.builtinModel
+    )
+    controller.setBuiltinModel(selected_model)
+    installs: list[tuple[Path, str]] = []
+    errors: list[tuple[str, str]] = []
+    controller.errorRaised.connect(
+        lambda title, detail: errors.append((title, detail))
+    )
+    monkeypatch.setattr(
+        controller_module,
+        "install_local_backend",
+        lambda root, model_id, **_kwargs: installs.append((root, model_id)),
+    )
+
+    controller.downloadBuiltinModel()
+    assert controller._local_install_thread is not None
+    controller._local_install_thread.join(timeout=2)
+    controller._check_local_install_events()
+
+    assert installs == [
+        (controller_module.local_backend_root(_config_path), selected_model)
+    ]
+    assert errors == []
     controller.shutdown()
 
 

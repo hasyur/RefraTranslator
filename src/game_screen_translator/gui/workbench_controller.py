@@ -2349,8 +2349,6 @@ class WorkbenchController(QObject):
                     "neutral",
                 )
                 return
-            if not self._save_runtime_settings(announce=False):
-                return
         except (ConfigError, LocalBackendError) as exc:
             self._show_error("无法下载内置模型", exc)
             return
