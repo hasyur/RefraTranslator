@@ -49,3 +49,18 @@ def test_readme_screenshot_includes_a_readable_scene_background(target: str) -> 
         screenshot.load()
         # A transparent overlay alone omits the scene needed to show the effect.
         assert screenshot.convert("RGBA").getextrema()[3] == (255, 255)
+
+
+def test_readme_comparisons_use_matching_distinct_original_and_translated_frames() -> None:
+    comparisons = re.findall(
+        r"^\| !\[[^\]]+\]\(([^)]+)\) \| !\[[^\]]+\]\(([^)]+)\) \|$",
+        README,
+        re.MULTILINE,
+    )
+    assert comparisons, "Show the original and translated scenes side by side"
+    for original_path, translated_path in comparisons:
+        with Image.open(ROOT / original_path) as original, Image.open(
+            ROOT / translated_path
+        ) as translated:
+            assert original.size == translated.size
+            assert original.convert("RGB").tobytes() != translated.convert("RGB").tobytes()

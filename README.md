@@ -15,19 +15,25 @@ RefraTranslator 是一款 Windows 游戏屏幕翻译工具：它自动识别画�
 
 ### 翻译效果
 
-以下为自有游戏风格测试场景上的实际运行截图，使用 **PaddleOCR GPU + Hy-MT2 1.8B** 识别与翻译，中文由程序直接覆盖在画面上。
+以下为自有游戏风格测试场景上的实际运行截图，使用 **PaddleOCR GPU + Hy-MT2 1.8B** 识别与翻译，中文由程序直接覆盖在画面上。每组左侧为原图，右侧为翻译效果。
 
 **对白与任务提示**：在同一画面中翻译底部对白、右上任务和拾取提示。
 
-![对白、任务和拾取提示的中文翻译覆盖效果](docs/images/translation-dialogue.png)
+| 原图 | 翻译效果 |
+| :---: | :---: |
+| ![对白、任务和拾取提示的日文原图](docs/images/translation-dialogue-original.png) | ![对白、任务和拾取提示的中文翻译覆盖效果](docs/images/translation-dialogue.png) |
 
 **装备菜单**：翻译装备名称、属性说明和菜单按钮。
 
-![装备列表、属性说明和菜单按钮的中文翻译覆盖效果](docs/images/translation-equipment.png)
+| 原图 | 翻译效果 |
+| :---: | :---: |
+| ![装备列表、属性说明和菜单按钮的日文原图](docs/images/translation-equipment-original.png) | ![装备列表、属性说明和菜单按钮的中文翻译覆盖效果](docs/images/translation-equipment.png) |
 
 **长段落文本**：在记录页面的原文位置显示中文，保留页面布局与背景。
 
-![记录页面中多行日文段落的中文翻译覆盖效果](docs/images/translation-notes.png)
+| 原图 | 翻译效果 |
+| :---: | :---: |
+| ![记录页面中多行日文段落的原图](docs/images/translation-notes-original.png) | ![记录页面中多行日文段落的中文翻译覆盖效果](docs/images/translation-notes.png) |
 
 ### 工作台
 
