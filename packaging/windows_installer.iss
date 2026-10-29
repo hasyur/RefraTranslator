@@ -39,6 +39,7 @@ DefaultDirName={localappdata}\Programs\RefraTranslator
 DefaultGroupName=RefraTranslator
 MinVersion=10.0
 DisableProgramGroupPage=yes
+DisableDirPage=no
 UsePreviousAppDir={#PreviousAppDir}
 UsePreviousGroup=no
 PrivilegesRequired=lowest

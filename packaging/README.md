@@ -1,6 +1,6 @@
 # Windows installer build
 
-The setup wizard and its uninstaller use Simplified Chinese by default. The tracked `ChineseSimplified.isl` is the Inno Setup 6.5+ translation maintained by [Kira-96](https://github.com/kira-96/Inno-Setup-Chinese-Simplified-Translation), linked from Inno Setup's [translation page](https://jrsoftware.org/files/istrans/). Its MIT license is tracked beside the language file and copied into the installed `THIRD_PARTY_LICENSES` directory.
+The setup wizard and its uninstaller use Simplified Chinese by default. It always shows the destination page; if an earlier installation exists, its directory is filled in and can be changed. The tracked `ChineseSimplified.isl` is the Inno Setup 6.5+ translation maintained by [Kira-96](https://github.com/kira-96/Inno-Setup-Chinese-Simplified-Translation), linked from Inno Setup's [translation page](https://jrsoftware.org/files/istrans/). Its MIT license is tracked beside the language file and copied into the installed `THIRD_PARTY_LICENSES` directory.
 
 The release runtime is Windows x64 CPython 3.13.5 with the GUI/core wheels. It does not include GPU OCR wheels or translation models; the first-run dialog prepares OCR resources after the user confirms.
 

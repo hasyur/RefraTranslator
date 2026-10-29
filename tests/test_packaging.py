@@ -100,6 +100,7 @@ def test_inno_script_preserves_supported_windows_and_portable_smoke_modes() -> N
     assert '#define PreviousAppDir "no"' in script
     assert '#define PreviousAppDir "yes"' in script
     assert 'UsePreviousAppDir={#PreviousAppDir}' in script
+    assert 'DisableDirPage=no' in script
     assert 'Compression=lzma2/max' in script
     assert 'Uninstallable={#InstallUninstaller}' in script
     assert 'AppVersion={#AppVersion}' in script
