@@ -153,7 +153,8 @@ def test_timeout_also_stops_the_launchers_child_process(tmp_path: Path) -> None:
     with pytest.raises(verifier.VerificationError, match="Timed out"):
         verifier._run(
             [sys.executable, "-c", program], cwd=tmp_path,
-            environment=os.environ.copy(), timeout=1, log_path=tmp_path / "child-timeout.log",
+            # Allow interpreter startup before testing process-tree termination.
+            environment=os.environ.copy(), timeout=5, log_path=tmp_path / "child-timeout.log",
         )
     child_pid = int(child_record.read_text())
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
