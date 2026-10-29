@@ -85,6 +85,9 @@ def test_application_staging_uses_embedded_python_zip_and_writes_runtime_path(
         installed_package / "gui" / "assets" / "refra-translator.ico"
     ).read_bytes()
     assert not any(installed_package.rglob("__pycache__"))
+    build_info = (app_root / "BUILD-INFO.txt").read_text(encoding="utf-8")
+    assert "Application version: alpha5(fix)\n" in build_info
+    assert "Package version: 0.1.5\n" in build_info
     assert summary["ocr_wheel_count"] == 1
     assert summary["ocr_installed_bytes"] == 20
 
@@ -245,13 +248,16 @@ def test_launcher_source_uses_the_single_project_version(tmp_path: Path) -> None
     packaging_dir.mkdir(parents=True)
     version_dir.mkdir(parents=True)
     shutil.copy2(_BUILDER_PATH.parent / "windows_launcher.cs", packaging_dir)
-    (version_dir / "_version.py").write_text('__version__ = "4.5.6"\n', encoding="utf-8")
+    (version_dir / "_version.py").write_text(
+        '__version__ = "4.5.6"\n__display_version__ = "4.5.6-preview"\n',
+        encoding="utf-8",
+    )
 
     source = builder._render_launcher_source(fixture_root)
 
     assert '[assembly: AssemblyVersion("4.5.6.0")]' in source
     assert '[assembly: AssemblyFileVersion("4.5.6.0")]' in source
-    assert '[assembly: AssemblyInformationalVersion("4.5.6")]' in source
+    assert '[assembly: AssemblyInformationalVersion("4.5.6-preview")]' in source
     assert "@@" not in source
 
 
@@ -265,7 +271,10 @@ def test_inno_compile_receives_project_and_windows_versions(
     packaging_dir.mkdir(parents=True)
     version_dir.mkdir(parents=True)
     shutil.copy2(_BUILDER_PATH.parent / "windows_installer.iss", packaging_dir)
-    (version_dir / "_version.py").write_text('__version__ = "4.5.6"\n', encoding="utf-8")
+    (version_dir / "_version.py").write_text(
+        '__version__ = "4.5.6"\n__display_version__ = "4.5.6-preview"\n',
+        encoding="utf-8",
+    )
     output_dir = tmp_path / "output"
     output_dir.mkdir()
     captured: list[str] = []
@@ -280,7 +289,7 @@ def test_inno_compile_receives_project_and_windows_versions(
 
     builder._run_inno(Path("fake-iscc.exe"), tmp_path / "app", output_dir, portable=False)
 
-    assert "/DAppVersion=4.5.6" in captured
+    assert "/DAppVersion=4.5.6-preview" in captured
     assert "/DWindowsVersion=4.5.6.0" in captured
 
 

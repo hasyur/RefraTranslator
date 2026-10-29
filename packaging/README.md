@@ -6,7 +6,7 @@ The release runtime is Windows x64 CPython 3.13.5 with the GUI/core wheels. It d
 
 ## Version and dependency sources
 
-Edit `src/game_screen_translator/_version.py` to change the application version. Setuptools reads it for wheel/source metadata, and the Windows builder generates C# assembly/file/product version attributes and Inno Setup version defines from it. Use numeric `MAJOR.MINOR.PATCH`.
+Edit `src/game_screen_translator/_version.py` to change the package and displayed application versions. `__version__` is the numeric `MAJOR.MINOR.PATCH` value used for wheel/source metadata and Windows file versions; `__display_version__` is the human-readable label shown by the launcher and setup wizard. For example, alpha5(fix) uses package version `0.1.5`, display version `alpha5(fix)`, and four-part Windows file version `0.1.5.0`.
 
 Development requirements remain ranges in `pyproject.toml`. Release inputs are:
 

@@ -78,6 +78,34 @@ def read_version(root: Path = ROOT) -> str:
     return version
 
 
+def read_display_version(root: Path = ROOT) -> str:
+    path = root / VERSION_FILE
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError) as exc:
+        raise ReleaseMetadataError(f"Could not read the version source {path}: {exc}") from exc
+    assignments: list[ast.expr] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "__display_version__"
+            for target in node.targets
+        ):
+            assignments.append(node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.target.id == "__display_version__":
+                assignments.append(node.value)
+    if len(assignments) != 1 or not isinstance(assignments[0], ast.Constant):
+        raise ReleaseMetadataError(
+            f"{path} must define exactly one literal __display_version__ string"
+        )
+    display_version = assignments[0].value
+    if not isinstance(display_version, str) or not display_version.strip():
+        raise ReleaseMetadataError(
+            f"{path} __display_version__ must be a non-empty string"
+        )
+    return display_version
+
+
 def windows_file_version(version: str) -> str:
     if not WINDOWS_VERSION_PATTERN.fullmatch(version):
         raise ReleaseMetadataError(
@@ -290,6 +318,7 @@ def check_release_metadata(
     root: Path = ROOT, *, ocr_manifest: Path | None = None,
 ) -> dict[str, object]:
     version = read_version(root)
+    display_version = read_display_version(root)
     project_data = _read_project(root)
     project = project_data.get("project")
     if not isinstance(project, dict):
@@ -362,6 +391,7 @@ def check_release_metadata(
             )
     return {
         "version": version,
+        "display_version": display_version,
         "windows_version": windows_file_version(version),
         "core_pin_count": len(requirements),
         "ocr_wheel_count": len(manifest["wheels"]),
@@ -380,7 +410,8 @@ def main() -> int:
     except (ReleaseMetadataError, OSError, ValueError, KeyError, TypeError) as exc:
         parser.error(str(exc))
     print(
-        "Release metadata OK: version {version} ({core_pin_count} core pins, "
+        "Release metadata OK: package {version} (display {display_version}; "
+        "{core_pin_count} core pins, "
         "{ocr_wheel_count} OCR wheels, {ocr_download_bytes:,} OCR bytes)".format(**summary)
     )
     return 0

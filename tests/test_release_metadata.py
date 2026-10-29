@@ -91,7 +91,11 @@ def test_release_metadata_is_consistent_offline() -> None:
         ROOT,
     )
 
+    assert summary["version"] == "0.1.5"
     assert summary["version"] == release_metadata.read_version(ROOT)
+    assert summary["display_version"] == "alpha5(fix)"
+    assert summary["display_version"] == release_metadata.read_display_version(ROOT)
+    assert summary["windows_version"] == "0.1.5.0"
     assert summary["core_pin_count"] == len(release_metadata.load_core_requirements(ROOT))
     assert summary["ocr_wheel_count"] == len(manifest["wheels"])
     assert summary["ocr_download_bytes"] == sum(

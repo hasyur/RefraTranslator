@@ -47,7 +47,7 @@ PACKAGING_RELEASE_FILES = (
     "packaging/verify_windows_install.py",
     "packaging/releases/v0.1.0-alpha.4.md",
     "packaging/releases/v0.1.0-alpha.5.md",
-    "packaging/releases/v0.1.0-alpha.5-fix.md",
+    "packaging/releases/alpha5-fix.md",
 )
 PUBLIC_TEST_MANIFEST_ENTRIES = (
     "include tests/test_*.py",
@@ -583,7 +583,7 @@ def test_readme_keeps_the_exe_user_journey_before_source_development() -> None:
 
 
 def test_archived_release_notes_keep_user_instructions_without_validation_logs() -> None:
-    for tag in ("v0.1.0-alpha.4", "v0.1.0-alpha.5", "v0.1.0-alpha.5-fix"):
+    for tag in ("v0.1.0-alpha.4", "v0.1.0-alpha.5"):
         notes = (PROJECT_ROOT / f"packaging/releases/{tag}.md").read_text(encoding="utf-8")
 
         assert "## 本版改动" in notes
@@ -601,12 +601,16 @@ def test_archived_release_notes_keep_user_instructions_without_validation_logs()
         r"应用代码基线：`cba105cfb57a29c2b56258f335b2375d18566862`", alpha5
     )
 
-    alpha5_fix = (PROJECT_ROOT / "packaging/releases/v0.1.0-alpha.5-fix.md").read_text(encoding="utf-8")
+    alpha5_fix = (PROJECT_ROOT / "packaging/releases/alpha5-fix.md").read_text(encoding="utf-8")
+    assert alpha5_fix.splitlines()[0] == "# RefraTranslator alpha5(fix)"
     assert "校验标记" in alpha5_fix and "SHA-256" in alpha5_fix
     assert "Windows 系统证书" in alpha5_fix and "主机名校验" in alpha5_fix
-    assert "27 个旧版界面文件" in alpha5_fix
     assert "网络超时" in alpha5_fix
-    assert re.search(r"应用代码基线：`17c0391fd1dbf1cf87d258a6c75135b8478b3cc0`", alpha5_fix)
+    assert "保存运行设置失败" in alpha5_fix
+    assert "尚未创建配置" in alpha5_fix
+    assert "alpha5(fix)" in alpha5_fix
+    assert "0.1.5" in alpha5_fix
+    assert "17c0391fd1dbf1cf87d258a6c75135b8478b3cc0" not in alpha5_fix
 
 
 def test_readme_explains_exe_first_run_and_in_place_updates() -> None:

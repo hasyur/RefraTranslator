@@ -22,6 +22,7 @@ from release_metadata import (
     ReleaseMetadataError,
     check_release_metadata,
     load_core_requirements,
+    read_display_version,
     read_version,
     windows_file_version,
 )
@@ -300,7 +301,8 @@ def _copy_application(
     metadata_path = app_root / "BUILD-INFO.txt"
     metadata_path.write_text(
         "RefraTranslator Windows x64\n"
-        f"Application version: {read_version(ROOT)}\n"
+        f"Application version: {read_display_version(ROOT)}\n"
+        f"Package version: {read_version(ROOT)}\n"
         f"Embedded CPython: {sys.version.split()[0]}\n"
         f"OCR fixed wheel resources: {wheel_count}\n",
         encoding="utf-8",
@@ -326,7 +328,7 @@ def _render_launcher_source(root: Path = ROOT) -> str:
     file_version = windows_file_version(version)
     source = source.replace("@@ASSEMBLY_VERSION@@", file_version)
     source = source.replace("@@FILE_VERSION@@", file_version)
-    source = source.replace("@@INFORMATIONAL_VERSION@@", version)
+    source = source.replace("@@INFORMATIONAL_VERSION@@", read_display_version(root))
     if "@@" in source:
         raise BuildError("The C# launcher template contains an unresolved version placeholder")
     return source
@@ -395,7 +397,7 @@ def _run_inno(
     )
     command = [
         str(compiler),
-        f"/DAppVersion={read_version(ROOT)}",
+        f"/DAppVersion={read_display_version(ROOT)}",
         f"/DWindowsVersion={windows_file_version(read_version(ROOT))}",
         f"/DAppSourceDir={app_root.as_posix()}",
         f"/DPortableBuild={1 if portable else 0}",
