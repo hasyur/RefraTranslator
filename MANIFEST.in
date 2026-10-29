@@ -1,5 +1,6 @@
 include LICENSE
 include README.md
+recursive-include docs/images *.png
 include THIRD_PARTY_NOTICES.md
 include bootstrap.ps1
 include config.example.toml

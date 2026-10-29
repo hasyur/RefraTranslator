@@ -259,6 +259,11 @@ def test_built_archives_contain_the_exact_native_qml_workbench(
     assert sdist_qml == expected
     sdist_files = {name.split("/", 1)[1] for name in sdist_names if "/" in name}
     assert set(SOURCE_RELEASE_FILES) <= sdist_files
+    readme_images = tuple((PROJECT_ROOT / "docs" / "images").glob("*.png"))
+    assert readme_images
+    assert {
+        path.relative_to(PROJECT_ROOT).as_posix() for path in readme_images
+    } <= sdist_files
     assert set(PUBLIC_TEST_FILES) <= sdist_files
     assert set(MANUAL_RELEASE_FILES) <= sdist_files
     assert set(PACKAGING_RELEASE_FILES) <= sdist_files

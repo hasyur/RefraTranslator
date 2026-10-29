@@ -9,6 +9,89 @@ RefraTranslator 是一款 Windows 游戏屏幕翻译工具：它自动识别画�
 
 [**下载 Windows 安装包**](https://github.com/hasyur/RefraTranslator/releases)
 
+[产品界面](#产品界面) · [核心功能](#核心功能) · [技术方案](#技术方案) · [安装与启动](#安装与启动) · [常见问题](#常见问题)
+
+## 产品界面
+
+**Prism 深色工作台**：从游戏配置出发，在捕获、识别、翻译、覆盖层与缓存之间切换。
+
+![RefraTranslator Prism 深色工作台首页](docs/images/prism-dark-home.png)
+
+<details>
+<summary>查看 Prism 浅色主题与 Dohna 皮肤</summary>
+
+**Prism 浅色**沿用相同的导航与操作位置，采用冷白与电蓝分区。
+
+![RefraTranslator Prism 浅色工作台首页](docs/images/prism-light-home.png)
+
+**Dohna**提供另一套明亮配色、布局和动效，共用同一套业务功能。
+
+![RefraTranslator Dohna 工作台首页](docs/images/dohna-home.png)
+
+</details>
+
+<details>
+<summary>查看 OCR 触发方式与本地翻译模型设置</summary>
+
+**OCR / 文字识别**：选择识别设备、检测质量和触发方式。
+
+![OCR 设置界面，包含识别设备、检测质量与动态 ROI 触发方式](docs/images/ocr-settings.png)
+
+**TRANSLATION / 翻译**：管理内置模型，也可切换到外部 API；术语表位于同页。
+
+![翻译设置界面，包含内置本地模型与外部 API 入口](docs/images/translation-settings.png)
+
+</details>
+
+以上为当前源码运行的真实工作台截图，使用独立的“示例游戏”配置，展示启动前的设置状态；未运行 OCR 或翻译，不代表游戏内翻译效果或性能测试结果。
+
+## 核心功能
+
+| 功能 | 可以做什么 |
+| --- | --- |
+| 屏幕翻译覆盖层 | 识别画面中的日文、英文，在原文附近显示中文；支持原文模糊和遮罩透明度调整，覆盖层可穿透鼠标操作。 |
+| 自定义捕获区域 | 选择显示器并框选字幕、菜单等区域；区域按比例保存，切换分辨率后换算。 |
+| 三种 OCR 触发方式 | 原生整区识别、默认的动态 ROI 局部识别，以及鼠标移动并停稳后的一次性按需识别。 |
+| 内置本地翻译 | 管理 Hy-MT2 模型及 CUDA 运行资源；完成资源准备后，OCR 和内置模型推理均在本机完成。 |
+| 外部翻译服务 | 可选接入 OpenAI-compatible API，自行配置服务地址、密钥和模型。 |
+| 每游戏独立配置 | 捕获、识别、翻译、覆盖层和运行参数随游戏切换；术语表、翻译缓存和手动修正也按游戏保存。 |
+| 结果回看与修订 | 查看上次运行的识别、翻译和缓存结果，维护术语表与人工修正，复用已有译文。 |
+| 工作台与录制支持 | Prism 深浅主题、Dohna 皮肤、减少动效、托盘和全局快捷键；可选开启透明的 OBS 浏览器覆盖层。 |
+
+## 技术方案
+
+应用采用 **Python + PySide6 / Qt Quick** 构建 Windows 工作台，以屏幕捕获作为输入，通过 GPU OCR 和翻译服务生成独立覆盖层，不需要读取游戏文本接口。
+
+```mermaid
+flowchart TD
+    A["游戏画面 / 所选显示器区域"] --> B["DXcam 捕获 · DXGI / WinRT"]
+    B --> C["触发与调度 · 原生 / 动态 ROI / 鼠标停稳"]
+    C --> D["PaddleOCR · NVIDIA GPU 检测与识别"]
+    D --> E["文字过滤 · 排版合并 · 稳定跟踪"]
+    E --> F{"游戏 Profile · 手动修正 / 翻译缓存"}
+    F -->|命中| J["校验文本版本 · 丢弃过期结果"]
+    F -->|未命中| G["术语表与上下文 · 翻译批次"]
+    G --> H["内置 llama.cpp + Hy-MT2 · CUDA"]
+    G --> I["外部 OpenAI-compatible API"]
+    H --> J
+    I --> J
+    J --> K["Qt 透明覆盖层 · 原文附近显示译文"]
+    J --> L["可选 · OBS 浏览器覆盖层"]
+```
+
+### 关键设计
+
+| 环节 | 实现方式与作用 | 源码入口 |
+| --- | --- | --- |
+| 采集与区域定位 | DXcam 优先使用 DXGI，初始化失败时尝试 WinRT；捕获区域采用相对显示器的比例坐标。 | [屏幕采集](src/game_screen_translator/capture/dxcam_capture.py) · [区域换算](src/game_screen_translator/capture_region.py) |
+| 动态 ROI 调度 | 基于帧间变化定位局部区域，结合已学习的 OCR 成本安排扫描，必要时回退整区识别；响应目标用于调度，不是端到端延迟承诺。 | [变化区域检测](src/game_screen_translator/ocr/dynamic_roi.py) · [扫描调度](src/game_screen_translator/ocr/roi_scheduler.py) |
+| OCR 与文本组织 | PaddleOCR 使用 GPU 检测、识别；过滤无关文字，整理换行和竖排文本，对严格歧义情况可调用 LLM 辅助排版判断。 | [OCR 引擎](src/game_screen_translator/ocr/paddle.py) · [文本分组](src/game_screen_translator/ocr/grouping.py) |
+| 翻译与缓存 | 内置 llama.cpp 服务运行 Hy-MT2，或接入外部 API；SQLite 缓存按游戏、语言、模型、提示词版本和术语表版本区分，优先使用手动修正并合并重复的在途请求。 | [本地后端](src/game_screen_translator/translation/local_backend.py) · [缓存服务](src/game_screen_translator/translation/cached.py) |
+| 实时一致性与显示 | 跟踪文本与修订号，丢弃已过期的异步译文；Qt 覆盖层穿透鼠标，并通过 Windows 接口请求排除自身捕获，实际兼容性取决于捕获链路。 | [版本管理](src/game_screen_translator/domain.py) · [覆盖层](src/game_screen_translator/overlay/window.py) |
+| 界面与运行隔离 | QML 宿主保留单个业务控制器，两套皮肤独立维护视觉组件；实时翻译由独立进程运行，工作台隐藏后仍可继续处理。 | [QML 宿主](src/game_screen_translator/gui/qml_workbench.py) · [业务控制器](src/game_screen_translator/gui/workbench_controller.py) · [实时管线](src/game_screen_translator/live/runtime.py) |
+
+**数据与网络边界**：模型、配置、缓存和日志保存在本机安装目录。首次准备资源需要联网；内置模型与外部 API 是两种可选后端，选择外部 API 时会将待译文本及翻译所需的术语、上下文发送给所配置的服务。第三方运行库与模型许可见 [第三方声明](THIRD_PARTY_NOTICES.md)。
+
 ## 安装与启动
 
 **普通用户推荐使用 EXE 安装版。** 安装包自带 Python 和图形界面运行环境，不需要先安装 Python、Git，也不需要手动运行 pip 或 PowerShell。
