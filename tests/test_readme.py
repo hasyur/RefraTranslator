@@ -38,9 +38,14 @@ def test_readme_screenshots_are_bundled_public_assets() -> None:
     assert IMAGES, "The product showcase must include screenshots"
     manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
     assert "recursive-include docs/images *.png" in manifest
-    for target in IMAGES:
-        assert target.startswith("docs/images/"), target
-        with Image.open(ROOT / target) as screenshot:
-            assert screenshot.format == "PNG"
-            assert screenshot.width >= 980 and screenshot.height >= 700
-            screenshot.verify()
+
+
+@pytest.mark.parametrize("target", IMAGES)
+def test_readme_screenshot_includes_a_readable_scene_background(target: str) -> None:
+    assert target.startswith("docs/images/"), target
+    with Image.open(ROOT / target) as screenshot:
+        assert screenshot.format == "PNG"
+        assert screenshot.width >= 980 and screenshot.height >= 700
+        screenshot.load()
+        # A transparent overlay alone omits the scene needed to show the effect.
+        assert screenshot.convert("RGBA").getextrema()[3] == (255, 255)
