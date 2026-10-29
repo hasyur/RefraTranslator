@@ -134,9 +134,9 @@ def _set_windows_caption_color(window_id: int, attribute: int, color: QColor) ->
 
 
 def _build_refra_icon() -> QIcon:
-    """Load the shared multi-size brand icon used by the app and installer."""
+    """Load the prism-only runtime icon used by the app window and tray."""
 
-    icon_path = Path(__file__).with_name("assets") / "refra-translator.ico"
+    icon_path = Path(__file__).with_name("assets") / "refra-prism.ico"
     return QIcon(str(icon_path))
 
 

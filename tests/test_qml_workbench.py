@@ -28,7 +28,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetricsF, QIcon, QWheelEvent
+from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetricsF, QIcon, QImage, QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, QQmlProperty
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtTest import QTest
@@ -1700,6 +1700,63 @@ def test_application_brand_icon_loads_all_native_sizes() -> None:
         (128, 128),
         (256, 256),
     }
+
+    from PIL import Image, ImageChops
+
+    assets = Path(host_module.__file__).with_name("assets")
+    with Image.open(assets / "refra-prism.ico") as runtime_icon:
+        with Image.open(assets / "refra-translator.ico") as executable_icon:
+            for size in (16, 32, 48, 256):
+                actual = icon.pixmap(size, size).toImage().convertToFormat(
+                    QImage.Format.Format_RGBA8888,
+                )
+                actual_image = Image.frombytes(
+                    "RGBA",
+                    (actual.width(), actual.height()),
+                    bytes(actual.bits()),
+                )
+                expected_runtime = runtime_icon.ico.getimage((size, size)).convert("RGBA")
+                expected_executable = executable_icon.ico.getimage((size, size)).convert("RGBA")
+
+                for background in ((24, 29, 38, 255), (245, 247, 250, 255)):
+                    runtime_diff = ImageChops.difference(
+                        Image.alpha_composite(
+                            Image.new("RGBA", actual_image.size, background),
+                            actual_image,
+                        ).convert("RGB"),
+                        Image.alpha_composite(
+                            Image.new("RGBA", expected_runtime.size, background),
+                            expected_runtime,
+                        ).convert("RGB"),
+                    )
+                    exe_diff = ImageChops.difference(
+                        Image.alpha_composite(
+                            Image.new("RGBA", actual_image.size, background),
+                            actual_image,
+                        ).convert("RGB"),
+                        Image.alpha_composite(
+                            Image.new("RGBA", expected_executable.size, background),
+                            expected_executable,
+                        ).convert("RGB"),
+                    )
+                    assert max(channel[1] for channel in runtime_diff.getextrema()) <= 1
+                    assert max(channel[1] for channel in exe_diff.getextrema()) > 16
+
+    for size in (16, 20, 24, 32, 48, 64, 128, 256):
+        image = icon.pixmap(size, size).toImage()
+        assert not image.isNull()
+        corners = (
+            (0, 0),
+            (size - 1, 0),
+            (0, size - 1),
+            (size - 1, size - 1),
+        )
+        assert max(image.pixelColor(x, y).alpha() for x, y in corners) <= 16
+        assert max(
+            image.pixelColor(x, y).alpha()
+            for x in range(size)
+            for y in range(size)
+        ) == 255
 
 
 def test_login_tray_start_keeps_native_target_for_second_instance_activation(

@@ -71,6 +71,16 @@ def test_application_staging_uses_embedded_python_zip_and_writes_runtime_path(
     assert (installed_package / "gui_entry.py").is_file()
     assert (installed_package / "ocr_wheel_manifest.json").is_file()
     assert (installed_package / "gui" / "assets" / "refra-translator.ico").is_file()
+    runtime_icon = installed_package / "gui" / "assets" / "refra-prism.ico"
+    assert runtime_icon.is_file()
+    assert runtime_icon.read_bytes() == (
+        _BUILDER_PATH.parents[1]
+        / "src"
+        / "game_screen_translator"
+        / "gui"
+        / "assets"
+        / "refra-prism.ico"
+    ).read_bytes()
     assert (app_root / "RefraTranslator.ico").read_bytes() == (
         installed_package / "gui" / "assets" / "refra-translator.ico"
     ).read_bytes()
@@ -185,6 +195,43 @@ def test_launcher_compilation_embeds_the_staged_brand_icon(
 
     assert launcher.read_bytes() == b"compiled launcher"
     assert f"/win32icon:{icon.resolve()}" in captured
+
+
+@pytest.mark.parametrize("icon_name", ("refra-translator.ico", "refra-prism.ico"))
+def test_runtime_and_executable_icons_have_all_alpha_frames(icon_name: str) -> None:
+    from PIL import Image
+
+    icon_path = (
+        _BUILDER_PATH.parents[1]
+        / "src"
+        / "game_screen_translator"
+        / "gui"
+        / "assets"
+        / icon_name
+    )
+    expected_sizes = {
+        (16, 16),
+        (20, 20),
+        (24, 24),
+        (32, 32),
+        (48, 48),
+        (64, 64),
+        (128, 128),
+        (256, 256),
+    }
+    with Image.open(icon_path) as icon:
+        assert set(icon.ico.sizes()) == expected_sizes
+        for size in expected_sizes:
+            frame = icon.ico.getimage(size).convert("RGBA")
+            alpha = frame.getchannel("A")
+            corners = (
+                (0, 0),
+                (size[0] - 1, 0),
+                (0, size[1] - 1),
+                (size[0] - 1, size[1] - 1),
+            )
+            assert max(alpha.getpixel(point) for point in corners) <= 16
+            assert alpha.getextrema() == (0, 255)
 
 
 def test_launcher_source_uses_the_single_project_version(tmp_path: Path) -> None:
